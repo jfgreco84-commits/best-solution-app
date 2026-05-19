@@ -773,7 +773,7 @@ function rHome(){
   </div>`;
 
   // ---- BOOTH COSTS — full season committed ----
-  const allUpcoming=S.shows.filter(sh=>sh.status!=='completed').sort((a,b)=>{const da=a.startDate||a.createdAt||'';const db=b.startDate||b.createdAt||'';return da<db?-1:da>db?1:0;});
+  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
   const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
   const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
@@ -1064,9 +1064,17 @@ function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);
 // ===================================================
 // SHOWS LIST
 // ===================================================
+function showSortKey(sh){
+  const mo={Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  if(sh.startDate&&/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))return sh.startDate;
+  if(sh.dates&&sh.dates[0]){const m=sh.dates[0].match(/(\w{3})\s+(\d+)/);if(m&&mo[m[1]])return '2026-'+mo[m[1]]+'-'+String(m[2]).padStart(2,'0');}
+  return sh.createdAt||'9999';
+}
 function rShows(){
-  const byDate=(a,b)=>{const da=a.startDate||a.createdAt||'';const db=b.startDate||b.createdAt||'';return da<db?-1:da>db?1:0;};
-  const all=[...S.shows].sort(byDate);
+  const today=new Date().toISOString().split('T')[0];
+  const upcoming=[...S.shows].filter(s=>showSortKey(s)>=today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const past=[...S.shows].filter(s=>showSortKey(s)<today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const all=[...upcoming,...past];
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   if(all.length){h+=all.map(s=>showCard(s)).join('');}
   else{h+=`<div class="empty"><div class="ei">🎪</div>No shows yet. Tap + New Show to start.</div>`;}
