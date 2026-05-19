@@ -489,6 +489,30 @@ function applyOneTimeUpdates(d){
     d._applied['st_martins_20260518']=true;
   }
 
+  // Force correct startDate + miles on Rustic Fox / St. Martins shows — 2026-05-18b
+  if(!d._applied['fix_rf_dates_20260518b']){
+    const fixes=[
+      {n:'rustic fox — carol stream (may)',  s:'2026-05-03',m:91},
+      {n:'rustic fox — carol stream (jun)',  s:'2026-06-07',m:91},
+      {n:'rustic fox — carol stream (jul)',  s:'2026-07-05',m:91},
+      {n:'rustic fox — carol stream (aug)',  s:'2026-08-02',m:91},
+      {n:'rustic fox — carol stream (sep)',  s:'2026-09-06',m:91},
+      {n:'rustic fox — carol stream (oct)',  s:'2026-10-04',m:91},
+      {n:'fox & found — north aurora (may)', s:'2026-05-23',m:77},
+      {n:'fox & found — north aurora (jun)', s:'2026-06-20',m:77},
+      {n:'fox & found — north aurora (jul)', s:'2026-07-18',m:77},
+      {n:'fox & found — north aurora (aug)', s:'2026-08-15',m:77},
+      {n:'fox & found — north aurora (sep)', s:'2026-09-19',m:77},
+      {n:'fox & found — north aurora (oct)', s:'2026-10-17',m:77},
+      {n:'st. martins fair',                 s:'2026-08-30',m:22},
+    ];
+    (d.shows||[]).forEach(sh=>{
+      const f=fixes.find(x=>x.n===(sh.name||'').toLowerCase());
+      if(f){sh.startDate=f.s;sh.miles=f.m;}
+    });
+    d._applied['fix_rf_dates_20260518b']=true;
+  }
+
   // Safety: ensure settings always present
   if(!d.settings)d.settings={tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70};
   d.settings=Object.assign({tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},d.settings);
@@ -508,7 +532,7 @@ function buildPlannedShow(e){
   return{
     id:'sh_auto_'+e.name.replace(/[^a-z0-9]/gi,'').toLowerCase().substring(0,20)+'_'+Date.now()+Math.floor(Math.random()*1000),
     name:e.name,location:e.location||'',numDays:e.numDays,dates,startDate:e.startDate,
-    boothCost:e.boothCost||0,boothPayments:e.boothPayments||[],miles:0,
+    boothCost:e.boothCost||0,boothPayments:e.boothPayments||[],miles:e.miles||0,
     status:'planned',confirmed:true,
     days,packedInventory:null,createdAt:new Date().toISOString()
   };
