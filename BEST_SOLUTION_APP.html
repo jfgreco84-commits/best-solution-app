@@ -304,11 +304,25 @@ const INIT={
 // ===================================================
 let S,curPg='home',curShow=null,curDay=0,calMonth=null;
 
+function normalizeShowDates(d){
+  // Always fix startDate from dates[] on every load — no flags, always reliable
+  const mo={Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  (d.shows||[]).forEach(sh=>{
+    if(sh.dates&&sh.dates[0]){
+      const m=sh.dates[0].match(/(\w{3})\s+(\d+)/);
+      if(m&&mo[m[1]]){
+        const yr=(sh.startDate&&sh.startDate.length>=4)?sh.startDate.substring(0,4):'2026';
+        const built=yr+'-'+mo[m[1]]+'-'+String(m[2]).padStart(2,'0');
+        sh.startDate=built;
+      }
+    }
+  });
+}
 function loadS(){
   try{
     // Try v7 first
     let r=localStorage.getItem('dd_bs_v7');
-    if(r){const d=JSON.parse(r);if(d.v===INIT.v){applyOneTimeUpdates(d);localStorage.setItem('dd_bs_v7',JSON.stringify(d));return d;}}
+    if(r){const d=JSON.parse(r);if(d.v===INIT.v){applyOneTimeUpdates(d);normalizeShowDates(d);localStorage.setItem('dd_bs_v7',JSON.stringify(d));return d;}}
     // Migrate from v6
     r=localStorage.getItem('dd_bs_v6');
     if(r){
@@ -320,6 +334,7 @@ function loadS(){
         if(sh.confirmed===undefined)sh.confirmed=sh.status==='completed';
       });
       applyOneTimeUpdates(d);
+      normalizeShowDates(d);
       localStorage.setItem('dd_bs_v7',JSON.stringify(d));
       return d;
     }
