@@ -513,6 +513,40 @@ function applyOneTimeUpdates(d){
     d._applied['fix_rf_dates_20260518b']=true;
   }
 
+  // Force startDate on ALL known shows by name — fixes sort order permanently
+  if(!d._applied['fix_all_startdates_v1']){
+    const allFix=[
+      {n:'milwaukee polish fest',             s:'2026-06-12'},
+      {n:'waukesha county fair',              s:'2026-07-15'},
+      {n:'cranberry fest',                    s:'2026-09-25'},
+      {n:'mchenry county fair',               s:'2026-08-04'},
+      {n:'maxwell street days — jun',         s:'2026-06-13'},
+      {n:'maxwell street days — jul',         s:'2026-07-18'},
+      {n:'maxwell street days — aug',         s:'2026-08-15'},
+      {n:'maxwell street days — sep',         s:'2026-09-12'},
+      {n:'burgoo fest',                       s:'2026-10-10'},
+      {n:'baraboo christmas market',          s:'2026-11-21'},
+      {n:'rustic fox — carol stream (may)',   s:'2026-05-03'},
+      {n:'rustic fox — carol stream (jun)',   s:'2026-06-07'},
+      {n:'rustic fox — carol stream (jul)',   s:'2026-07-05'},
+      {n:'rustic fox — carol stream (aug)',   s:'2026-08-02'},
+      {n:'rustic fox — carol stream (sep)',   s:'2026-09-06'},
+      {n:'rustic fox — carol stream (oct)',   s:'2026-10-04'},
+      {n:'fox & found — north aurora (may)',  s:'2026-05-23'},
+      {n:'fox & found — north aurora (jun)',  s:'2026-06-20'},
+      {n:'fox & found — north aurora (jul)',  s:'2026-07-18'},
+      {n:'fox & found — north aurora (aug)',  s:'2026-08-15'},
+      {n:'fox & found — north aurora (sep)',  s:'2026-09-19'},
+      {n:'fox & found — north aurora (oct)',  s:'2026-10-17'},
+      {n:'st. martins fair',                  s:'2026-08-30'},
+    ];
+    (d.shows||[]).forEach(sh=>{
+      const f=allFix.find(x=>x.n===(sh.name||'').toLowerCase());
+      if(f)sh.startDate=f.s;
+    });
+    d._applied['fix_all_startdates_v1']=true;
+  }
+
   // Safety: ensure settings always present
   if(!d.settings)d.settings={tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70};
   d.settings=Object.assign({tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},d.settings);
