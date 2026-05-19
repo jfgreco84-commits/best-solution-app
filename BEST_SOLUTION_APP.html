@@ -308,7 +308,7 @@ function loadS(){
   try{
     // Try v7 first
     let r=localStorage.getItem('dd_bs_v7');
-    if(r){const d=JSON.parse(r);if(d.v===INIT.v){applyOneTimeUpdates(d);return d;}}
+    if(r){const d=JSON.parse(r);if(d.v===INIT.v){applyOneTimeUpdates(d);localStorage.setItem('dd_bs_v7',JSON.stringify(d));return d;}}
     // Migrate from v6
     r=localStorage.getItem('dd_bs_v6');
     if(r){
