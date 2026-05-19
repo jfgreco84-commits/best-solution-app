@@ -662,7 +662,7 @@ function rHome(){
   </div>`;
 
   // ---- BOOTH COSTS — full season committed ----
-  const allUpcoming=S.shows.filter(sh=>sh.status!=='completed');
+  const allUpcoming=S.shows.filter(sh=>sh.status!=='completed').sort((a,b)=>{const da=a.startDate||a.createdAt||'';const db=b.startDate||b.createdAt||'';return da<db?-1:da>db?1:0;});
   const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
   const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
   const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
@@ -954,9 +954,10 @@ function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);
 // SHOWS LIST
 // ===================================================
 function rShows(){
-  const active=S.shows.filter(s=>s.status==='active');
-  const planned=S.shows.filter(s=>s.status==='planned');
-  const done=S.shows.filter(s=>s.status==='completed');
+  const byDate=(a,b)=>{const da=a.startDate||a.createdAt||'';const db=b.startDate||b.createdAt||'';return da<db?-1:da>db?1:0;};
+  const active=S.shows.filter(s=>s.status==='active').sort(byDate);
+  const planned=S.shows.filter(s=>s.status==='planned').sort(byDate);
+  const done=S.shows.filter(s=>s.status==='completed').sort(byDate);
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   if(active.length){h+=`<div class="sec-lbl">ACTIVE</div>`+active.map(s=>showCard(s)).join('');}
   if(planned.length){h+=`<div class="sec-lbl">UPCOMING</div>`+planned.map(s=>showCard(s)).join('');}
@@ -1000,7 +1001,7 @@ function createShow(){
   if(ds){const s=new Date(ds+'T12:00:00');for(let i=0;i<nd;i++){const d=new Date(s);d.setDate(d.getDate()+i);dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}}
   const days=[];
   for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},notes:'',status:'open'});
-  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,dates,boothCost:bc,miles:mi,status:'planned',days,packedInventory:null,createdAt:new Date().toISOString()};
+  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',days,packedInventory:null,createdAt:new Date().toISOString()};
   S.shows.push(sh);mClose();saveS();toast('Show created!');go('show',sh.id,0);
 }
 
