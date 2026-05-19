@@ -468,6 +468,27 @@ function applyOneTimeUpdates(d){
     d._applied['rustic_fox_20260518']=true;
   }
 
+  // St. Martins Fair — added 2026-05-18
+  if(!d._applied['st_martins_20260518']){
+    d.shows=d.shows||[];
+    const exists=d.shows.find(sh=>(sh.name||'').toLowerCase().includes('martins'));
+    if(!exists){
+      const sh=buildPlannedShow({
+        name:'St. Martins Fair',
+        location:'Franklin, WI',
+        startDate:'2026-08-30',
+        numDays:3,
+        boothCost:0,
+        miles:22,
+        boothPayments:[],
+        confirmed:false
+      });
+      sh.confirmed=false;
+      d.shows.push(sh);
+    }
+    d._applied['st_martins_20260518']=true;
+  }
+
   // Safety: ensure settings always present
   if(!d.settings)d.settings={tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70};
   d.settings=Object.assign({tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},d.settings);
