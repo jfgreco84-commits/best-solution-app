@@ -1112,23 +1112,67 @@ function rShows(){
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
 }
+function calcBreakEven(sh){
+  const mpg=S.settings.mpg||17.5;
+  const gp=S.settings.gasPrice||3.50;
+  const gas=(sh.miles||0)*2*(sh.numDays||1)/mpg*gp;
+  return (sh.boothCost||0)+gas+(sh.lodging||0);
+}
 function showCard(sh){
   const t=calcShow(sh);
   const cls=sh.status==='active'?'sa':sh.status==='completed'?'sd':'';
   const bdg=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED';
   const dateStr=sh.dates?sh.dates.join(' → '):'';
+  const be=calcBreakEven(sh);
+  const beHit=sh.status==='completed'&&t.gross>=be;
   return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
     <span class="sc-badge ${sh.status}">${bdg}</span>
     <div class="sc-name">${sh.name}</div>
     <div class="sc-loc">${sh.location?sh.location+' · ':''}${dateStr}${sh.numDays>1?' · '+sh.numDays+' days':''}</div>
-    ${sh.status!=='planned'?`
+    ${sh.status==='planned'?`
+    <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2)">
+      <div style="font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}</div>
+      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Break Even</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(be)}</div></div>
+    </div>`:``}
+    ${sh.status==='active'?`
     <div class="sc-stats">
       <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
       <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
       <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
       <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
-    </div>`:`<div style="margin-top:7px;font-size:12px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · Booth: ${sh.boothCost?fmt(sh.boothCost):'TBD'} · ${sh.miles||0} mi one-way</div>`}
+    </div>
+    <div style="margin-top:6px;padding:5px 8px;background:rgba(255,200,0,0.08);border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
+      <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
+      <span style="color:${t.gross>=be?'var(--green)':'var(--red)'};font-weight:700">${t.gross>=be?'✅ HIT':'⚠️ '+fmt(be-t.gross)+' to go'}</span>
+    </div>`:``}
+    ${sh.status==='completed'?`
+    <div class="sc-stats">
+      <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
+      <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
+      <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
+      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
+    </div>
+    <div style="margin-top:6px;padding:5px 8px;background:${beHit?'rgba(0,200,100,0.08)':'rgba(255,60,60,0.08)'};border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
+      <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
+      <span style="color:${beHit?'var(--green)':'var(--red)'};font-weight:700">${beHit?'✅ HIT — '+fmt(t.gross-be)+' over':'❌ MISSED by '+fmt(be-t.gross)}</span>
+    </div>`:``}
+    <div style="margin-top:8px;text-align:center" onclick="event.stopPropagation()">
+      <button style="font-size:11px;padding:5px 14px;background:rgba(100,149,237,0.12);border:1px solid rgba(100,149,237,0.3);color:#7EB8F7;border-radius:6px;cursor:pointer;font-weight:700" onclick="showLodgingModal('${sh.id}')">${sh.lodging?'🏨 Lodging: '+fmt(sh.lodging):'🏨 Lodging Expenses'}</button>
+    </div>
   </div>`;
+}
+function showLodgingModal(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  mOpen(`<div class="mh"><div class="mt">🏨 Lodging Expenses</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="padding:8px 0 14px;font-size:13px;color:var(--muted)">${sh.name}</div>
+  <div class="fg"><label class="fl">Total Lodging Cost ($)</label><input class="fi" type="number" id="lod_amt" placeholder="0.00" step="0.01" min="0" value="${sh.lodging||''}"></div>
+  <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:12px">Lodging is added to your Break Even calculation automatically.</div>
+  <button class="btn btn-gold btn-full" onclick="saveLodging('${id}')">Save Lodging</button>`);
+}
+function saveLodging(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  sh.lodging=parseFloat($$('lod_amt').value)||0;
+  saveS();mClose();toast('Lodging saved!');rShows();
 }
 function showNewShowModal(){
   const today=new Date().toISOString().split('T')[0];
