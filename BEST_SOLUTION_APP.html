@@ -441,6 +441,38 @@ function applyOneTimeUpdates(d){
     d.productDebt.payments=pmts;
     d._applied['debt_seed_v1']=true;
   }
+
+  // Rustic Fox Events — added 2026-05-18
+  if(!d._applied['rustic_fox_20260518']){
+    d.shows=d.shows||[];
+    const rfShows=[
+      // Sunday at The Fox Collective Market — Carol Stream, IL (91 mi)
+      {name:'Rustic Fox — Carol Stream (May)',  location:'Carol Stream, IL', startDate:'2026-05-03',numDays:1,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      {name:'Rustic Fox — Carol Stream (Jun)',  location:'Carol Stream, IL', startDate:'2026-06-07',numDays:1,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      {name:'Rustic Fox — Carol Stream (Jul)',  location:'Carol Stream, IL', startDate:'2026-07-05',numDays:1,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      {name:'Rustic Fox — Carol Stream (Aug)',  location:'Carol Stream, IL', startDate:'2026-08-02',numDays:1,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      {name:'Rustic Fox — Carol Stream (Sep)',  location:'Carol Stream, IL', startDate:'2026-09-06',numDays:1,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      {name:'Rustic Fox — Carol Stream (Oct)',  location:'Carol Stream, IL', startDate:'2026-10-04',numDays:1,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      // Fox & Found Collective Market — North Aurora, IL (77 mi)
+      {name:'Fox & Found — North Aurora (May)', location:'North Aurora, IL', startDate:'2026-05-23',numDays:1,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+      {name:'Fox & Found — North Aurora (Jun)', location:'North Aurora, IL', startDate:'2026-06-20',numDays:1,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+      {name:'Fox & Found — North Aurora (Jul)', location:'North Aurora, IL', startDate:'2026-07-18',numDays:1,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+      {name:'Fox & Found — North Aurora (Aug)', location:'North Aurora, IL', startDate:'2026-08-15',numDays:1,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+      {name:'Fox & Found — North Aurora (Sep)', location:'North Aurora, IL', startDate:'2026-09-19',numDays:1,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+      {name:'Fox & Found — North Aurora (Oct)', location:'North Aurora, IL', startDate:'2026-10-17',numDays:1,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+    ];
+    rfShows.forEach(e=>{
+      const exists=d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase());
+      if(!exists){const sh=buildPlannedShow(e);sh.confirmed=e.confirmed;d.shows.push(sh);}
+    });
+    d._applied['rustic_fox_20260518']=true;
+  }
+
+  // Safety: ensure settings always present
+  if(!d.settings)d.settings={tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70};
+  d.settings=Object.assign({tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},d.settings);
+  // Safety: ensure otherExpenses always present
+  if(!d.otherExpenses)d.otherExpenses=[];
 }
 
 function buildPlannedShow(e){
