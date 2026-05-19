@@ -1066,14 +1066,10 @@ function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);
 // ===================================================
 function rShows(){
   const byDate=(a,b)=>{const da=a.startDate||a.createdAt||'';const db=b.startDate||b.createdAt||'';return da<db?-1:da>db?1:0;};
-  const active=S.shows.filter(s=>s.status==='active').sort(byDate);
-  const planned=S.shows.filter(s=>s.status==='planned').sort(byDate);
-  const done=S.shows.filter(s=>s.status==='completed').sort(byDate);
+  const all=[...S.shows].sort(byDate);
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
-  if(active.length){h+=`<div class="sec-lbl">ACTIVE</div>`+active.map(s=>showCard(s)).join('');}
-  if(planned.length){h+=`<div class="sec-lbl">UPCOMING</div>`+planned.map(s=>showCard(s)).join('');}
-  if(done.length){h+=`<div class="sec-lbl">COMPLETED (${done.length})</div>`+done.map(s=>showCard(s)).join('');}
-  if(!S.shows.length)h+=`<div class="empty"><div class="ei">🎪</div>No shows yet. Tap + New Show to start.</div>`;
+  if(all.length){h+=all.map(s=>showCard(s)).join('');}
+  else{h+=`<div class="empty"><div class="ei">🎪</div>No shows yet. Tap + New Show to start.</div>`;}
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
 }
