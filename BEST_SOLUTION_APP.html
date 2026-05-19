@@ -721,7 +721,7 @@ function rHome(){
   const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
   const active=S.shows.find(s=>s.status==='active');
   const done=S.shows.filter(s=>s.status==='completed');
-  const planned=S.shows.filter(s=>s.status==='planned');
+  const planned=[...S.shows].filter(s=>s.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const avgProfit=done.length?ytd.profit/done.length:0;
   const keep=ytd.keep;
   const keepPct=ytd.profit>0?Math.round((keep/ytd.profit)*100):0;
