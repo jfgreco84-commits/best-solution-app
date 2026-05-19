@@ -1548,8 +1548,13 @@ function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
 // ===================================================
 // INIT
 // ===================================================
-S=loadS();
-go('home');
+try{
+  S=loadS();
+  go('home');
+}catch(e){
+  document.body.style.cssText='background:#111;color:#fff;padding:20px;font-family:monospace';
+  document.body.innerHTML='<h2 style="color:red">APP ERROR</h2><pre style="font-size:14px;color:#ff6;white-space:pre-wrap">'+e.toString()+'\n\n'+e.stack+'</pre>';
+}
 </script>
 </body>
 </html>
