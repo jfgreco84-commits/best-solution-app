@@ -1209,7 +1209,6 @@ function showEndModal(shId){
   <button class="btn btn-ghost btn-full" style="margin-top:9px" onclick="mClose()">Cancel</button>`);
 }
 function endShow(shId){
-function endShow(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   let lE=null;for(let i=sh.days.length-1;i>=0;i--){if(sh.days[i].eveningCount){lE=sh.days[i].eveningCount;break;}}
   if(lE)SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)+(lE[s.key]||0));
