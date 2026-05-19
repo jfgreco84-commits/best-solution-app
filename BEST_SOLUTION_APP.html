@@ -504,6 +504,20 @@ function applyOneTimeUpdates(d){
     d._applied['st_martins_20260518']=true;
   }
 
+  // Rustic Fox Holiday Shows — Sip & Sleigh + Kris Kringle
+  if(!d._applied['rf_holiday_20260518']){
+    d.shows=d.shows||[];
+    const hShows=[
+      {name:'Sip & Sleigh — Carol Stream',  location:'Carol Stream, IL', startDate:'2026-11-07',numDays:3,boothCost:0,miles:91,boothPayments:[],confirmed:false},
+      {name:'Kris Kringle — North Aurora',  location:'North Aurora, IL', startDate:'2026-12-12',numDays:3,boothCost:0,miles:77,boothPayments:[],confirmed:false},
+    ];
+    hShows.forEach(e=>{
+      const exists=d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase());
+      if(!exists){const sh=buildPlannedShow(e);sh.confirmed=e.confirmed;d.shows.push(sh);}
+    });
+    d._applied['rf_holiday_20260518']=true;
+  }
+
   // Force correct startDate + miles on Rustic Fox / St. Martins shows — 2026-05-18b
   if(!d._applied['fix_rf_dates_20260518b']){
     const fixes=[
@@ -554,6 +568,8 @@ function applyOneTimeUpdates(d){
       {n:'fox & found — north aurora (sep)',  s:'2026-09-19'},
       {n:'fox & found — north aurora (oct)',  s:'2026-10-17'},
       {n:'st. martins fair',                  s:'2026-08-30'},
+      {n:'sip & sleigh — carol stream',       s:'2026-11-07'},
+      {n:'kris kringle — north aurora',       s:'2026-12-12'},
     ];
     (d.shows||[]).forEach(sh=>{
       const f=allFix.find(x=>x.n===(sh.name||'').toLowerCase());
