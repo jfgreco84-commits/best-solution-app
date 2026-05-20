@@ -210,6 +210,7 @@
 
     ::-webkit-scrollbar{width:0;height:0}
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -603,7 +604,7 @@ function buildPlannedShow(e){
   };
 }
 
-function saveS(){localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();}
+function saveS(){S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();cloudQueuePush();}
 function renderCur(){
   if(curPg==='home')rHome();else if(curPg==='stock')rStock();
   else if(curPg==='shows')rShows();else if(curPg==='show')rShow();
@@ -1660,8 +1661,10 @@ function addSupItem(){
 // ===================================================
 function rSettings(){
   const s=S.settings;
+  const cloudCard=cloudCardHTML();
   pg('settings').innerHTML=`
   <div class="sec-title" style="margin-bottom:12px">⚙️ Settings</div>
+  ${cloudCard}
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TAX & FEES</div>
   <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
   <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
@@ -1695,7 +1698,7 @@ function rSettings(){
   </div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v6.0<br>All data saved locally in your browser</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v18<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
@@ -1794,11 +1797,122 @@ function mClose(){$$('mo').classList.remove('on');document.body.style.overflow='
 function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
 
 // ===================================================
+// CLOUD SYNC (Supabase) - offline-first, localStorage stays primary
+// ===================================================
+const SB_URL='https://ylotwhvkrlobrpdmngul.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3R3aHZrcmxvYnJwZG1uZ3VsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1MDY0NDAsImV4cCI6MjA5MzA4MjQ0MH0.k_94GPfSLJpbib4pt3bSV6xTYM1hATninPHWU6iCHjI';
+let sb=null,_cloudUser=null,_cloudTimer=null,_syncState='off';
+try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
+
+function syncLabel(st){return {off:'Not signed in',syncing:'Syncing…',synced:'Synced ✓',error:'Sync error — working offline'}[st]||'';}
+function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st);}
+
+async function cloudPull(){
+  if(!sb||!_cloudUser)return null;
+  try{
+    const{data,error}=await sb.from('app_data').select('data_value').eq('data_key','bs_state').maybeSingle();
+    if(error||!data)return null;
+    return data.data_value;
+  }catch(e){console.warn('cloudPull',e);return null;}
+}
+async function cloudPush(){
+  if(!sb||!_cloudUser)return;
+  if(!S._updatedAt)S._updatedAt=new Date().toISOString();
+  setSync('syncing');
+  try{
+    const{error}=await sb.from('app_data').upsert({user_id:_cloudUser.id,data_key:'bs_state',data_value:S,updated_at:new Date().toISOString()},{onConflict:'user_id,data_key'});
+    setSync(error?'error':'synced');
+    if(error)console.warn('cloudPush',error);
+  }catch(e){console.warn('cloudPush',e);setSync('error');}
+}
+function cloudQueuePush(){
+  if(!sb||!_cloudUser)return;
+  clearTimeout(_cloudTimer);
+  setSync('syncing');
+  _cloudTimer=setTimeout(cloudPush,800);
+}
+function backupLocal(){
+  try{
+    const cur=localStorage.getItem('dd_bs_v7');if(!cur)return;
+    localStorage.setItem('dd_bs_backup_'+Date.now(),cur);
+    const keys=Object.keys(localStorage).filter(k=>k.indexOf('dd_bs_backup_')===0).sort();
+    while(keys.length>3)localStorage.removeItem(keys.shift());
+  }catch(e){console.warn('backupLocal',e);}
+}
+function looksUsed(st){
+  if(!st||!st.shows)return false;
+  if((st.otherExpenses||[]).length)return true;
+  return st.shows.some(sh=>sh.status==='completed'||(sh.days||[]).some(d=>d.morningCount!=null||d.eveningCount!=null));
+}
+function adoptCloud(cloud){
+  backupLocal();
+  cloud.v=INIT.v;
+  localStorage.setItem('dd_bs_v7',JSON.stringify(cloud));
+  S=loadS();
+  renderCur();
+  setSync('synced');
+}
+async function cloudHydrate(){
+  const cloud=await cloudPull();
+  if(!cloud){await cloudPush();return;}
+  if(!cloud.inventory||!cloud.shows){await cloudPush();return;}
+  const localUsed=looksUsed(S),cloudUsed=looksUsed(cloud);
+  if(localUsed&&!cloudUsed){await cloudPush();return;}
+  if(cloudUsed&&!localUsed){adoptCloud(cloud);return;}
+  const localT=S._updatedAt||'',cloudT=cloud._updatedAt||'';
+  if(cloudT>localT)adoptCloud(cloud);
+  else if(localT>cloudT)await cloudPush();
+  else setSync('synced');
+}
+async function cloudInit(){
+  if(!sb)return;
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    if(session&&session.user){_cloudUser=session.user;setSync('syncing');await cloudHydrate();}
+  }catch(e){console.warn('cloudInit',e);}
+}
+async function cloudSignIn(){
+  if(!sb){toast('Cloud sync unavailable - no connection');return;}
+  const email=($$('cl_email').value||'').trim();
+  const pass=$$('cl_pass').value||'';
+  if(!email||!pass){toast('Enter email and password');return;}
+  const btn=$$('cl_btn');if(btn){btn.disabled=true;btn.textContent='SIGNING IN…';}
+  try{
+    const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
+    if(error){toast(error.message||'Sign in failed');if(btn){btn.disabled=false;btn.textContent='SIGN IN';}return;}
+    _cloudUser=data.user;
+    toast('✅ Signed in');
+    setSync('syncing');
+    await cloudHydrate();
+    rSettings();
+    toast('✅ Cloud sync on');
+  }catch(e){toast('Sign in failed');if(btn){btn.disabled=false;btn.textContent='SIGN IN';}}
+}
+async function cloudSignOut(){
+  try{if(sb)await sb.auth.signOut();}catch(e){}
+  _cloudUser=null;setSync('off');rSettings();
+  toast('Signed out - app still works offline');
+}
+async function cloudSyncNow(){
+  if(!_cloudUser){toast('Sign in first');return;}
+  setSync('syncing');await cloudPush();rSettings();
+}
+function cloudCardHTML(){
+  if(_cloudUser){
+    const email=_cloudUser.email||'signed in';
+    return `<div class="card grb"><div style="font-size:10px;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:13px;margin-bottom:4px">Signed in as <strong>${email}</strong></div><div id="cl_status" style="font-size:12px;color:var(--muted);margin-bottom:10px">${syncLabel(_syncState)||'Synced ✓'}</div><div class="g2" style="gap:8px"><button class="btn btn-ghost btn-full" onclick="cloudSyncNow()">🔄 Sync Now</button><button class="btn btn-ghost btn-full" onclick="cloudSignOut()">Sign Out</button></div></div>`;
+  }
+  return `<div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">Sign in to back up your data and sync across all your devices. The app still works offline either way.</div><div class="fg"><label class="fl">EMAIL</label><input class="fi" id="cl_email" type="email" placeholder="you@email.com" autocomplete="username"></div><div class="fg"><label class="fl">PASSWORD</label><input class="fi" id="cl_pass" type="password" placeholder="••••••••" autocomplete="current-password"></div><button class="btn btn-gold btn-full" id="cl_btn" onclick="cloudSignIn()">SIGN IN</button><div id="cl_status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px"></div></div>`;
+}
+
+
+// ===================================================
 // INIT
 // ===================================================
 try{
   S=loadS();
   go('home');
+  cloudInit();
 }catch(e){
   document.body.style.cssText='background:#111;color:#fff;padding:20px;font-family:monospace';
   document.body.innerHTML='<h2 style="color:red">APP ERROR</h2><pre style="font-size:14px;color:#ff6;white-space:pre-wrap">'+e.toString()+'\n\n'+e.stack+'</pre>';
