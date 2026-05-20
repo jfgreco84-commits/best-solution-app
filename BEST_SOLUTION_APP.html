@@ -1521,6 +1521,64 @@ function exportCalICS(){
 }
 
 // ===================================================
+// CALENDAR (month grid view)
+// ===================================================
+function calShift(delta){
+  if(!calMonth){const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};}
+  let m=calMonth.m+delta,y=calMonth.y;
+  if(m<0){m=11;y--;}
+  if(m>11){m=0;y++;}
+  calMonth={y,m};
+  rCalendar();
+}
+function calToday(){
+  const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};
+  rCalendar();
+}
+function rCalendar(){
+  if(!calMonth){const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};}
+  const y=calMonth.y,m=calMonth.m;
+  const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DOW=['S','M','T','W','T','F','S'];
+  const startDow=new Date(y,m,1).getDay();
+  const daysInMonth=new Date(y,m+1,0).getDate();
+  const todayStr=new Date().toISOString().split('T')[0];
+  const mKey=y+'-'+String(m+1).padStart(2,'0');
+  const dayMap={};
+  S.shows.forEach(sh=>{getShowDates(sh).forEach(ds=>{(dayMap[ds]=dayMap[ds]||[]).push(sh);});});
+  let monthDays=0;
+  Object.keys(dayMap).forEach(ds=>{if(ds.substring(0,7)===mKey)monthDays++;});
+  let h=`<div class="cal-hdr"><button class="cal-nav-btn" onclick="calShift(-1)">&lsaquo;</button><div class="cal-title">${MN[m]} ${y}</div><button class="cal-nav-btn" onclick="calShift(1)">&rsaquo;</button></div>`;
+  h+='<div class="cal-grid">';
+  DOW.forEach(d=>h+=`<div class="cal-dow">${d}</div>`);
+  for(let i=0;i<startDow;i++)h+='<div class="cal-cell blank"></div>';
+  for(let day=1;day<=daysInMonth;day++){
+    const ds=`${mKey}-${String(day).padStart(2,'0')}`;
+    const shows=dayMap[ds]||[];
+    let cls='cal-cell',onclick='';
+    if(ds===todayStr)cls+=' today';
+    if(shows.length){
+      let st='possible';
+      if(shows.some(s=>s.status==='completed'))st='completed';
+      else if(shows.some(s=>s.confirmed||s.status==='active'))st='confirmed';
+      cls+=` has-show ${st}`;
+      onclick=` onclick="go('show','${shows[0].id}')"`;
+    }
+    h+=`<div class="${cls}"${onclick}><div class="cal-num">${day}</div>`;
+    shows.slice(0,2).forEach(s=>{h+=`<div class="cal-show-pill">${s.name}</div>`;});
+    if(shows.length>2)h+=`<div class="cal-show-pill">+${shows.length-2} more</div>`;
+    h+='</div>';
+  }
+  h+='</div>';
+  h+=`<div class="cal-legend"><span><span class="cal-legend-dot" style="background:var(--green)"></span>Booked</span><span><span class="cal-legend-dot" style="background:var(--gold)"></span>Pending</span><span><span class="cal-legend-dot" style="background:rgba(0,210,106,0.55)"></span>Completed</span></div>`;
+  h+=`<div style="text-align:center;font-size:12px;color:var(--muted);margin-top:10px">${monthDays} show day${monthDays===1?'':'s'} in ${MN[m]}</div>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="calToday()">Jump to This Month</button>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="exportCalICS()">Export Shows to Calendar (.ics)</button>`;
+  pg('calendar').innerHTML=h;
+}
+
+
+// ===================================================
 // SUPPLIES TALLY
 // ===================================================
 function rSupplies(){
