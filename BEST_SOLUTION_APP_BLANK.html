@@ -1,0 +1,1848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Best Solution | Dot Dynasty LLC</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    :root{
+      --bg:#0a0a0a;--card:#161616;--card2:#1e1e1e;--card3:#262626;
+      --gold:#FFD700;--gold2:#c9a900;--goldbg:rgba(255,215,0,0.08);--goldbd:rgba(255,215,0,0.25);
+      --green:#00D26A;--greenbg:rgba(0,210,106,0.08);--greenbd:rgba(0,210,106,0.25);
+      --red:#FF4545;--redbg:rgba(255,69,69,0.08);--redbd:rgba(255,69,69,0.25);
+      --blue:#4FC3F7;--text:#f0f0f0;--muted:#777;--border:#252525;
+    }
+    html,body{height:100%;overflow:hidden}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif;font-size:15px}
+
+    /* HEADER */
+    #hdr{background:var(--card);border-bottom:2px solid var(--gold);padding:0 16px;display:flex;align-items:center;justify-content:space-between;position:fixed;top:0;left:0;right:0;z-index:100;height:52px}
+    .hdr-brand{display:flex;align-items:center;gap:8px}
+    .hdr-logo{font-size:22px}
+    .hdr-name{font-size:16px;font-weight:900;color:var(--gold);letter-spacing:0.3px}
+    .hdr-sub{font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-top:-1px}
+
+    /* BOTTOM NAV */
+    #nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:100;height:58px}
+    .nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;border:none;background:none;color:var(--muted);font-size:8px;font-weight:700;letter-spacing:0.4px;gap:2px;transition:color 0.15s;position:relative}
+    .nb .ni{font-size:18px;line-height:1}
+    .nb-badge{position:absolute;top:6px;right:calc(50% - 14px);background:var(--red);color:#fff;font-size:8px;font-weight:900;border-radius:8px;padding:1px 4px;line-height:1.4;min-width:14px;text-align:center}
+    .nb.on{color:var(--gold)}
+
+    /* PAGES */
+    #pages{position:fixed;top:52px;bottom:58px;left:0;right:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+    .pg{display:none;padding:12px 12px 16px;min-height:100%}
+    .pg.on{display:block}
+
+    /* SECTION LABELS */
+    .sec-lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700;margin:14px 0 8px}
+    .sec-lbl:first-child{margin-top:2px}
+    .sec-row{display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px}
+    .sec-row .sec-lbl{margin:0}
+    .sec-title{font-size:16px;font-weight:900}
+
+    /* CARDS */
+    .card{background:var(--card);border-radius:12px;padding:14px;margin-bottom:10px;border:1px solid var(--border)}
+    .card.gb{border-color:var(--goldbd)}
+    .card.grb{border-color:var(--greenbd)}
+    .card.rb{border-color:var(--redbd)}
+    .card.bb{border-color:rgba(79,195,247,0.3)}
+
+    /* STAT GRIDS */
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+    .sbox{background:var(--card);border-radius:10px;padding:11px 12px;border:1px solid var(--border)}
+    .sbox.gb{border-color:var(--goldbd);background:var(--goldbg)}
+    .sbox.grb{border-color:var(--greenbd);background:var(--greenbg)}
+    .sbox.rb{border-color:var(--redbd);background:var(--redbg)}
+    .sl{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:4px}
+    .sv{font-size:20px;font-weight:900;color:var(--gold);line-height:1}
+    .sv.g{color:var(--green)}.sv.r{color:var(--red)}.sv.w{color:var(--text)}.sv.sm{font-size:16px}
+    .ss{font-size:10px;color:var(--muted);margin-top:3px}
+
+    /* PROGRESS BAR */
+    .pbar-wrap{background:var(--card3);border-radius:4px;height:7px;overflow:hidden;margin-top:7px}
+    .pbar-fill{height:100%;border-radius:4px;transition:width 0.4s}
+
+    /* BUTTONS */
+    .btn{padding:11px 16px;border-radius:9px;border:none;cursor:pointer;font-size:14px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:opacity 0.12s,transform 0.1s;letter-spacing:0.2px}
+    .btn:active{opacity:0.75;transform:scale(0.97)}.btn:disabled{opacity:0.35;cursor:not-allowed}
+    .btn-gold{background:var(--gold);color:#000}.btn-green{background:var(--green);color:#000}
+    .btn-red{background:var(--red);color:#fff}.btn-ghost{background:var(--card2);border:1px solid var(--border);color:var(--text)}
+    .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+    .btn-sm{padding:8px 13px;font-size:12px;border-radius:7px}.btn-xs{padding:6px 10px;font-size:11px;border-radius:6px}
+    .btn-full{width:100%}
+
+    /* INVENTORY TABLE */
+    .inv-table{width:100%;border-collapse:collapse}
+    .inv-table th{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;padding:0 6px 8px;text-align:right}
+    .inv-table th:first-child{text-align:left}
+    .inv-table td{padding:8px 6px;border-top:1px solid var(--border);font-size:13px;text-align:right;font-weight:600}
+    .inv-table td:first-child{text-align:left}
+    .inv-table tr:last-child td{border-bottom:1px solid var(--border)}
+
+    /* SHOW CARDS */
+    .sc{background:var(--card);border-radius:12px;padding:13px;margin-bottom:9px;border:1px solid var(--border);cursor:pointer}
+    .sc.sa{border-color:var(--goldbd)}.sc.sd{opacity:0.8}
+    .sc-badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px}
+    .sc-badge.planned{background:var(--card2);color:var(--muted)}
+    .sc-badge.active{background:var(--goldbg);color:var(--gold)}
+    .sc-badge.completed{background:var(--greenbg);color:var(--green)}
+    .sc-name{font-size:17px;font-weight:900}
+    .sc-loc{font-size:11px;color:var(--muted);margin-top:2px}
+    .sc-stats{display:flex;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+    .sc-s .sv2{font-size:16px;font-weight:900;color:var(--gold)}.sc-s .sl2{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+
+    /* FORMS */
+    .fg{margin-bottom:11px}
+    .fl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:5px;display:block;font-weight:700}
+    .fi{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:11px 13px;color:var(--text);font-size:16px;outline:none}
+    .fi:focus{border-color:var(--gold)}
+    textarea.fi{min-height:70px;resize:vertical}
+
+    /* MODAL */
+    #mo{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:200;display:none;align-items:flex-end;justify-content:center}
+    #mo.on{display:flex}
+    #mb{background:#181818;border-radius:20px 20px 0 0;padding:18px 14px 28px;width:100%;max-width:560px;max-height:91vh;overflow-y:auto;border-top:2px solid var(--gold)}
+    .mh{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:13px}
+    .mt{font-size:18px;font-weight:900;color:var(--gold)}
+    .mx{background:none;border:none;color:var(--muted);font-size:28px;cursor:pointer;line-height:1;padding:0 4px;margin-top:-4px}
+
+    /* COUNT ROWS */
+    .cr{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+    .cr:last-child{border-bottom:none}
+    .cr-i{flex:1;min-width:0}
+    .cr-n{font-size:14px;font-weight:700}
+    .cr-s{font-size:11px;color:var(--muted);margin-top:1px}
+    .cr-c{display:flex;align-items:center;gap:7px}
+    .crb{width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:300}
+    .crb:active{background:var(--gold);color:#000;border-color:var(--gold)}
+    .cri{width:62px;text-align:center;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 4px;color:var(--text);font-size:18px;font-weight:900;outline:none}
+    .cri:focus{border-color:var(--gold)}
+
+    /* MONEY */
+    .mr{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+    .mi{flex:1;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:18px;font-weight:700;outline:none}
+    .mi:focus{border-color:var(--gold)}
+
+    /* SUM ROWS */
+    .sr{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+    .sr:last-child{border-bottom:none}
+    .srl{font-size:14px;color:var(--muted)}
+    .srl.b{color:var(--text);font-weight:800;font-size:15px}
+    .srv{font-size:14px;font-weight:700}
+    .srv.gold{color:var(--gold)}.srv.green{color:var(--green)}.srv.red{color:var(--red)}.srv.lg{font-size:18px}
+
+    /* CHIPS */
+    .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
+    .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
+    .chip.green{background:var(--greenbg);color:var(--green);border-color:var(--greenbd)}
+    .chip.red{background:var(--redbg);color:var(--red);border-color:var(--redbd)}
+
+    /* DAY TABS */
+    .dtabs{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px;margin-bottom:13px;scrollbar-width:none}
+    .dtabs::-webkit-scrollbar{display:none}
+    .dtab{padding:7px 14px;border-radius:20px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;background:var(--card2);border:1px solid var(--border);color:var(--muted);transition:all 0.12s}
+    .dtab.on{background:var(--gold);color:#000;border-color:var(--gold)}
+    .dtab.done{border-color:var(--greenbd);color:var(--green)}
+
+    /* STEP */
+    .step{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+    .step:last-child{border-bottom:none}
+    .si{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+    .si.done{background:var(--greenbg)}.si.pend{background:var(--card2)}.si.act{background:var(--goldbg)}
+    .sn{font-size:14px;font-weight:800}
+    .ss2{font-size:11px;color:var(--muted);margin-top:1px}
+
+    /* WARN BOXES */
+    .wb{padding:9px 12px;border-radius:8px;font-size:12px;font-weight:600}
+    .wb.red{background:var(--redbg);color:var(--red);border:1px solid var(--redbd)}
+    .wb.green{background:var(--greenbg);color:var(--green);border:1px solid var(--greenbd)}
+    .wb.gold{background:var(--goldbg);color:var(--gold);border:1px solid var(--goldbd)}
+
+    /* DIVIDER */
+    .div{height:1px;background:var(--border);margin:12px 0}
+
+    /* TOAST */
+    #toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--gold);color:var(--text);padding:8px 18px;border-radius:9px;font-size:13px;font-weight:700;z-index:400;display:none;white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,0.6)}
+
+    /* HORIZONTAL MINI BAR (payment split) */
+    .hbar{height:10px;border-radius:5px;overflow:hidden;display:flex;margin-top:5px;gap:1px}
+    .hbar-seg{height:100%;transition:width 0.4s}
+
+    /* EMPTY */
+    .empty{text-align:center;padding:48px 20px;color:var(--muted)}
+    .empty .ei{font-size:50px;margin-bottom:12px}
+
+    /* CALENDAR */
+    .cal-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+    .cal-nav-btn{width:36px;height:36px;border-radius:9px;background:var(--card2);border:1px solid var(--border);color:var(--text);font-size:18px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center}
+    .cal-nav-btn:active{background:var(--gold);color:#000}
+    .cal-title{font-size:18px;font-weight:900;color:var(--gold)}
+    .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+    .cal-dow{font-size:9px;color:var(--muted);text-align:center;font-weight:800;letter-spacing:1px;padding:6px 0;text-transform:uppercase}
+    .cal-cell{aspect-ratio:1;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:4px;position:relative;min-height:46px;display:flex;flex-direction:column;cursor:pointer;overflow:hidden}
+    .cal-cell.blank{background:transparent;border:none;padding:0;cursor:default}
+    .cal-cell.today{border-color:var(--gold);background:var(--goldbg)}
+    .cal-cell.has-show{cursor:pointer}
+    .cal-cell.confirmed{background:rgba(0,210,106,0.18);border-color:var(--green)}
+    .cal-cell.possible{background:rgba(255,215,0,0.16);border-color:var(--gold)}
+    .cal-cell.completed{background:rgba(0,210,106,0.30);border-color:var(--green)}
+    .cal-num{font-size:11px;font-weight:800;color:var(--text)}
+    .cal-cell.today .cal-num{color:var(--gold)}
+    .cal-cell.confirmed .cal-num,.cal-cell.completed .cal-num{color:var(--green)}
+    .cal-cell.possible .cal-num{color:var(--gold)}
+    .cal-show-pill{font-size:8px;font-weight:800;line-height:1.1;margin-top:2px;padding:1px 3px;border-radius:3px;background:rgba(0,0,0,0.35);color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cal-legend{display:flex;gap:14px;justify-content:center;margin-top:12px;font-size:11px;flex-wrap:wrap}
+    .cal-legend-dot{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:middle}
+
+    /* CONFIRMED BORDERS for show cards */
+    .sc.confirmed{border-color:var(--greenbd)}
+    .sc.possible{border-color:var(--goldbd);background:rgba(255,215,0,0.04)}
+
+    /* BOOTH PAYMENTS */
+    .pay-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:8px}
+    .pay-row:last-child{border-bottom:none}
+    .pay-amount{font-size:14px;font-weight:900;color:var(--green)}
+    .pay-meta{font-size:10px;color:var(--muted)}
+
+    ::-webkit-scrollbar{width:0;height:0}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="hdr">
+  <div class="hdr-brand">
+    <span class="hdr-logo">⚡</span>
+    <div><div class="hdr-name">Best Solution</div><div class="hdr-sub">Dot Dynasty LLC</div></div>
+  </div>
+  <div id="hdrR"></div>
+</div>
+
+<!-- PAGES -->
+<div id="pages">
+  <div id="pg-home" class="pg on"></div>
+  <div id="pg-stock" class="pg"></div>
+  <div id="pg-shows" class="pg"></div>
+  <div id="pg-show" class="pg"></div>
+  <div id="pg-calendar" class="pg"></div>
+  <div id="pg-supplies" class="pg"></div>
+  <div id="pg-pnl" class="pg"></div>
+  <div id="pg-settings" class="pg"></div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div id="nav">
+  <button class="nb on" id="nb-home" onclick="go('home')"><span class="ni">📊</span>HOME</button>
+  <button class="nb" id="nb-stock" onclick="go('stock')"><span class="ni">📦</span>STOCK</button>
+  <button class="nb" id="nb-shows" onclick="go('shows')"><span class="ni">🎪</span>SHOWS</button>
+  <button class="nb" id="nb-calendar" onclick="go('calendar')"><span class="ni">📅</span>CAL</button>
+  <button class="nb" id="nb-supplies" onclick="go('supplies')"><span class="ni">🧴</span>SUPPLY</button>
+  <button class="nb" id="nb-pnl" onclick="go('pnl')"><span class="ni">💰</span>P&amp;L</button>
+  <button class="nb" id="nb-settings" onclick="go('settings')"><span class="ni">⚙️</span>SETUP</button>
+</div>
+
+<!-- MODAL -->
+<div id="mo" onclick="mMaybeClose(event)"><div id="mb"></div></div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+// ===================================================
+// CONFIG
+// ===================================================
+const SKUS=[
+  {key:'32oz',name:'32oz Best Solution',short:'32oz',emoji:'🫙',cost:6.00,defP:22.50},
+  {key:'16oz',name:'16oz Best Solution',short:'16oz',emoji:'🫙',cost:4.50,defP:15.00},
+  {key:'8oz', name:'8oz Best Solution', short:'8oz', emoji:'🧴',cost:4.00,defP:10.00},
+  {key:'2oz', name:'2oz Best Solution', short:'2oz', emoji:'🧴',cost:2.25,defP:5.00},
+  {key:'c5s', name:'C5 Small (2oz)',    short:'C5-S',emoji:'✨',cost:3.00,defP:10.00},
+  {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00}
+];
+const PMTS=[
+  {key:'cash',   label:'Cash',    icon:'💵',color:'#00D26A'},
+  {key:'square', label:'Square',  icon:'⬛',color:'#4FC3F7'},
+  {key:'venmo',  label:'Venmo',   icon:'🔵',color:'#3D95CE'},
+  {key:'paypal', label:'PayPal',  icon:'🅿️', color:'#003087'},
+  {key:'cashapp',label:'Cash App',icon:'💚',color:'#00D632'},
+  {key:'zelle',  label:'Zelle',   icon:'🟣',color:'#6D1ED4'}
+];
+const PREV_YEAR={gross:0,cogs:0,booth:0,otherExp:0,net:0,shows:0,bestShow:'',bestProfit:0};
+const DEFAULT_SUPPLIES=[
+  {id:'sup_bags_lg',   name:'Bags (Large)',      qty:0,low:5, unit:'pk'},
+  {id:'sup_bags_sm',   name:'Bags (Small)',       qty:0,low:5, unit:'pk'},
+  {id:'sup_ptowels',   name:'Paper Towels',       qty:0,low:2, unit:'roll'},
+  {id:'sup_microfiber',name:'Microfiber Cloths',  qty:0,low:4, unit:'ea'},
+  {id:'sup_tablecloth',name:'Table Cover',         qty:0,low:1, unit:'ea'},
+  {id:'sup_trash',     name:'Trash Bags',          qty:0,low:5, unit:'ea'},
+  {id:'sup_tape',      name:'Packing Tape',        qty:0,low:1, unit:'roll'},
+  {id:'sup_zipties',   name:'Zip Ties',            qty:0,low:10,unit:'ea'},
+  {id:'sup_markers',   name:'Markers',             qty:0,low:2, unit:'ea'},
+  {id:'sup_ptags',     name:'Price Tags',          qty:0,low:20,unit:'ea'},
+  {id:'sup_cards',     name:'Business Cards',      qty:0,low:50,unit:'ea'},
+  {id:'sup_flyers',    name:'Flyers',              qty:0,low:20,unit:'ea'},
+  {id:'sup_hsani',     name:'Hand Sanitizer',      qty:0,low:1, unit:'bottle'},
+  {id:'sup_candy',     name:'Candy/Mints',         qty:0,low:1, unit:'bag'},
+  {id:'sup_change',    name:'Change Bag (Cash)',   qty:0,low:1, unit:'ea'}
+];
+const INIT={
+  v:7,
+  inventory:{'32oz':0,'16oz':0,'8oz':0,'2oz':0,'c5s':0,'c5l':0},
+  shows:[],
+  supplies:JSON.parse(JSON.stringify(DEFAULT_SUPPLIES)),
+  productDebt:{supplier:'',originalBalance:0,payments:[]},
+  otherExpenses:[],
+  prices:{'32oz':22.50,'16oz':15.00,'8oz':10.00,'2oz':5.00,'c5s':10.00,'c5l':20.00},
+  settings:{tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},
+  _applied:{}
+};
+
+// ===================================================
+// STATE
+// ===================================================
+let S,curPg='home',curShow=null,curDay=0,calMonth=null;
+
+function normalizeShowDates(d){
+  // Always fix startDate from dates[] on every load — no flags, always reliable
+  const mo={Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  (d.shows||[]).forEach(sh=>{
+    if(sh.dates&&sh.dates[0]){
+      const m=sh.dates[0].match(/(\w{3})\s+(\d+)/);
+      if(m&&mo[m[1]]){
+        const yr=(sh.startDate&&sh.startDate.length>=4)?sh.startDate.substring(0,4):'2026';
+        const built=yr+'-'+mo[m[1]]+'-'+String(m[2]).padStart(2,'0');
+        sh.startDate=built;
+      }
+    }
+  });
+}
+function loadS(){
+  try{
+    // Try v7 first
+    let r=localStorage.getItem('dd_bs_blank_v7');
+    if(r){const d=JSON.parse(r);if(d.v===INIT.v){applyOneTimeUpdates(d);normalizeShowDates(d);localStorage.setItem('dd_bs_blank_v7',JSON.stringify(d));return d;}}
+    // Migrate from v6
+    r=localStorage.getItem('dd_bs_blank_v6');
+    if(r){
+      const d=JSON.parse(r);
+      d.v=7;
+      d._applied=d._applied||{};
+      (d.shows||[]).forEach(sh=>{
+        if(!sh.boothPayments)sh.boothPayments=[];
+        if(sh.confirmed===undefined)sh.confirmed=sh.status==='completed';
+      });
+      applyOneTimeUpdates(d);
+      normalizeShowDates(d);
+      localStorage.setItem('dd_bs_blank_v7',JSON.stringify(d));
+      return d;
+    }
+  }catch(e){console.error('load error',e);}
+  const fresh=JSON.parse(JSON.stringify(INIT));
+  applyOneTimeUpdates(fresh);
+  return fresh;
+}
+
+function applyOneTimeUpdates(d){
+  // Blank template app: no seeded shows, inventory, or debt.
+  d._applied=d._applied||{};
+  // Seed showExpenses array on all shows that don't have it
+  if(!d._applied['show_expenses_seed_v1']){
+    (d.shows||[]).forEach(sh=>{if(!sh.showExpenses)sh.showExpenses=[];});
+    d._applied['show_expenses_seed_v1']=true;
+  }
+}
+
+function buildPlannedShow(e){
+  const dates=[];
+  const start=new Date(e.startDate+'T12:00:00');
+  for(let i=0;i<e.numDays;i++){
+    const d=new Date(start);d.setDate(d.getDate()+i);
+    dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  }
+  const days=[];
+  for(let i=0;i<e.numDays;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},notes:'',status:'open'});
+  return{
+    id:'sh_auto_'+e.name.replace(/[^a-z0-9]/gi,'').toLowerCase().substring(0,20)+'_'+Date.now()+Math.floor(Math.random()*1000),
+    name:e.name,location:e.location||'',numDays:e.numDays,dates,startDate:e.startDate,
+    boothCost:e.boothCost||0,boothPayments:e.boothPayments||[],miles:e.miles||0,
+    status:'planned',confirmed:true,showExpenses:[],
+    days,packedInventory:null,createdAt:new Date().toISOString()
+  };
+}
+
+function saveS(){S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_blank_v7',JSON.stringify(S));renderCur();cloudQueuePush();}
+function renderCur(){
+  if(curPg==='home')rHome();else if(curPg==='stock')rStock();
+  else if(curPg==='shows')rShows();else if(curPg==='show')rShow();
+  else if(curPg==='calendar')rCalendar();
+  else if(curPg==='supplies')rSupplies();
+  else if(curPg==='pnl')rPnL();
+  else if(curPg==='settings')rSettings();
+  updateSupplyBadge();
+}
+function updateSupplyBadge(){
+  const sup=S.supplies||[];
+  const lowCnt=sup.filter(s=>s.qty<=s.low&&s.low>0).length;
+  const nb=$$('nb-supplies');if(!nb)return;
+  const existing=nb.querySelector('.nb-badge');
+  if(lowCnt>0){
+    if(existing)existing.textContent=lowCnt;
+    else{const b=document.createElement('span');b.className='nb-badge';b.textContent=lowCnt;nb.appendChild(b);}
+  } else {
+    if(existing)existing.remove();
+  }
+}
+
+// ===================================================
+// UTILS
+// ===================================================
+function $$(i){return document.getElementById(i);}
+function pg(i){return $$('pg-'+i);}
+function fmt(n){if(n===null||n===undefined)return'$0.00';const a=Math.abs(n);const s='$'+a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');return n<0?'-'+s:s;}
+function fmtN(n){return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+function getP(k){return(S.prices&&S.prices[k])||SKUS.find(s=>s.key===k).defP;}
+function eSku(){const r={};SKUS.forEach(s=>r[s.key]=0);return r;}
+function calcRev(sold){return SKUS.reduce((t,s)=>t+(sold[s.key]||0)*getP(s.key),0);}
+function calcCOGS(sold){return SKUS.reduce((t,s)=>t+(sold[s.key]||0)*s.cost,0);}
+function calcSold(m,e){const r={};SKUS.forEach(s=>r[s.key]=Math.max(0,(m[s.key]||0)-(e[s.key]||0)));return r;}
+function calcPmt(pmts){return PMTS.reduce((t,p)=>t+(parseFloat(pmts[p.key])||0),0);}
+function calcInvCost(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*s.cost,0);}
+function calcInvRetail(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*getP(s.key),0);}
+function calcShow(sh){
+  let gross=0,cogs=0,exp=sh.boothCost||0;
+  (sh.days||[]).forEach(d=>{
+    if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);gross+=calcRev(sold);cogs+=calcCOGS(sold);}
+    if(d.expenses)exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);
+  });
+  exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  exp+=(sh.lodging||0);
+  const profit=gross-cogs-exp;
+  return{gross,cogs,expenses:exp,profit,taxRes:Math.max(0,profit*S.settings.tax)};
+}
+function calcYTD(){
+  let gross=0,cogs=0,expenses=0,units={};
+  SKUS.forEach(s=>units[s.key]=0);
+  let pmtTotals={cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0};
+  let miles=0;
+  // Completed shows: gross, cogs, and all show-level expenses (booth + daily gas/food/etc)
+  S.shows.filter(s=>s.status==='completed').forEach(sh=>{
+    const t=calcShow(sh);gross+=t.gross;cogs+=t.cogs;expenses+=t.expenses;
+    miles+=(sh.miles||0)*2*(sh.numDays||1);
+    (sh.days||[]).forEach(d=>{
+      if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);SKUS.forEach(s=>units[s.key]+=(sold[s.key]||0));}
+      if(d.payments)PMTS.forEach(p=>pmtTotals[p.key]+=(parseFloat(d.payments[p.key])||0));
+    });
+  });
+  // Non-completed shows: booth payments + any logged show expenses count as real money out
+  S.shows.filter(s=>s.status!=='completed').forEach(sh=>{
+    expenses+=boothPaid(sh);
+    expenses+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+    expenses+=(sh.lodging||0);
+  });
+  // Other expenses: supplies, equipment, misc — logged separately
+  const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  expenses+=otherSpend;
+  // True profit = gross minus every dollar that left your pocket
+  const profit=gross-cogs-expenses;
+  const taxRes=Math.max(0,profit*S.settings.tax);
+  const keep=Math.max(0,profit-taxRes);
+  const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
+  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,otherSpend};
+}
+function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
+function boothPaid(sh){return(sh.boothPayments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);}
+function boothBalance(sh){return Math.max(0,(sh.boothCost||0)-boothPaid(sh));}
+function calcBoothTally(){
+  let paid=0,owed=0,due=0,confirmedCnt=0,possibleCnt=0;
+  const paidShows=[],unpaidShows=[];
+  S.shows.forEach(sh=>{
+    if(sh.status==='completed')return;
+    const cost=sh.boothCost||0;const p=boothPaid(sh);
+    paid+=p;owed+=cost;due+=Math.max(0,cost-p);
+    if(sh.confirmed)confirmedCnt++;else possibleCnt++;
+    if(cost>0){
+      if(p>=cost-0.01)paidShows.push(sh);
+      else unpaidShows.push(sh);
+    }
+  });
+  return{paid,owed,due,confirmedCnt,possibleCnt,paidShows,unpaidShows};
+}
+function getShowDates(sh){
+  // Returns array of YYYY-MM-DD dates this show occupies. Needs startDate.
+  if(!sh.startDate)return[];
+  const out=[];const s=new Date(sh.startDate+'T12:00:00');
+  for(let i=0;i<(sh.numDays||1);i++){
+    const d=new Date(s);d.setDate(d.getDate()+i);
+    out.push(d.toISOString().split('T')[0]);
+  }
+  return out;
+}
+
+// ===================================================
+// NAVIGATION
+// ===================================================
+function go(pg,shId,dayIdx){
+  document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  curPg=pg;
+  if(shId!==undefined)curShow=shId;
+  if(dayIdx!==undefined)curDay=dayIdx;
+  $$('pg-'+pg).classList.add('on');
+  const nb=$$('nb-'+pg);if(nb)nb.classList.add('on');
+  if(pg==='show'){
+    $$('hdrR').innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('shows')">← Back</button>`;
+    $$('nb-shows').classList.add('on');
+  } else {
+    $$('hdrR').innerHTML='';
+  }
+  if(pg==='calendar'&&!calMonth){
+    const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};
+  }
+  renderCur();
+}
+
+// ===================================================
+// HOME - FULL COMMAND CENTER
+// ===================================================
+function rHome(){
+  const ytd=calcYTD();
+  const invCost=calcInvCost(S.inventory);
+  const invRetail=calcInvRetail(S.inventory);
+  const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
+  const active=S.shows.find(s=>s.status==='active');
+  const done=S.shows.filter(s=>s.status==='completed');
+  const planned=[...S.shows].filter(s=>s.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const avgProfit=done.length?ytd.profit/done.length:0;
+  const keep=ytd.keep;
+  const keepPct=ytd.profit>0?Math.round((keep/ytd.profit)*100):0;
+  const taxPct=ytd.profit>0?Math.round((ytd.taxRes/ytd.profit)*100):0;
+  const mileDeduct=ytd.miles*S.settings.irsRate;
+
+  // Best show this season
+  let bestShow=null,bestProfit=-Infinity;
+  done.forEach(sh=>{const t=calcShow(sh);if(t.profit>bestProfit){bestProfit=t.profit;bestShow=sh;}});
+
+  // YTD payment totals
+  const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
+
+  // vs 2025
+  const profitDiff=ytd.profit-PREV_YEAR.net;
+  const grossDiff=ytd.gross-PREV_YEAR.gross;
+
+  // Low stock items
+  const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
+
+  let html='';
+
+  // ---- ACTIVE SHOW BANNER ----
+  if(active){
+    const t=calcShow(active);
+    const dateStr=active.dates?(active.dates.length>1?active.dates[0]+' - '+active.dates[active.dates.length-1]:active.dates[0]):'';
+    html+=`
+    <div class="card gb" style="cursor:pointer" onclick="go('show','${active.id}')">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:9px">
+          <span style="font-size:26px">🔴</span>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--gold);font-weight:800">ACTIVE SHOW</div>
+            <div style="font-size:19px;font-weight:900">${active.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${active.location||''} ${dateStr?'· '+dateStr:''}</div>
+          </div>
+        </div>
+        <span style="color:var(--gold);font-size:22px;margin-right:2px">→</span>
+      </div>
+      <div class="g4">
+        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${fmt(t.gross)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gross</div></div>
+        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Profit</div></div>
+        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${fmt(t.cogs)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">COGS</div></div>
+        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${active.days.filter(d=>d.morningCount&&d.eveningCount).length}/${active.numDays}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Days</div></div>
+      </div>
+    </div>`;
+  }
+
+  // ---- SEASON OVERVIEW ----
+  html+=`<div class="sec-lbl">2026 SEASON OVERVIEW</div>
+  <div class="g2" style="margin-bottom:8px">
+    <div class="sbox gb"><div class="sl">YTD GROSS SALES</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">${done.length} show${done.length!==1?'s':''} completed</div></div>
+    <div class="sbox ${ytd.keep>=0?'grb':'rb'}"><div class="sl">AFTER-TAX KEEP</div><div class="sv ${ytd.keep>=0?'g':'r'}">${fmt(ytd.keep)}</div><div class="ss">What you actually pocket</div></div>
+  </div>
+  <div class="g3" style="margin-bottom:8px">
+    <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
+    <div class="sbox"><div class="sl">TOTAL EXPENSES</div><div class="sv sm w">${fmt(ytd.expenses)}</div><div class="ss">Booth + travel + supplies + misc</div></div>
+    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% set aside</div></div>
+  </div>
+  <div class="g3" style="margin-bottom:8px">
+    <div class="sbox"><div class="sl">UNITS SOLD</div><div class="sv sm w">${fmtN(ytd.totalUnits)}</div><div class="ss">YTD total</div></div>
+    <div class="sbox"><div class="sl">AVG/SHOW</div><div class="sv sm w">${fmt(avgProfit)}</div><div class="ss">Avg profit</div></div>
+    <div class="sbox"><div class="sl">SHOWS DONE</div><div class="sv sm w">${done.length}</div><div class="ss">${planned.length} planned</div></div>
+  </div>`;
+
+  // ---- BOOTH COSTS — full season committed ----
+  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
+  const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
+  const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
+  const unpaidList=allUpcoming.filter(sh=>boothBalance(sh)>0.01);
+  html+=`<div class="sec-lbl">BOOTH COSTS — 2026 SEASON</div>
+  <div class="card">
+    <div class="g3" style="margin-bottom:${unpaidList.length?10:0}px">
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Committed</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
+    </div>
+    ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
+  </div>`;
+
+  // ---- OTHER EXPENSES (supplies, equipment, misc) ----
+  const otherExp=S.otherExpenses||[];
+  const recentOther=[...otherExp].reverse().slice(0,5);
+  html+=`<div class="sec-lbl">OTHER EXPENSES — SUPPLIES & MISC</div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${otherExp.length?10:0}px">
+      <div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
+        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(ytd.otherSpend)}</div>
+      </div>
+      <button class="btn btn-gold btn-sm" onclick="openOtherExpense()">+ Log Expense</button>
+    </div>
+    ${recentOther.length?`<div style="border-top:1px solid var(--border);padding-top:8px">${recentOther.map(e=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${e.note||e.category||'Expense'}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.category?'['+e.category+']':''}</span></div><div style="text-align:right"><span style="color:var(--red);font-weight:900">${fmt(e.amount)}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.date}</span></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--muted);text-align:center;padding:4px 0">No expenses logged yet. Track bags, paper towels, equipment, etc.</div>'}
+  </div>`;
+
+  // ---- MARK MARTONE PRODUCT DEBT ----
+  const debt=S.productDebt||{supplier:'',originalBalance:0,payments:[]};
+  const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
+  const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
+  const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
+  html+=`<div class="sec-lbl">PRODUCT DEBT — ${debt.supplier||'SUPPLIER'}</div>
+  <div class="card rb">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div><div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(debtBal)}</div></div>
+      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Total Paid</div><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(debtPaid)}</div></div>
+    </div>
+    <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
+    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
+    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
+  </div>`;
+
+  // ---- TAX + KEEP ----
+  html+=`<div class="sec-lbl">MONEY SPLIT</div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div>
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Clean Keep (after ${taxPct}% tax)</div>
+        <div style="font-size:28px;font-weight:900;color:var(--green)">${fmt(keep)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Set Aside for Tax</div>
+        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(ytd.taxRes)}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:4px;height:12px;border-radius:6px;overflow:hidden">
+      <div style="background:var(--green);flex:${keepPct};border-radius:6px 0 0 6px;min-width:4px"></div>
+      <div style="background:var(--red);flex:${100-keepPct};border-radius:0 6px 6px 0;min-width:${taxPct>0?4:0}px"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:var(--muted)">
+      <span>Keep: ${keepPct}%</span>
+      <span>Tax: ${taxPct}%</span>
+    </div>
+  </div>`;
+
+  // ---- PAYMENT BREAKDOWN ----
+  if(pmtGrand>0){
+    const pmtHasData=PMTS.filter(p=>(ytd.pmtTotals[p.key]||0)>0);
+    html+=`<div class="sec-lbl">PAYMENT BREAKDOWN (YTD)</div>
+    <div class="card">
+      <div class="hbar" style="height:14px;border-radius:7px">
+        ${pmtHasData.map(p=>{const pct=(ytd.pmtTotals[p.key]/pmtGrand)*100;return`<div class="hbar-seg" style="background:${p.color};flex:${pct};min-width:${pct>1?2:0}px"></div>`;}).join('')}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">
+        ${PMTS.map(p=>{const v=ytd.pmtTotals[p.key]||0;if(!v)return'';const pct=Math.round((v/pmtGrand)*100);return`<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span><span style="font-size:12px;font-weight:700">${p.label}: ${fmt(v)} <span style="color:var(--muted)">(${pct}%)</span></span></div>`;}).join('')}
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
+        <span style="font-size:12px;color:var(--muted)">💵 Cash</span>
+        <span style="font-size:15px;font-weight:900;color:var(--green)">${fmt(ytd.pmtTotals.cash||0)} (${pmtGrand>0?Math.round(((ytd.pmtTotals.cash||0)/pmtGrand)*100):0}% of total)</span>
+      </div>
+    </div>`;
+  }
+
+  // ---- INVENTORY SNAPSHOT ----
+  html+=`<div class="sec-row"><div class="sec-lbl" style="margin:0">MASTER INVENTORY</div><button class="btn btn-ghost btn-xs" onclick="go('stock')">Manage →</button></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+      <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Total Units</div><div style="font-size:24px;font-weight:900;color:var(--gold)">${invUnits}</div></div>
+      <div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:20px;font-weight:900">${fmt(invCost)}</div></div>
+      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(invRetail)}</div></div>
+    </div>
+    <table class="inv-table">
+      <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
+      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:9px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
+      <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${invUnits}</td><td style="font-weight:900">${fmt(invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(invRetail)}</td></tr>
+    </table>
+    ${lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Potential margin on current stock: <strong style="color:var(--green)">${fmt(invRetail-invCost)}</strong></div>
+  </div>`;
+
+  // ---- YTD UNITS SOLD BY SKU ----
+  if(ytd.totalUnits>0){
+    html+=`<div class="sec-lbl">UNITS SOLD YTD (BY PRODUCT)</div>
+    <div class="card">
+      ${SKUS.map(s=>{const u=ytd.units[s.key]||0;const pct=ytd.totalUnits>0?Math.round((u/ytd.totalUnits)*100):0;const rev=u*getP(s.key);return`
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:700">${s.emoji} ${s.name}</span>
+          <span style="font-size:13px;font-weight:900;color:var(--gold)">${u} units · ${fmt(rev)}</span>
+        </div>
+        <div class="pbar-wrap"><div class="pbar-fill" style="width:${pct}%;background:var(--gold)"></div></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${pct}% of total units sold</div>
+      </div>`;}).join('')}
+    </div>`;
+  }
+
+  // ---- MILEAGE DEDUCTION ----
+  if(ytd.miles>0){
+    html+=`<div class="sec-lbl">MILEAGE & TAX DEDUCTION</div>
+    <div class="card">
+      <div class="g3">
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(ytd.miles)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(mileDeduct)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
+    </div>`;
+  }
+
+  // ---- BEST SHOW THIS SEASON ----
+  if(bestShow){
+    const bt=calcShow(bestShow);
+    html+=`<div class="sec-lbl">BEST SHOW THIS SEASON</div>
+    <div class="card grb" style="cursor:pointer" onclick="go('show','${bestShow.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div style="font-size:18px;font-weight:900">🏆 ${bestShow.name}</div><div style="font-size:11px;color:var(--muted)">${bestShow.location||''} ${bestShow.dates?'· '+bestShow.dates.join(' → '):''}</div></div>
+        <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(bt.profit)}</div><div style="font-size:11px;color:var(--muted)">profit</div></div>
+      </div>
+      <div class="g4" style="margin-top:10px">
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(bt.gross)}</div><div style="font-size:9px;color:var(--muted)">GROSS</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900">${fmt(bt.cogs)}</div><div style="font-size:9px;color:var(--muted)">COGS</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900">${fmt(bt.expenses)}</div><div style="font-size:9px;color:var(--muted)">EXPENSES</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--red)">${fmt(bt.taxRes)}</div><div style="font-size:9px;color:var(--muted)">TAX RES.</div></div>
+      </div>
+    </div>`;
+  }
+
+  // ---- VS 2025 ----
+  html+=`<div class="sec-lbl">2026 vs 2025 COMPARISON</div>
+  <div class="card">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;text-align:center;margin-bottom:12px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;padding-bottom:6px">METRIC</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;padding-bottom:6px">2025 FINAL</div>
+      <div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;padding-bottom:6px">2026 YTD</div>
+    </div>
+    ${[
+      {lbl:'Gross',v25:PREV_YEAR.gross,v26:ytd.gross},
+      {lbl:'Net Profit',v25:PREV_YEAR.net,v26:ytd.profit},
+      {lbl:'Shows Done',v25:PREV_YEAR.shows,v26:done.length,isCnt:true},
+      {lbl:'Best Show',v25:PREV_YEAR.bestProfit,v26:bestProfit>-Infinity?bestProfit:0},
+    ].map(row=>{
+      const diff=row.v26-row.v25;
+      const better=diff>0;
+      return`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;padding:8px 0;border-top:1px solid var(--border);align-items:center;text-align:center">
+        <div style="font-size:13px;font-weight:700;text-align:left">${row.lbl}</div>
+        <div style="font-size:13px;color:var(--muted)">${row.isCnt?row.v25:fmt(row.v25)}</div>
+        <div style="font-size:13px;font-weight:900;color:var(--gold)">${row.isCnt?row.v26:fmt(row.v26)} <span style="font-size:10px;color:${better?'var(--green)':'var(--red)'}">${better?'▲':'▼'} ${row.isCnt?Math.abs(diff):fmt(Math.abs(diff))}</span></div>
+      </div>`;
+    }).join('')}
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">2025 best show: ${PREV_YEAR.bestShow} — ${fmt(PREV_YEAR.bestProfit)} profit</div>
+  </div>`;
+
+  // ---- UPCOMING SHOWS ----
+  if(planned.length){
+    html+=`<div class="sec-lbl">UPCOMING SHOWS (${planned.length})</div>`;
+    planned.forEach(sh=>{
+      const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+      const gasEst=sh.miles?(sh.miles*2*sh.numDays/S.settings.mpg*S.settings.gasPrice):0;
+      html+=`<div class="card" style="cursor:pointer" onclick="go('show','${sh.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:16px;font-weight:900">📅 ${sh.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${sh.location?sh.location+' · ':''}${dateStr} · ${sh.numDays} day${sh.numDays>1?'s':''}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:13px;font-weight:700">${fmt(sh.boothCost||0)} booth</div>
+            <div style="font-size:11px;color:var(--muted)">${sh.miles?sh.miles+' mi · est. '+fmt(gasEst)+' gas':''}</div>
+          </div>
+        </div>
+      </div>`;
+    });
+  }
+
+  // ---- RECENT COMPLETED ----
+  if(done.length){
+    html+=`<div class="sec-lbl">COMPLETED SHOWS</div>`;
+    done.slice(-5).reverse().forEach(sh=>{
+      const t=calcShow(sh);
+      const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+      const margin=t.gross>0?Math.round((t.profit/t.gross)*100):0;
+      html+=`<div class="card sd" style="cursor:pointer" onclick="go('show','${sh.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-weight:900;font-size:15px">${sh.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${sh.location?sh.location+' · ':''}${dateStr}</div>
+            <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
+              <span class="chip">${fmt(t.gross)} gross</span>
+              <span class="chip">${fmt(t.cogs)} COGS</span>
+              <span class="chip">${fmt(t.expenses)} exp</span>
+            </div>
+          </div>
+          <div style="text-align:right;margin-left:10px">
+            <div style="font-size:20px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div>
+            <div style="font-size:11px;color:var(--muted)">margin: ${margin}%</div>
+          </div>
+        </div>
+      </div>`;
+    });
+  }
+
+  // ---- QUICK ACTIONS ----
+  html+=`<div class="sec-lbl">QUICK ACTIONS</div>
+  <div class="g2" style="margin-bottom:8px">
+    <button class="btn btn-gold" onclick="showNewShowModal()">🎪 New Show</button>
+    <button class="btn btn-ghost" onclick="showSetAllInv()">📋 Update Stock</button>
+  </div>
+  <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
+  ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.1</div>
+  `;
+
+  pg('home').innerHTML=html;
+}
+
+// ===================================================
+// STOCK
+// ===================================================
+function rStock(){
+  const cost=calcInvCost(S.inventory);const retail=calcInvRetail(S.inventory);
+  pg('stock').innerHTML=`
+  <div class="sec-row"><div class="sec-title">📦 Master Inventory</div><button class="btn btn-gold btn-sm" onclick="showRestock()">+ Restock</button></div>
+  <div class="card g2" style="margin-bottom:12px">
+    <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:22px;font-weight:900">${fmt(cost)}</div></div>
+    <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(retail)}</div></div>
+  </div>
+  ${SKUS.map(s=>{
+    const q=S.inventory[s.key]||0;const val=q*s.cost;const margin=Math.round(((getP(s.key)-s.cost)/getP(s.key))*100);const low=q<5;
+    return`<div class="card ${low?'rb':''}">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:30px">${s.emoji}</span>
+        <div style="flex:1">
+          <div style="font-weight:900;font-size:15px">${s.name} ${low?'<span class="chip red" style="font-size:9px">LOW STOCK</span>':''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(s.cost)} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} on hand</div>
+          <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+            <button class="crb" onclick="adjInv('${s.key}',-1)">−</button>
+            <input class="cri" type="number" value="${q}" min="0" onchange="setInv('${s.key}',this.value)" onfocus="this.select()">
+            <button class="crb" onclick="adjInv('${s.key}',1)">+</button>
+          </div>
+        </div>
+        <div style="text-align:right"><div style="font-size:28px;font-weight:900;color:var(--gold)">${q}</div><div style="font-size:10px;color:var(--muted)">units</div></div>
+      </div>
+    </div>`;
+  }).join('')}
+  <div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>
+  <div style="height:10px"></div>`;
+}
+function adjInv(k,d){S.inventory[k]=Math.max(0,(S.inventory[k]||0)+d);saveS();toast(k+': '+(S.inventory[k])+' units');}
+function setInv(k,v){S.inventory[k]=Math.max(0,parseInt(v)||0);saveS();}
+function showRestock(){
+  mOpen(`<div class="mh"><div class="mt">+ Restock Inventory</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter units to ADD to current inventory.</div>
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (now: ${S.inventory[s.key]||0})</label><input class="fi" type="number" id="rst_${s.key}" placeholder="0" min="0"></div>`).join('')}
+  <button class="btn btn-gold btn-full" onclick="applyRestock()">Add to Inventory</button>`);
+}
+function applyRestock(){let n=0;SKUS.forEach(s=>{const v=parseInt($$('rst_'+s.key).value)||0;if(v>0){S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' units added!');}
+function showSetAllInv(){
+  mOpen(`<div class="mh"><div class="mt">📋 Set Exact Counts</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT count you have right now.</div>
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name}</label><input class="fi" type="number" id="sa_${s.key}" value="${S.inventory[s.key]||0}" min="0"></div>`).join('')}
+  <button class="btn btn-gold btn-full" onclick="applySetAll()">Save All Counts</button>`);
+}
+function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);if(!isNaN(v))S.inventory[s.key]=Math.max(0,v);});mClose();saveS();toast('Inventory updated!');}
+
+// ===================================================
+// SHOWS LIST
+// ===================================================
+function showSortKey(sh){
+  const mo={Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  if(sh.startDate&&/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))return sh.startDate;
+  if(sh.dates&&sh.dates[0]){const m=sh.dates[0].match(/(\w{3})\s+(\d+)/);if(m&&mo[m[1]])return '2026-'+mo[m[1]]+'-'+String(m[2]).padStart(2,'0');}
+  return sh.createdAt||'9999';
+}
+function rShows(){
+  const today=new Date().toISOString().split('T')[0];
+  const upcoming=[...S.shows].filter(s=>showSortKey(s)>=today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const past=[...S.shows].filter(s=>showSortKey(s)<today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const all=[...upcoming,...past];
+  let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
+  if(all.length){h+=all.map(s=>showCard(s)).join('');}
+  else{h+=`<div class="empty"><div class="ei">🎪</div>No shows yet. Tap + New Show to start.</div>`;}
+  h+=`<div style="height:10px"></div>`;
+  pg('shows').innerHTML=h;
+}
+function calcBreakEven(sh){
+  const mpg=S.settings.mpg||17.5;
+  const gp=S.settings.gasPrice||3.50;
+  const gas=(sh.miles||0)*2*(sh.numDays||1)/mpg*gp;
+  const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  return (sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
+}
+const SHOW_EXP_CATS=[
+  {key:'fuel',   label:'Fuel',         icon:'⛽'},
+  {key:'hotel',  label:'Hotel/Lodging', icon:'🏨'},
+  {key:'flight', label:'Flight',        icon:'✈️'},
+  {key:'car',    label:'Car Rental',    icon:'🚗'},
+  {key:'supply', label:'Supplies',      icon:'🧴'},
+  {key:'food',   label:'Food & Meals',  icon:'🍔'},
+  {key:'park',   label:'Parking',       icon:'🅿️'},
+  {key:'tax',    label:'Sales Tax',     icon:'🧾'},
+  {key:'other',  label:'Other',         icon:'💸'},
+];
+function showCard(sh){
+  const t=calcShow(sh);
+  const cls=sh.status==='active'?'sa':sh.status==='completed'?'sd':'';
+  const bdg=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED';
+  const dateStr=sh.dates?sh.dates.join(' → '):'';
+  const be=calcBreakEven(sh);
+  const beHit=sh.status==='completed'&&t.gross>=be;
+  return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
+    <span class="sc-badge ${sh.status}">${bdg}</span>
+    <div class="sc-name">${sh.name}</div>
+    <div class="sc-loc">${sh.location?sh.location+' · ':''}${dateStr}${sh.numDays>1?' · '+sh.numDays+' days':''}</div>
+    ${sh.status==='planned'?`
+    <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2)">
+      <div style="font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}</div>
+      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Break Even</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(be)}</div></div>
+    </div>`:``}
+    ${sh.status==='active'?`
+    <div class="sc-stats">
+      <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
+      <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
+      <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
+      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
+    </div>
+    <div style="margin-top:6px;padding:5px 8px;background:rgba(255,200,0,0.08);border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
+      <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
+      <span style="color:${t.gross>=be?'var(--green)':'var(--red)'};font-weight:700">${t.gross>=be?'✅ HIT':'⚠️ '+fmt(be-t.gross)+' to go'}</span>
+    </div>`:``}
+    ${sh.status==='completed'?`
+    <div class="sc-stats">
+      <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
+      <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
+      <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
+      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
+    </div>
+    <div style="margin-top:6px;padding:5px 8px;background:${beHit?'rgba(0,200,100,0.08)':'rgba(255,60,60,0.08)'};border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
+      <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
+      <span style="color:${beHit?'var(--green)':'var(--red)'};font-weight:700">${beHit?'✅ HIT — '+fmt(t.gross-be)+' over':'❌ MISSED by '+fmt(be-t.gross)}</span>
+    </div>`:``}
+    <div style="margin-top:8px;display:flex;gap:6px" onclick="event.stopPropagation()">
+      <button style="flex:1;font-size:11px;padding:5px 8px;background:rgba(100,149,237,0.12);border:1px solid rgba(100,149,237,0.3);color:#7EB8F7;border-radius:6px;cursor:pointer;font-weight:700" onclick="showLodgingModal('${sh.id}')">${sh.lodging?'🏨 '+fmt(sh.lodging):'🏨 Lodging'}</button>
+      <button style="flex:1;font-size:11px;padding:5px 8px;background:${(sh.showExpenses||[]).length?'rgba(255,165,0,0.15)':'rgba(255,165,0,0.07)'};border:1px solid rgba(255,165,0,0.3);color:#FFA500;border-radius:6px;cursor:pointer;font-weight:700" onclick="showShowExpModal('${sh.id}')">${(sh.showExpenses||[]).length?'💸 Exp: '+fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0)):'💸 Other Expenses'}</button>
+    </div>
+  </div>`;
+}
+function showLodgingModal(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  mOpen(`<div class="mh"><div class="mt">🏨 Lodging Expenses</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="padding:8px 0 14px;font-size:13px;color:var(--muted)">${sh.name}</div>
+  <div class="fg"><label class="fl">Total Lodging Cost ($)</label><input class="fi" type="number" id="lod_amt" placeholder="0.00" step="0.01" min="0" value="${sh.lodging||''}"></div>
+  <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:12px">Lodging is added to your Break Even calculation automatically.</div>
+  <button class="btn btn-gold btn-full" onclick="saveLodging('${id}')">Save Lodging</button>`);
+}
+function saveLodging(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  sh.lodging=parseFloat($$('lod_amt').value)||0;
+  saveS();mClose();toast('Lodging saved!');rShows();
+}
+
+// ===================================================
+// SHOW OTHER EXPENSES
+// ===================================================
+function showShowExpModal(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  if(!sh.showExpenses)sh.showExpenses=[];
+  const total=sh.showExpenses.reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const listHtml=sh.showExpenses.length?sh.showExpenses.map((e,i)=>{
+    const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};
+    return`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:18px">${cat.icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700">${cat.label}${e.desc?' — '+e.desc:''}</div>
+        <div style="font-size:11px;color:var(--muted)">${e.date||''}</div>
+      </div>
+      <div style="font-size:15px;font-weight:900;color:var(--red);margin-right:6px">-${fmt(e.amount)}</div>
+      <button style="background:var(--redbg);border:1px solid var(--redbd);color:var(--red);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;font-weight:700" onclick="delShowExp('${id}',${i})">✕</button>
+    </div>`;
+  }).join(''):`<div style="font-size:12px;color:var(--muted);padding:10px 0">No expenses logged yet.</div>`;
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">💸 Other Expenses</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${sh.name}</div>
+  ${total>0?`<div style="font-size:14px;font-weight:900;color:var(--red);margin-bottom:12px">Total: -${fmt(total)}</div>`:''}
+  ${listHtml}
+  <div style="margin-top:14px;padding-top:12px;border-top:2px solid var(--border)">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:10px">ADD EXPENSE</div>
+    <div class="fg"><label class="fl">Category</label>
+      <select class="fi" id="se_cat">
+        ${SHOW_EXP_CATS.map(c=>`<option value="${c.key}">${c.icon} ${c.label}</option>`).join('')}
+      </select>
+    </div>
+    <div class="g2" style="gap:10px">
+      <div class="fg"><label class="fl">Amount ($)</label><input class="fi" type="number" id="se_amt" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+      <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="se_date" value="${today}"></div>
+    </div>
+    <div class="fg"><label class="fl">Description (optional)</label><input class="fi" type="text" id="se_desc" placeholder="e.g. Round trip gas, Airbnb, supplies run"></div>
+    <button class="btn btn-gold btn-full" onclick="addShowExp('${id}')">Add Expense</button>
+  </div>`);
+}
+function addShowExp(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const amt=parseFloat($$('se_amt').value);
+  if(!amt||amt<=0){toast('Enter a valid amount');return;}
+  if(!sh.showExpenses)sh.showExpenses=[];
+  sh.showExpenses.push({
+    id:'se_'+Date.now(),
+    cat:$$('se_cat').value,
+    amount:amt,
+    desc:($$('se_desc').value||'').trim(),
+    date:$$('se_date').value||new Date().toISOString().split('T')[0]
+  });
+  saveS();toast('Expense added!');showShowExpModal(id);
+}
+function delShowExp(id,idx){
+  const sh=S.shows.find(s=>s.id===id);if(!sh||!sh.showExpenses)return;
+  if(!confirm('Delete this expense?'))return;
+  sh.showExpenses.splice(idx,1);
+  saveS();toast('Expense removed');showShowExpModal(id);
+}
+
+// ===================================================
+// P&L TAB
+// ===================================================
+function rPnL(){
+  const y=new Date().getFullYear();
+  const ytd=calcYTD();
+  const tax=S.settings.tax||0.28;
+  const taxAmt=Math.max(0,ytd.profit*tax);
+  const keep=Math.max(0,ytd.profit-taxAmt);
+  const qtr=taxAmt/4;
+  let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0;
+  S.shows.forEach(sh=>{
+    if(sh.status==='completed'){
+      boothTotal+=sh.boothCost||0;
+      showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+      lodgingTotal+=sh.lodging||0;
+      (sh.days||[]).forEach(d=>{if(d.expenses)dayExpTotal+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);});
+    } else {
+      boothTotal+=boothPaid(sh);
+      showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+      lodgingTotal+=sh.lodging||0;
+    }
+  });
+  const globalSupply=ytd.otherSpend||0;
+  const done=S.shows.filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
+  const catTotals={};
+  S.shows.forEach(sh=>{(sh.showExpenses||[]).forEach(e=>{catTotals[e.cat]=(catTotals[e.cat]||0)+(parseFloat(e.amount)||0);});});
+  const margin=ytd.gross>0?Math.round((ytd.profit/ytd.gross)*100):0;
+  let h=`<div class="sec-title" style="margin-bottom:12px">💰 P&amp;L — ${y}</div>`;
+  h+=`<div class="card gb" style="margin-bottom:12px">
+    <div class="g2" style="gap:8px;margin-bottom:10px">
+      <div class="sbox gb"><div class="sl">Gross Revenue</div><div class="sv">${fmt(ytd.gross)}</div></div>
+      <div class="sbox ${ytd.profit>=0?'grb':'rb'}"><div class="sl">Net Profit</div><div class="sv ${ytd.profit>=0?'g':'r'}">${fmt(ytd.profit)}</div></div>
+      <div class="sbox rb"><div class="sl">Total Expenses</div><div class="sv r sm">${fmt(ytd.expenses)}</div></div>
+      <div class="sbox"><div class="sl">Profit Margin</div><div class="sv w sm">${margin}%</div></div>
+    </div>
+    <div class="sr"><span class="srl">Product COGS</span><span class="srv red">-${fmt(ytd.cogs)}</span></div>
+    <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
+    <div class="sr"><span class="srl">Show Expenses (fuel, hotel, etc.)</span><span class="srv red">-${fmt(showExpTotal+lodgingTotal+dayExpTotal)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl">Supply Purchases</span><span class="srv red">-${fmt(globalSupply)}</span></div>
+  </div>`;
+  h+=`<div class="card rb" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧾 TAX RESERVE (${Math.round(tax*100)}%)</div>
+    <div class="g2" style="gap:8px;margin-bottom:10px">
+      <div class="sbox rb"><div class="sl">Set Aside Now</div><div class="sv r">${fmt(taxAmt)}</div></div>
+      <div class="sbox grb"><div class="sl">Keep (${100-Math.round(tax*100)}%)</div><div class="sv g">${fmt(keep)}</div></div>
+    </div>
+    <div class="sr"><span class="srl">Est. Quarterly Payment</span><span class="srv red">${fmt(qtr)}</span></div>
+    <div class="sr"><span class="srl">Q1 Due (Apr 15)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div class="sr"><span class="srl">Q2 Due (Jun 15)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div class="sr"><span class="srl">Q3 Due (Sep 15)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl">Q4 Due (Jan 15 next yr)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px">Estimates based on even splits. Change tax % in Setup.</div>
+  </div>`;
+  const catKeys=Object.keys(catTotals);
+  if(catKeys.length>0){
+    h+=`<div class="sec-lbl">SHOW EXPENSE BREAKDOWN</div><div class="card" style="margin-bottom:12px">`;
+    catKeys.sort((a,b)=>catTotals[b]-catTotals[a]).forEach(k=>{const cat=SHOW_EXP_CATS.find(c=>c.key===k)||{icon:'💸',label:'Other'};h+=`<div class="sr"><span class="srl">${cat.icon} ${cat.label}</span><span class="srv red">-${fmt(catTotals[k])}</span></div>`;});
+    h+=`<div class="sr" style="border-bottom:none"><span class="srl b">Total Show Expenses</span><span class="srv red lg">-${fmt(Object.values(catTotals).reduce((a,b)=>a+b,0))}</span></div></div>`;
+  }
+  if(done.length>0){
+    h+=`<div class="sec-lbl">COMPLETED SHOWS — P&amp;L</div>`;
+    done.forEach(sh=>{
+      const t=calcShow(sh);
+      const netColor=t.profit>=0?'var(--green)':'var(--red)';
+      const netSign=t.profit>=0?'+':'';
+      h+=`<div class="card" style="cursor:pointer;padding:10px 14px;margin-bottom:7px" onclick="go('show','${sh.id}',0)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800;font-size:14px">${sh.name}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${sh.dates?sh.dates[0]:''}${sh.dates&&sh.dates.length>1?' – '+sh.dates[sh.dates.length-1]:''} · ${sh.numDays} day${sh.numDays>1?'s':''}</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">
+              <span class="chip" style="font-size:9px">${fmt(t.gross)} gross</span>
+              <span class="chip" style="font-size:9px;background:var(--redbg);color:var(--red);border-color:var(--redbd)">${fmt(t.expenses)} exp</span>
+            </div>
+          </div>
+          <div style="text-align:right;margin-left:12px;flex-shrink:0">
+            <div style="font-size:18px;font-weight:900;color:${netColor}">${netSign}${fmt(t.profit)}</div>
+            <div style="font-size:9px;color:var(--muted)">${t.gross>0?Math.round((t.profit/t.gross)*100):0}% margin</div>
+          </div>
+        </div>
+      </div>`;
+    });
+  } else {
+    h+=`<div class="empty"><div class="ei">📊</div><div>Complete some shows to see P&amp;L here.</div></div>`;
+  }
+  h+=`<div style="height:10px"></div>`;
+  pg('pnl').innerHTML=h;
+}
+
+function showNewShowModal(){
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">🎪 New Show</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">Show Name *</label><input class="fi" id="ns_n" placeholder="e.g. Cranberry Fest 2026"></div>
+  <div class="fg"><label class="fl">Location / Venue</label><input class="fi" id="ns_l" placeholder="e.g. Warrens, WI"></div>
+  <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Start Date</label><input class="fi" type="date" id="ns_d" value="${today}"></div><div class="fg"><label class="fl"># of Days</label><input class="fi" type="number" id="ns_dy" value="1" min="1" max="10"></div></div>
+  <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ns_b" placeholder="0.00" step="0.01" min="0"></div><div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ns_m" placeholder="0" min="0"></div></div>
+  <button class="btn btn-gold btn-full" onclick="createShow()">Create Show</button>`);
+}
+function createShow(){
+  const name=($$('ns_n').value||'').trim();if(!name){toast('Enter a show name!');return;}
+  const nd=Math.max(1,parseInt($$('ns_dy').value)||1);
+  const ds=$$('ns_d').value;const bc=parseFloat($$('ns_b').value)||0;const mi=parseFloat($$('ns_m').value)||0;
+  const dates=[];
+  if(ds){const s=new Date(ds+'T12:00:00');for(let i=0;i<nd;i++){const d=new Date(s);d.setDate(d.getDate()+i);dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}}
+  const days=[];
+  for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},notes:'',status:'open'});
+  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',showExpenses:[],days,packedInventory:null,createdAt:new Date().toISOString()};
+  S.shows.push(sh);mClose();saveS();toast('Show created!');go('show',sh.id,0);
+}
+
+// ===================================================
+// SHOW DETAIL
+// ===================================================
+function rShow(){
+  if(!curShow)return;
+  const sh=S.shows.find(s=>s.id===curShow);if(!sh){go('shows');return;}
+  const t=calcShow(sh);
+  const bdgTxt=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ COMPLETED':'📅 PLANNED';
+  const dateStr=sh.dates?sh.dates.join(' → '):'';
+  const actBtn=sh.status==='planned'?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>`:'';
+  const dtabs=sh.days.map((d,i)=>{const ok=d.morningCount&&d.eveningCount&&calcPmt(d.payments)>0;return`<button class="dtab ${i===curDay?'on':''} ${ok&&i!==curDay?'done':''}" onclick="go('show','${sh.id}',${i})">${d.date}${ok?'✓':''}</button>`;}).join('');
+
+  pg('show').innerHTML=`
+  <span class="sc-badge ${sh.status}">${bdgTxt}</span>
+  <div style="font-size:22px;font-weight:900;margin:4px 0">${sh.name}</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${sh.location?sh.location+' · ':''}${dateStr}</div>
+  <div class="card g2" style="margin-bottom:12px">
+    <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
+    <div><div class="sl">Profit</div><div class="sv ${t.profit>=0?'g':'r'}">${fmt(t.profit)}</div></div>
+    <div><div class="sl">COGS</div><div class="sv sm w">${fmt(t.cogs)}</div></div>
+    <div><div class="sl">Expenses</div><div class="sv sm w">${fmt(t.expenses)}</div></div>
+    <div><div class="sl">Tax Reserve</div><div class="sv sm r" style="font-size:14px">${fmt(t.taxRes)}</div></div>
+    <div><div class="sl">Keep</div><div class="sv sm g" style="font-size:14px">${fmt(Math.max(0,t.profit-t.taxRes))}</div></div>
+  </div>
+  ${actBtn}
+  ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
+  <div class="card" style="margin-top:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">SHOW DETAILS</div>
+    <div class="sr"><span class="srl">Booth Cost</span><span class="srv">${fmt(sh.boothCost||0)}</span></div>
+    <div class="sr"><span class="srl">One-Way Miles</span><span class="srv">${sh.miles||0} mi</span></div>
+    <div class="sr"><span class="srl">Total Miles (${sh.numDays} days)</span><span class="srv">${(sh.miles||0)*2*sh.numDays} mi</span></div>
+    <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt((sh.miles||0)*2*sh.numDays*S.settings.irsRate)}</span></div>
+    <div class="sr"><span class="srl">Est. Gas Cost</span><span class="srv">${fmt(((sh.miles||0)*2*sh.numDays/S.settings.mpg)*S.settings.gasPrice)}</span></div>
+  </div>
+  <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700">💸 OTHER EXPENSES</div>
+      <button class="btn btn-xs" style="background:rgba(255,165,0,0.15);border:1px solid rgba(255,165,0,0.4);color:#FFA500" onclick="showShowExpModal('${sh.id}')">+ Add</button>
+    </div>
+    ${(sh.showExpenses||[]).length===0?`<div style="font-size:12px;color:var(--muted)">No expenses logged yet. Tap + Add to log fuel, hotel, flights, supplies, etc.</div>`:`
+    ${(sh.showExpenses||[]).map(e=>{const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};return`<div class="sr"><span class="srl">${cat.icon} ${cat.label}${e.desc?' — '+e.desc:''}</span><span class="srv red">-${fmt(e.amount)}</span></div>`;}).join('')}
+    <div class="sr" style="border-top:1px solid rgba(255,165,0,0.2);margin-top:4px"><span class="srl b">Total Other Expenses</span><span class="srv red lg">-${fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0))}</span></div>`}
+  </div>
+  <div style="height:10px"></div>`;
+}
+
+function rDay(sh,di){
+  const d=sh.days[di];if(!d)return'';
+  const haM=d.morningCount!==null,haE=d.eveningCount!==null,haP=calcPmt(d.payments)>0;
+  const isA=sh.status==='active';
+  let sold=null,rev=0,cogs=0;
+  if(haM&&haE){sold=calcSold(d.morningCount,d.eveningCount);rev=calcRev(sold);cogs=calcCOGS(sold);}
+  const pmtT=calcPmt(d.payments||{});
+  const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
+  const bpd=(sh.boothCost||0)/sh.numDays;
+  const profit=rev-cogs-dayExp-bpd;
+  const taxRes=Math.max(0,profit*S.settings.tax);
+  const soldChips=sold?SKUS.filter(s=>(sold[s.key]||0)>0).map(s=>`<span class="chip gold">${s.short}: <strong>${sold[s.key]}</strong></span>`).join(''):'';
+  let moneyCheck='';
+  if(haP&&rev>0){const diff=Math.abs(pmtT-rev);moneyCheck=diff>0.50?`<div class="wb ${pmtT>rev?'gold':'red'}" style="margin-top:8px">${pmtT>rev?'⚠️ Collected MORE than inventory shows. Check counts.':'⚠️ Missing '+fmt(rev-pmtT)+'. Collected less than inventory.'}</div>`:`<div class="wb green" style="margin-top:8px">✓ Money matches inventory. Good to go.</div>`;}
+  return`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:17px;font-weight:900">${d.date||'Day '+(di+1)}</div>
+      <span class="chip ${haM&&haE&&haP?'green':isA?'gold':''}">${haM&&haE&&haP?'✓ COMPLETE':isA?'IN PROGRESS':'—'}</span>
+    </div>
+    <!-- MORNING -->
+    <div class="step">
+      <div class="si ${haM?'done':'act'}">${haM?'✓':'🌅'}</div>
+      <div style="flex:1"><div class="sn">Morning Count</div>
+      ${haM?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">${SKUS.map(s=>`<span class="chip">${s.short}: <strong>${d.morningCount[s.key]||0}</strong></span>`).join('')}</div>`:'<div class="ss2">Count everything at your booth</div>'}
+      </div><button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'}" onclick="showCntModal('${sh.id}',${di},'morning')">${haM?'Edit':'Count'}</button>
+    </div>
+    <!-- EVENING -->
+    <div class="step">
+      <div class="si ${haE?'done':haM?'act':'pend'}">${haE?'✓':'🌙'}</div>
+      <div style="flex:1"><div class="sn">Evening Count</div>
+      ${haE?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">${SKUS.map(s=>`<span class="chip">${s.short}: <strong>${d.eveningCount[s.key]||0}</strong></span>`).join('')}</div>
+      ${soldChips?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:6px 0 3px">Sold today:</div><div style="display:flex;flex-wrap:wrap;gap:5px">${soldChips}</div>`:'<div class="ss2">Nothing sold</div>'}
+      ${rev>0?`<div style="margin-top:6px;font-size:14px;font-weight:900;color:var(--gold)">Revenue: ${fmt(rev)}</div>`:''}
+      `:'<div class="ss2">Count unsold items at close</div>'}
+      </div><button class="btn btn-xs ${haE?'btn-ghost':haM?'btn-gold':'btn-outline'}" onclick="showCntModal('${sh.id}',${di},'evening')" ${!haM?'disabled':''}>${haE?'Edit':'Count'}</button>
+    </div>
+    <!-- MONEY -->
+    <div class="step">
+      <div class="si ${haP?'done':haE?'act':'pend'}">${haP?'✓':'💰'}</div>
+      <div style="flex:1"><div class="sn">Money Count</div>
+      ${haP?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">${PMTS.filter(p=>(d.payments[p.key]||0)>0).map(p=>`<span class="chip">${p.label}: <strong>${fmt(d.payments[p.key])}</strong></span>`).join('')}</div>
+      <div style="font-size:14px;font-weight:900;color:var(--gold);margin-top:6px">Total: ${fmt(pmtT)}</div>
+      ${moneyCheck}`:'<div class="ss2">Count all cash and payment apps</div>'}
+      </div><button class="btn btn-xs ${haP?'btn-ghost':haE?'btn-gold':'btn-outline'}" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>
+    </div>
+    ${isA?`<div class="div"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Day Expenses</div><button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit</button></div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px">
+      <span class="chip">Gas: <strong>${fmt(d.expenses?.gas||0)}</strong></span>
+      <span class="chip">Food: <strong>${fmt(d.expenses?.food||0)}</strong></span>
+      <span class="chip">Hotel: <strong>${fmt(d.expenses?.hotel||0)}</strong></span>
+      <span class="chip">Other: <strong>${fmt(d.expenses?.other||0)}</strong></span>
+    </div>`:''}
+    ${haM&&haE?`<div class="div"></div>
+    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">DAY SUMMARY</div>
+    <div class="sr"><span class="srl">Gross Revenue</span><span class="srv gold">${fmt(rev)}</span></div>
+    <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv">-${fmt(cogs)}</span></div>
+    <div class="sr"><span class="srl">Day Expenses</span><span class="srv">-${fmt(dayExp)}</span></div>
+    <div class="sr"><span class="srl">Booth Share</span><span class="srv">-${fmt(bpd)}</span></div>
+    <div class="sr"><span class="srl b">Net Profit</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
+    <div class="sr"><span class="srl">Tax Reserve (${Math.round(S.settings.tax*100)}%)</span><span class="srv red">-${fmt(taxRes)}</span></div>
+    <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
+    ${isA?`<div class="div"></div><div class="fg"><label class="fl">Notes / What Worked</label><textarea class="fi" placeholder="Best sellers? Weather? What to restock?" onchange="saveDayNote('${sh.id}',${di},this.value)">${d.notes||''}</textarea></div>`
+    :d.notes?`<div class="div"></div><div style="font-size:12px;color:var(--muted)"><strong>Notes:</strong> ${d.notes}</div>`:''}
+  </div>`;
+}
+
+// ===================================================
+// SHOW WORKFLOW
+// ===================================================
+function showPackModal(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  mOpen(`<div class="mh"><div class="mt">🎒 Pack for ${sh.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many are you bringing? Can't exceed master inventory.</div>
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">In stock: ${S.inventory[s.key]||0}</div></div>
+  <div class="cr-c"><button class="crb" onclick="pkA('${s.key}',-1)">−</button><input class="cri" type="number" id="pk_${s.key}" value="0" min="0" max="${S.inventory[s.key]||0}"><button class="crb" onclick="pkA('${s.key}',1)">+</button></div></div>`).join('')}
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <button class="btn btn-ghost" style="flex:0 0 auto" onclick="pkAll('${shId}')">Take All</button>
+    <button class="btn btn-gold" style="flex:1" onclick="confirmPack('${shId}')">✅ Start Show</button>
+  </div>`);
+}
+function pkA(k,d){const i=$$('pk_'+k);const m=S.inventory[k]||0;i.value=Math.max(0,Math.min(m,parseInt(i.value||0)+d));}
+function pkAll(shId){SKUS.forEach(s=>{const i=$$('pk_'+s.key);if(i)i.value=S.inventory[s.key]||0;});}
+function confirmPack(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const pk={};SKUS.forEach(s=>pk[s.key]=Math.min(parseInt($$('pk_'+s.key).value)||0,S.inventory[s.key]||0));
+  SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)-pk[s.key]);
+  sh.status='active';sh.packedInventory={...pk};sh.days[0].morningCount={...pk};
+  mClose();saveS();toast('Show started! Inventory packed.');
+}
+function showCntModal(shId,di,type){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const d=sh.days[di];
+  let def=eSku();
+  if(type==='morning'){if(di>0&&sh.days[di-1].eveningCount)def={...sh.days[di-1].eveningCount};else if(d.morningCount)def={...d.morningCount};}
+  else{def=d.eveningCount?{...d.eveningCount}:(d.morningCount?{...d.morningCount}:eSku());}
+  mOpen(`<div class="mh"><div class="mt">${type==='morning'?'🌅 Morning Count':'🌙 Evening Count'}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${type==='morning'?'Count everything at your booth right now.':'Count all unsold items at end of day.'}</div>
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&d.morningCount?`<div class="cr-s">Started: ${d.morningCount[s.key]||0}</div>`:''}</div>
+  <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}')">Save ${type==='morning'?'Morning':'Evening'} Count</button>`);
+}
+function cA(id,d){const e=$$(id);e.value=Math.max(0,parseInt(e.value||0)+d);}
+function saveCount(shId,di,type){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const d=sh.days[di];const c={};SKUS.forEach(s=>c[s.key]=parseInt($$('c_'+s.key).value)||0);
+  if(type==='morning')d.morningCount=c;
+  else{d.eveningCount=c;if(di<sh.days.length-1&&!sh.days[di+1].morningCount)sh.days[di+1].morningCount={...c};}
+  mClose();saveS();toast(type==='morning'?'Morning count saved!':'Evening count saved! Tomorrow morning auto-filled.');
+}
+function showMoneyModal(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const d=sh.days[di];const pmts=d.payments||{};
+  let exp=0;if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);exp=calcRev(sold);}
+  mOpen(`<div class="mh"><div class="mt">💰 Money Count</div><button class="mx" onclick="mClose()">×</button></div>
+  ${exp>0?`<div class="wb gold" style="margin-bottom:12px">Expected from inventory sold: <strong>${fmt(exp)}</strong></div>`:''}
+  ${PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${pmts[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('')}
+  <div style="background:var(--card2);border-radius:9px;padding:12px;margin:10px 0;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-weight:900">TOTAL COLLECTED</span>
+    <span id="pmtTot" style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(calcPmt(pmts))}</span>
+  </div>
+  <button class="btn btn-gold btn-full" onclick="saveMoney('${shId}',${di})">Save Money Count</button>`);
+}
+function updPmt(){let t=0;PMTS.forEach(p=>t+=parseFloat($$('pm_'+p.key).value)||0);$$('pmtTot').textContent=fmt(t);}
+function saveMoney(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const p={};PMTS.forEach(x=>p[x.key]=parseFloat($$('pm_'+x.key).value)||0);
+  sh.days[di].payments=p;mClose();saveS();toast('Money count saved!');
+}
+function showExpModal(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const e=sh.days[di].expenses||{};
+  const aG=sh.miles?Math.round((sh.miles*2/S.settings.mpg)*S.settings.gasPrice*100)/100:0;
+  mOpen(`<div class="mh"><div class="mt">💸 Day Expenses</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">Gas ${aG>0?'(est. '+fmt(aG)+')':''}</label><input class="fi" type="number" id="ex_g" value="${e.gas||aG}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Food / Drinks</label><input class="fi" type="number" id="ex_f" value="${e.food||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Parking / Tolls</label><input class="fi" type="number" id="ex_p" value="${e.parking||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Hotel</label><input class="fi" type="number" id="ex_h" value="${e.hotel||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Other</label><input class="fi" type="number" id="ex_o" value="${e.other||0}" step="0.01" placeholder="0.00"></div>
+  <button class="btn btn-gold btn-full" onclick="saveExp('${shId}',${di})">Save Expenses</button>`);
+}
+function saveExp(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  sh.days[di].expenses={gas:parseFloat($$('ex_g').value)||0,food:parseFloat($$('ex_f').value)||0,parking:parseFloat($$('ex_p').value)||0,hotel:parseFloat($$('ex_h').value)||0,other:parseFloat($$('ex_o').value)||0};
+  mClose();saveS();toast('Expenses saved!');
+}
+function saveDayNote(shId,di,n){const sh=S.shows.find(s=>s.id===shId);if(!sh)return;sh.days[di].notes=n;saveS();}
+function showEndModal(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  let lE=null;for(let i=sh.days.length-1;i>=0;i--){if(sh.days[i].eveningCount){lE=sh.days[i].eveningCount;break;}}
+  const rU=lE?SKUS.reduce((t,s)=>t+(lE[s.key]||0),0):0;
+  const t=calcShow(sh);
+  mOpen(`<div class="mh"><div class="mt">🏁 Close Show</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="card" style="margin-bottom:12px">
+    <div style="font-weight:900;margin-bottom:10px">Final P&L: ${sh.name}</div>
+    <div class="sr"><span class="srl">Gross Sales</span><span class="srv gold">${fmt(t.gross)}</span></div>
+    <div class="sr"><span class="srl">COGS</span><span class="srv">-${fmt(t.cogs)}</span></div>
+    <div class="sr"><span class="srl">All Expenses</span><span class="srv">-${fmt(t.expenses)}</span></div>
+    <div class="sr"><span class="srl b">Net Profit</span><span class="srv lg ${t.profit>=0?'green':'red'}">${fmt(t.profit)}</span></div>
+    <div class="sr"><span class="srl">Tax Reserve</span><span class="srv red">-${fmt(t.taxRes)}</span></div>
+    <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,t.profit-t.taxRes))}</span></div>
+  </div>
+  <div class="wb gold" style="margin-bottom:12px"><strong>Returning to master inventory:</strong> ${rU} units<br>${lE?SKUS.filter(s=>(lE[s.key]||0)>0).map(s=>s.short+': '+lE[s.key]).join(' · '):'Sold out — nothing to return!'}</div>
+  <button class="btn btn-gold btn-full" onclick="endShow('${shId}')">✅ Confirm &amp; Return Inventory</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:9px" onclick="mClose()">Cancel</button>`);
+}
+function endShow(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  let lE=null;for(let i=sh.days.length-1;i>=0;i--){if(sh.days[i].eveningCount){lE=sh.days[i].eveningCount;break;}}
+  if(lE)SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)+(lE[s.key]||0));
+  sh.status='completed';sh.completedAt=new Date().toISOString();
+  mClose();saveS();toast('Show closed! Inventory returned.');
+}
+
+// ===================================================
+// PRODUCT DEBT (MARK MARTONE)
+// ===================================================
+function openDebtPmt(){
+  const debt=S.productDebt||{};
+  const paid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
+  const bal=Math.max(0,(debt.originalBalance||0)-paid);
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">💳 Log Payment to ${debt.supplier||'Supplier'}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="wb red" style="margin-bottom:12px">Current balance: <strong>${fmt(bal)}</strong></div>
+  <div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01"></div>
+  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="${today}"></div>
+  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. Venmo, check #1234"></div>
+  <button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ Save Payment</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+function saveDebtPmt(){
+  const amt=parseFloat($$('dpt_amt').value);
+  if(!amt||amt<=0){toast('Enter a valid amount');return;}
+  const date=$$('dpt_date').value||new Date().toISOString().split('T')[0];
+  const note=$$('dpt_note').value||'';
+  if(!S.productDebt)S.productDebt={supplier:'',originalBalance:0,payments:[]};
+  S.productDebt.payments.push({amount:amt,date,note});
+  mClose();saveS();toast('✅ Payment logged — '+fmt(amt));
+}
+
+// ===================================================
+// BOOTH PAYMENT
+// ===================================================
+function openBoothPmt(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const bal=boothBalance(sh);
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">💳 Pay Booth Fee — ${sh.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="wb red" style="margin-bottom:12px">Remaining balance: <strong>${fmt(bal)}</strong> of ${fmt(sh.boothCost||0)} total</div>
+  <div class="fg"><label class="fl">AMOUNT PAID ($)</label><input class="fi" type="number" id="bpt_amt" placeholder="${bal.toFixed(2)}" step="0.01" min="0.01" max="${bal.toFixed(2)}"></div>
+  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="bpt_date" value="${today}"></div>
+  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="bpt_note" placeholder="e.g. check, Venmo, cash"></div>
+  <button class="btn btn-green btn-full" onclick="saveBoothPmt('${shId}')">✅ Save Payment</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+function saveBoothPmt(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const amt=parseFloat($$('bpt_amt').value);
+  if(!amt||amt<=0){toast('Enter a valid amount');return;}
+  const date=$$('bpt_date').value||new Date().toISOString().split('T')[0];
+  const note=$$('bpt_note').value||'';
+  if(!sh.boothPayments)sh.boothPayments=[];
+  sh.boothPayments.push({amount:amt,date,note});
+  mClose();saveS();toast('✅ Booth payment logged — '+fmt(amt));
+}
+
+// ===================================================
+// OTHER EXPENSES (supplies, equipment, misc)
+// ===================================================
+function openOtherExpense(presetCategory){
+  const cat=presetCategory||'';
+  const today=new Date().toISOString().split('T')[0];
+  const categories=['Supplies','Equipment','Marketing','Travel','Other'];
+  mOpen(`<div class="mh"><div class="mt">💸 Log Expense</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Bags, paper towels, equipment, canopy, table — anything you spent money on.</div>
+  <div class="fg"><label class="fl">AMOUNT ($)</label><input class="fi" type="number" id="oe_amt" placeholder="0.00" step="0.01" min="0.01"></div>
+  <div class="fg"><label class="fl">WHAT WAS IT? (description)</label><input class="fi" id="oe_note" placeholder="e.g. Paper bags x2 packs, Costco run"></div>
+  <div class="fg"><label class="fl">CATEGORY</label><select class="fi" id="oe_cat">${categories.map(c=>`<option value="${c}"${c===cat?' selected':''}>${c}</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="oe_date" value="${today}"></div>
+  <button class="btn btn-gold btn-full" onclick="saveOtherExpense()">✅ Save Expense</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+function saveOtherExpense(){
+  const amt=parseFloat($$('oe_amt').value);
+  if(!amt||amt<=0){toast('Enter a valid amount');return;}
+  const note=$$('oe_note').value||'';
+  const category=$$('oe_cat').value||'Other';
+  const date=$$('oe_date').value||new Date().toISOString().split('T')[0];
+  if(!S.otherExpenses)S.otherExpenses=[];
+  S.otherExpenses.push({id:'oe_'+Date.now(),amount:amt,note,category,date});
+  mClose();saveS();toast('✅ Expense logged — '+fmt(amt));
+}
+
+// ===================================================
+// CALENDAR EXPORT (ICS)
+// ===================================================
+function exportCalICS(){
+  const shows=S.shows.filter(sh=>sh.startDate);
+  if(!shows.length){toast('No shows to export');return;}
+  const CRLF='\r\n';
+  let ics='BEGIN:VCALENDAR'+CRLF+'VERSION:2.0'+CRLF+'PRODID:-//Best Solution//Show Calendar//EN'+CRLF+'CALSCALE:GREGORIAN'+CRLF+'METHOD:PUBLISH'+CRLF;
+  shows.forEach(sh=>{
+    const s=new Date(sh.startDate+'T08:00:00');
+    const e=new Date(sh.startDate+'T08:00:00');
+    e.setDate(e.getDate()+(sh.numDays||1));
+    const fmt8=d=>d.toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
+    const stamp=fmt8(new Date());
+    const boothNote='Booth: '+(sh.boothCost?'$'+sh.boothCost.toFixed(2):'TBD')+' | '+( sh.numDays||1)+' day(s) | '+(sh.confirmed?'CONFIRMED':'PENDING');
+    ics+='BEGIN:VEVENT'+CRLF;
+    ics+='UID:'+(sh.id||('bs_'+Date.now()))+'@bestsolution'+CRLF;
+    ics+='DTSTAMP:'+stamp+CRLF;
+    ics+='DTSTART:'+fmt8(s)+CRLF;
+    ics+='DTEND:'+fmt8(e)+CRLF;
+    ics+='SUMMARY:'+(sh.confirmed?'✅ ':'⏳ ')+sh.name+CRLF;
+    ics+='LOCATION:'+(sh.location||'')+CRLF;
+    ics+='DESCRIPTION:'+boothNote+CRLF;
+    ics+='END:VEVENT'+CRLF;
+  });
+  ics+='END:VCALENDAR';
+  const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='BestSolution_Shows_2026.ics';
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},500);
+  toast('📅 Calendar file downloaded!');
+}
+
+// ===================================================
+// CALENDAR (month grid view)
+// ===================================================
+function calShift(delta){
+  if(!calMonth){const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};}
+  let m=calMonth.m+delta,y=calMonth.y;
+  if(m<0){m=11;y--;}
+  if(m>11){m=0;y++;}
+  calMonth={y,m};
+  rCalendar();
+}
+function calToday(){
+  const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};
+  rCalendar();
+}
+function rCalendar(){
+  if(!calMonth){const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};}
+  const y=calMonth.y,m=calMonth.m;
+  const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DOW=['S','M','T','W','T','F','S'];
+  const startDow=new Date(y,m,1).getDay();
+  const daysInMonth=new Date(y,m+1,0).getDate();
+  const todayStr=new Date().toISOString().split('T')[0];
+  const mKey=y+'-'+String(m+1).padStart(2,'0');
+  const dayMap={};
+  S.shows.forEach(sh=>{getShowDates(sh).forEach(ds=>{(dayMap[ds]=dayMap[ds]||[]).push(sh);});});
+  let monthDays=0;
+  Object.keys(dayMap).forEach(ds=>{if(ds.substring(0,7)===mKey)monthDays++;});
+  let h=`<div class="cal-hdr"><button class="cal-nav-btn" onclick="calShift(-1)">&lsaquo;</button><div class="cal-title">${MN[m]} ${y}</div><button class="cal-nav-btn" onclick="calShift(1)">&rsaquo;</button></div>`;
+  h+='<div class="cal-grid">';
+  DOW.forEach(d=>h+=`<div class="cal-dow">${d}</div>`);
+  for(let i=0;i<startDow;i++)h+='<div class="cal-cell blank"></div>';
+  for(let day=1;day<=daysInMonth;day++){
+    const ds=`${mKey}-${String(day).padStart(2,'0')}`;
+    const shows=dayMap[ds]||[];
+    let cls='cal-cell',onclick='';
+    if(ds===todayStr)cls+=' today';
+    if(shows.length){
+      let st='possible';
+      if(shows.some(s=>s.status==='completed'))st='completed';
+      else if(shows.some(s=>s.confirmed||s.status==='active'))st='confirmed';
+      cls+=` has-show ${st}`;
+      onclick=` onclick="go('show','${shows[0].id}')"`;
+    }
+    h+=`<div class="${cls}"${onclick}><div class="cal-num">${day}</div>`;
+    shows.slice(0,2).forEach(s=>{h+=`<div class="cal-show-pill">${s.name}</div>`;});
+    if(shows.length>2)h+=`<div class="cal-show-pill">+${shows.length-2} more</div>`;
+    h+='</div>';
+  }
+  h+='</div>';
+  h+=`<div class="cal-legend"><span><span class="cal-legend-dot" style="background:var(--green)"></span>Booked</span><span><span class="cal-legend-dot" style="background:var(--gold)"></span>Pending</span><span><span class="cal-legend-dot" style="background:rgba(0,210,106,0.55)"></span>Completed</span></div>`;
+  h+=`<div style="text-align:center;font-size:12px;color:var(--muted);margin-top:10px">${monthDays} show day${monthDays===1?'':'s'} in ${MN[m]}</div>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="calToday()">Jump to This Month</button>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="exportCalICS()">Export Shows to Calendar (.ics)</button>`;
+  pg('calendar').innerHTML=h;
+}
+
+
+// ===================================================
+// SUPPLIES TALLY
+// ===================================================
+function rSupplies(){
+  const sup=S.supplies||[];
+  const low=sup.filter(s=>s.qty<=s.low&&s.low>0);
+  const supSpend=(S.otherExpenses||[]).filter(e=>e.category==='Supplies').reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  let h='';
+  h+=`<div class="sec-row"><div class="sec-title">🧴 Supplies</div><button class="btn btn-gold btn-sm" onclick="openOtherExpense('Supplies')">💰 Log Purchase</button></div>
+  ${supSpend>0?`<div class="wb gold" style="margin-bottom:8px">YTD supply spend: <strong>${fmt(supSpend)}</strong></div>`:'<div style="font-size:12px;color:var(--muted);margin-bottom:8px">No supply purchases logged yet. Hit Log Purchase after a Target/Walmart run.</div>'}`;
+  if(low.length>0){
+    h+=`<div class="wb red" style="margin-bottom:10px">⚠️ ${low.length} item${low.length>1?'s':''} LOW — restock before next show</div>`;
+  } else if(sup.length>0){
+    h+=`<div class="wb green" style="margin-bottom:10px">✅ All supplies stocked</div>`;
+  }
+  h+='<div class="card">';
+  if(sup.length===0){
+    h+='<div class="empty"><div class="ei">📦</div><div>No items yet. Add below.</div></div>';
+  } else {
+    sup.forEach((s,i)=>{
+      const isLow=s.qty<=s.low&&s.low>0;
+      h+=`<div class="cr">
+        <div class="cr-i">
+          <div class="cr-n" style="${isLow?'color:var(--red)':''}">${s.name}</div>
+          <div class="cr-s">${isLow?'⚠️ LOW · ':''}<span style="color:var(--muted)">min ${s.low} ${s.unit||'ea'}</span></div>
+        </div>
+        <div class="cr-c">
+          <button class="crb" onclick="adjSup(${i},-1)">−</button>
+          <input class="cri" type="number" min="0" value="${s.qty}" style="${isLow?'border-color:var(--red);color:var(--red)':''}" onchange="setSup(${i},this.value)">
+          <button class="crb" onclick="adjSup(${i},1)">+</button>
+          <button onclick="delSup(${i})" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px;margin-left:2px" title="Delete">🗑</button>
+        </div>
+      </div>`;
+    });
+  }
+  h+='</div>';
+  h+=`<div class="sec-lbl">ADD ITEM</div>
+  <div class="card">
+    <div class="fg"><label class="fl">ITEM NAME</label><input class="fi" id="sup-new-name" placeholder="e.g. Paper Bags"></div>
+    <div class="g2" style="gap:8px;margin-bottom:11px">
+      <div><label class="fl">QUANTITY</label><input class="fi" id="sup-new-qty" type="number" min="0" placeholder="0" style="font-size:16px"></div>
+      <div><label class="fl">LOW ALERT AT</label><input class="fi" id="sup-new-low" type="number" min="0" placeholder="2" style="font-size:16px"></div>
+    </div>
+    <div class="fg"><label class="fl">UNIT (optional)</label><input class="fi" id="sup-new-unit" placeholder="ea, roll, pk, bag…"></div>
+    <button class="btn btn-gold btn-full" onclick="addSupItem()">+ ADD ITEM</button>
+  </div>`;
+  pg('supplies').innerHTML=h;
+}
+function adjSup(i,delta){
+  if(!S.supplies||!S.supplies[i])return;
+  S.supplies[i].qty=Math.max(0,(S.supplies[i].qty||0)+delta);
+  saveS();
+}
+function setSup(i,val){
+  if(!S.supplies||!S.supplies[i])return;
+  S.supplies[i].qty=Math.max(0,parseInt(val)||0);
+  saveS();
+}
+function delSup(i){
+  if(!S.supplies)return;
+  const name=S.supplies[i]?S.supplies[i].name:'item';
+  if(!confirm('Delete '+name+'?'))return;
+  S.supplies.splice(i,1);
+  saveS();
+}
+function addSupItem(){
+  const name=($$('sup-new-name').value||'').trim();
+  if(!name){toast('Enter an item name');return;}
+  const qty=parseInt($$('sup-new-qty').value)||0;
+  const low=parseInt($$('sup-new-low').value)||2;
+  const unit=($$('sup-new-unit').value||'').trim()||'ea';
+  if(!S.supplies)S.supplies=[];
+  S.supplies.push({id:'sup_'+Date.now(),name,qty,low,unit});
+  saveS();
+  toast('✅ '+name+' added');
+}
+
+// ===================================================
+// SETTINGS
+// ===================================================
+function rSettings(){
+  const s=S.settings;
+  const cloudCard=cloudCardHTML();
+  pg('settings').innerHTML=`
+  <div class="sec-title" style="margin-bottom:12px">⚙️ Settings</div>
+  ${cloudCard}
+  <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TAX & FEES</div>
+  <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
+  <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
+  </div>
+  <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TRAVEL (2017 Ram 1500)</div>
+  <div class="fg"><label class="fl">Gas Price ($/gallon)</label><input class="fi" type="number" id="st_g" value="${s.gasPrice}" step="0.01" onchange="setSt('gasPrice',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">MPG (default: 17.5)</label><input class="fi" type="number" id="st_m" value="${s.mpg}" step="0.1" onchange="setSt('mpg',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">IRS Mileage Rate ($/mile)</label><input class="fi" type="number" id="st_i" value="${s.irsRate}" step="0.01" onchange="setSt('irsRate',parseFloat(this.value))"></div>
+  </div>
+  <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
+  </div>
+  <div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">🎤 PASTE CLAUDE UPDATE</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Speak to Claude on your phone, copy the command it gives you, paste it here. Updates inventory instantly — no tapping required.</div>
+  <div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:var(--muted)">
+    <strong style="color:var(--gold)">Example — say to Claude:</strong><br>
+    <em>"Give me a Best Solution inventory update command for: 32oz=80, c5s=400, c5l=50"</em><br><br>
+    <strong style="color:var(--gold)">Claude gives you:</strong><br>
+    <code style="color:var(--text)">INV:32oz=80,c5s=400,c5l=50</code><br><br>
+    Paste that below and hit Apply.
+  </div>
+  <textarea class="fi" id="claudeCmd" style="min-height:60px;font-family:monospace;font-size:14px" placeholder="Paste Claude command here... e.g. INV:32oz=80,c5s=400"></textarea>
+  <button class="btn btn-gold btn-full" style="margin-top:8px" onclick="applyClaudeCmd()">⚡ Apply Command</button>
+  <div class="divider" style="margin:14px 0;height:1px;background:var(--border)"></div>
+  <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">SYNC BETWEEN DEVICES</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Export your data and import it on another device to keep everything in sync.</div>
+  <div class="g2" style="gap:8px">
+    <button class="btn btn-ghost btn-full" onclick="exportData()">📤 Export Data</button>
+    <button class="btn btn-ghost btn-full" onclick="importData()">📥 Import Data</button>
+  </div>
+  </div>
+  <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
+  <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC<br>Syncs automatically between devices, no login needed</div>
+  <div style="height:10px"></div>`;
+}
+function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
+function setP(k,v){if(!S.prices)S.prices={};S.prices[k]=v;saveS();}
+function applyClaudeCmd(){
+  const raw=($$('claudeCmd').value||'').trim().toUpperCase();
+  if(!raw){toast('Nothing to apply!');return;}
+  try{
+    // INVENTORY UPDATE: INV:32oz=80,c5s=400
+    if(raw.startsWith('INV:')){
+      const parts=raw.replace('INV:','').split(',');
+      let updated=0;
+      parts.forEach(p=>{
+        const [k,v]=p.split('=');
+        const key=k.trim().toLowerCase();
+        const val=parseInt(v);
+        const sku=SKUS.find(s=>s.key===key||s.short.toLowerCase()===key||s.name.toLowerCase().includes(key));
+        if(sku&&!isNaN(val)){S.inventory[sku.key]=Math.max(0,val);updated++;}
+      });
+      if(updated>0){$$('claudeCmd').value='';saveS();toast('✅ Updated '+updated+' inventory items!');go('stock');}
+      else{toast('No valid items found. Check the format.');}
+      return;
+    }
+    // ADD INVENTORY: ADD:32oz=10,c5s=50
+    if(raw.startsWith('ADD:')){
+      const parts=raw.replace('ADD:','').split(',');
+      let updated=0;
+      parts.forEach(p=>{
+        const [k,v]=p.split('=');
+        const key=k.trim().toLowerCase();
+        const val=parseInt(v);
+        const sku=SKUS.find(s=>s.key===key||s.short.toLowerCase()===key||s.name.toLowerCase().includes(key));
+        if(sku&&!isNaN(val)){S.inventory[sku.key]=(S.inventory[sku.key]||0)+val;updated++;}
+      });
+      if(updated>0){$$('claudeCmd').value='';saveS();toast('✅ Added stock to '+updated+' items!');go('stock');}
+      else{toast('No valid items found. Check the format.');}
+      return;
+    }
+    // SUBTRACT INVENTORY: SOLD:32oz=5,c5s=10
+    if(raw.startsWith('SOLD:')){
+      const parts=raw.replace('SOLD:','').split(',');
+      let updated=0;
+      parts.forEach(p=>{
+        const [k,v]=p.split('=');
+        const key=k.trim().toLowerCase();
+        const val=parseInt(v);
+        const sku=SKUS.find(s=>s.key===key||s.short.toLowerCase()===key||s.name.toLowerCase().includes(key));
+        if(sku&&!isNaN(val)){S.inventory[sku.key]=Math.max(0,(S.inventory[sku.key]||0)-val);updated++;}
+      });
+      if(updated>0){$$('claudeCmd').value='';saveS();toast('✅ Removed sold items from '+updated+' SKUs!');go('stock');}
+      else{toast('No valid items found. Check the format.');}
+      return;
+    }
+    toast('Unknown command. Start with INV:, ADD:, or SOLD:');
+  }catch(e){toast('Command error: '+e.message);}
+}
+function confirmReset(){if(confirm('RESET ALL DATA? Cannot be undone.')){localStorage.removeItem('dd_bs_blank_v6');S=JSON.parse(JSON.stringify(INIT));saveS();toast('Reset!');go('home');}}
+function exportData(){
+  try{
+    const txt=JSON.stringify(S,null,2);
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(()=>toast('✅ Data copied to clipboard! Paste it on your other device.'),()=>showExportFallback(txt));
+    } else {showExportFallback(txt);}
+  }catch(e){toast('Export failed: '+e.message);}
+}
+function showExportFallback(txt){
+  mOpen(`<div class="mh"><div class="mt">📤 Export Data</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Select all the text below and copy it. Then paste it into Import on your other device.</div>
+  <textarea class="fi" style="min-height:160px;font-size:11px;font-family:monospace" onclick="this.select()" readonly>${txt}</textarea>
+  <button class="btn btn-gold btn-full" style="margin-top:10px" onclick="this.previousElementSibling.select();document.execCommand('copy');toast('Copied!');mClose()">Copy All & Close</button>`);
+}
+function importData(){
+  mOpen(`<div class="mh"><div class="mt">📥 Import Data</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Paste your exported data here. THIS WILL REPLACE everything on this device.</div>
+  <textarea class="fi" id="importTxt" style="min-height:160px;font-size:11px;font-family:monospace" placeholder="Paste exported data here..."></textarea>
+  <button class="btn btn-red btn-full" style="margin-top:10px" onclick="applyImport()">Import & Replace Data</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+function applyImport(){
+  try{
+    const txt=($$('importTxt').value||'').trim();
+    if(!txt){toast('Nothing to import!');return;}
+    const parsed=JSON.parse(txt);
+    if(!parsed.inventory||!parsed.shows){toast('Invalid data. Make sure you copied the full export.');return;}
+    parsed.v=INIT.v;S=parsed;
+    localStorage.setItem('dd_bs_blank_v6',JSON.stringify(S));
+    mClose();renderCur();toast('✅ Data imported successfully!');go('home');
+  }catch(e){toast('Import failed. Invalid format.');}
+}
+
+// ===================================================
+// MODAL
+// ===================================================
+function mOpen(h){$$('mb').innerHTML=h;$$('mo').classList.add('on');document.body.style.overflow='hidden';}
+function mClose(){$$('mo').classList.remove('on');document.body.style.overflow='';}
+function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
+
+// ===================================================
+// CLOUD SYNC (Supabase) - no login, shared between devices
+// ===================================================
+const SB_URL='https://ylotwhvkrlobrpdmngul.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3R3aHZrcmxvYnJwZG1uZ3VsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1MDY0NDAsImV4cCI6MjA5MzA4MjQ0MH0.k_94GPfSLJpbib4pt3bSV6xTYM1hATninPHWU6iCHjI';
+const SHARED_ID='shared';
+let sb=null,_cloudTimer=null,_syncState='off';
+try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
+
+function syncLabel(st){return {off:'Connecting…',syncing:'Syncing…',synced:'Synced ✓',error:'Offline — will sync later'}[st]||'';}
+function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st);}
+
+async function cloudPull(){
+  if(!sb)return null;
+  try{
+    const{data,error}=await sb.from('blank_app_state').select('data').eq('id',SHARED_ID).maybeSingle();
+    if(error||!data)return null;
+    return data.data;
+  }catch(e){console.warn('cloudPull',e);return null;}
+}
+async function cloudPush(){
+  if(!sb)return;
+  if(!S._updatedAt)S._updatedAt=new Date().toISOString();
+  setSync('syncing');
+  try{
+    const{error}=await sb.from('blank_app_state').upsert({id:SHARED_ID,data:S,updated_at:new Date().toISOString()},{onConflict:'id'});
+    setSync(error?'error':'synced');
+    if(error)console.warn('cloudPush',error);
+  }catch(e){console.warn('cloudPush',e);setSync('error');}
+}
+function cloudQueuePush(){
+  if(!sb)return;
+  clearTimeout(_cloudTimer);
+  setSync('syncing');
+  _cloudTimer=setTimeout(cloudPush,800);
+}
+function backupLocal(){
+  try{
+    const cur=localStorage.getItem('dd_bs_blank_v7');if(!cur)return;
+    localStorage.setItem('dd_bs_blank_backup_'+Date.now(),cur);
+    const keys=Object.keys(localStorage).filter(k=>k.indexOf('dd_bs_blank_backup_')===0).sort();
+    while(keys.length>3)localStorage.removeItem(keys.shift());
+  }catch(e){console.warn('backupLocal',e);}
+}
+function looksUsed(st){
+  if(!st||!st.shows)return false;
+  if((st.otherExpenses||[]).length)return true;
+  return st.shows.some(sh=>sh.status==='completed'||(sh.days||[]).some(d=>d.morningCount!=null||d.eveningCount!=null));
+}
+function adoptCloud(cloud){
+  backupLocal();
+  cloud.v=INIT.v;
+  localStorage.setItem('dd_bs_blank_v7',JSON.stringify(cloud));
+  S=loadS();
+  renderCur();
+  setSync('synced');
+}
+async function cloudHydrate(){
+  const cloud=await cloudPull();
+  if(!cloud){await cloudPush();return;}
+  if(!cloud.inventory||!cloud.shows){await cloudPush();return;}
+  const localUsed=looksUsed(S),cloudUsed=looksUsed(cloud);
+  if(localUsed&&!cloudUsed){await cloudPush();return;}
+  if(cloudUsed&&!localUsed){adoptCloud(cloud);return;}
+  const localT=S._updatedAt||'',cloudT=cloud._updatedAt||'';
+  if(cloudT>localT)adoptCloud(cloud);
+  else if(localT>cloudT)await cloudPush();
+  else setSync('synced');
+}
+async function cloudInit(){
+  if(!sb)return;
+  setSync('syncing');
+  await cloudHydrate();
+}
+async function cloudSyncNow(){
+  if(!sb){toast('Sync unavailable - no connection');return;}
+  setSync('syncing');
+  await cloudHydrate();
+  rSettings();
+  toast('Synced');
+}
+function cloudCardHTML(){
+  return `<div class="card grb"><div style="font-size:10px;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:8px">CLOUD SYNC</div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">Syncs automatically between all devices. No login needed. Anything entered on one phone shows up on the other within seconds.</div><div id="cl_status" style="font-size:12px;color:var(--muted);margin-bottom:10px">${syncLabel(_syncState)||'Synced ✓'}</div><button class="btn btn-ghost btn-full" onclick="cloudSyncNow()">Sync Now</button></div>`;
+}
+
+// ===================================================
+// INIT
+// ===================================================
+try{
+  S=loadS();
+  go('home');
+  cloudInit();
+}catch(e){
+  document.body.style.cssText='background:#111;color:#fff;padding:20px;font-family:monospace';
+  document.body.innerHTML='<h2 style="color:red">APP ERROR</h2><pre style="font-size:14px;color:#ff6;white-space:pre-wrap">'+e.toString()+'\n\n'+e.stack+'</pre>';
+}
+</script>
+</body>
+</html>
