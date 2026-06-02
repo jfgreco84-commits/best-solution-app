@@ -775,6 +775,42 @@ function applyOneTimeUpdates(d){
     }
     d._applied['jun2026_reconcile_v1']=true;
   }
+
+  // Jun 2026 expense CORRECTION — remove DBW/office/personal items that don't belong in Best Solution P&L
+  if(!d._applied['jun2026_expense_fix_v2']){
+    if(!d.otherExpenses)d.otherExpenses=[];
+    // Remove anything that is DBW corporate, office supplies, or personal fishing gear
+    const BAD_IDS=new Set([
+      // DBW Marketing tools (Mailchimp, EZ Texting — run on North Shore spiff budget, not Best Solution)
+      'oe_mc_jan','oe_mc_feb','oe_mc_feb2','oe_mc_mar','oe_mc_apr','oe_mc_may',
+      'oe_ez_jan1','oe_ez_jan2','oe_ez_feb1','oe_ez_feb2','oe_ez_mar','oe_ez_apr','oe_ez_may',
+      // DBW office software (Microsoft 365, Klarna Printasti — DBW North Shore account)
+      'oe_ms_jan','oe_ms_feb','oe_ms_mar','oe_ms_apr','oe_ms_may',
+      'oe_pr_jan','oe_pr_feb','oe_pr_mar','oe_pr_apr',
+      // DBW CRM/sales tools (Apollo.io, ZOHO, JL Technical CRM migration)
+      'oe_ap_may','oe_zo_may','oe_jl_tech_may',
+      // Office/DBW supplies (toner, sheet protectors, binders, stapler, labels — not show-related)
+      'oe_amz_s1','oe_amz_s2','oe_amz_s3','oe_amz_s4','oe_amz_s5','oe_amz_s6',
+      'oe_amz_s7','oe_amz_s8','oe_amz_s9','oe_amz_s11',
+      // Personal (supplements, fishing boat equipment)
+      'oe_amz_s12','oe_amz_s19','oe_amz_s20','oe_amz_s24'
+    ]);
+    d.otherExpenses=d.otherExpenses.filter(e=>!BAD_IDS.has(e.id));
+
+    // Add legitimate items that were missed
+    const addIfMissing=[
+      // Claude.ai subscription — Dot Dynasty LLC BlueVine account (used for Best Solution planning/app)
+      {id:'oe_claude_may',date:'2026-05-29',amount:167.66,category:'Software',note:'Claude.ai subscription — Dot Dynasty LLC (BlueVine) — show planning & business tools'},
+      // USPS shipping costs from AMEX — likely shipping show-related items
+      {id:'oe_usps_may',date:'2026-05-26',amount:44,category:'Supplies',note:'USPS postage (May 26) — AMEX'},
+      {id:'oe_usps_apr',date:'2026-04-08',amount:6.08,category:'Supplies',note:'USPS postage (Apr 8) — AMEX'},
+    ];
+    addIfMissing.forEach(e=>{
+      if(!d.otherExpenses.find(x=>x.id===e.id))d.otherExpenses.push(e);
+    });
+
+    d._applied['jun2026_expense_fix_v2']=true;
+  }
 }
 
 function buildPlannedShow(e){
@@ -1238,7 +1274,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.1</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.2</div>
   `;
 
   pg('home').innerHTML=html;
