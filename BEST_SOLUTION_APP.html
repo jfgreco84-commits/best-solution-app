@@ -661,6 +661,120 @@ function applyOneTimeUpdates(d){
     }
     d._applied['cranberry_airbnb_2026']=true;
   }
+
+  // 2026 YTD Business Write-Off Expenses (seeded Jun 2026 from bank statement reconciliation)
+  if(!d._applied['ytd_biz_expenses_2026_v1']){
+    if(!d.otherExpenses)d.otherExpenses=[];
+    const seed=[
+      // --- MARKETING / SUBSCRIPTIONS ---
+      {id:'oe_mc_jan',   date:'2026-01-20', amount:79.13,  category:'Software/Marketing', note:'Mailchimp (Jan) — North Shore'},
+      {id:'oe_mc_feb',   date:'2026-02-23', amount:106.03, category:'Software/Marketing', note:'Mailchimp (Feb) — North Shore'},
+      {id:'oe_mc_feb2',  date:'2026-02-23', amount:36.93,  category:'Software/Marketing', note:'Mailchimp (Feb addl) — North Shore'},
+      {id:'oe_mc_mar',   date:'2026-03-26', amount:116.05, category:'Software/Marketing', note:'Mailchimp (Mar) — North Shore'},
+      {id:'oe_mc_apr',   date:'2026-04-20', amount:116.05, category:'Software/Marketing', note:'Mailchimp (Apr) — North Shore'},
+      {id:'oe_mc_may',   date:'2026-05-20', amount:116.05, category:'Software/Marketing', note:'Mailchimp (May) — North Shore'},
+      // --- EZ TEXTING ---
+      {id:'oe_ez_jan1',  date:'2026-01-08', amount:101.11, category:'Software/Marketing', note:'EZ Texting (Jan) — North Shore'},
+      {id:'oe_ez_jan2',  date:'2026-01-20', amount:32.16,  category:'Software/Marketing', note:'EZ Texting (Jan) — North Shore'},
+      {id:'oe_ez_feb1',  date:'2026-02-17', amount:31.65,  category:'Software/Marketing', note:'EZ Texting (Feb) — North Shore'},
+      {id:'oe_ez_feb2',  date:'2026-02-25', amount:56.34,  category:'Software/Marketing', note:'EZ Texting (Feb) — North Shore'},
+      {id:'oe_ez_mar',   date:'2026-03-17', amount:32.16,  category:'Software/Marketing', note:'EZ Texting (Mar) — North Shore'},
+      {id:'oe_ez_apr',   date:'2026-04-17', amount:31.65,  category:'Software/Marketing', note:'EZ Texting (Apr) — North Shore'},
+      {id:'oe_ez_may',   date:'2026-05-18', amount:31.65,  category:'Software/Marketing', note:'EZ Texting (May) — North Shore'},
+      // --- MICROSOFT 365 (Business) ---
+      {id:'oe_ms_jan',   date:'2026-01-09', amount:13.76,  category:'Software/Marketing', note:'Microsoft 365 (Jan) — North Shore'},
+      {id:'oe_ms_feb',   date:'2026-02-02', amount:13.76,  category:'Software/Marketing', note:'Microsoft 365 (Feb) — North Shore'},
+      {id:'oe_ms_mar',   date:'2026-03-03', amount:13.76,  category:'Software/Marketing', note:'Microsoft 365 (Mar) — North Shore'},
+      {id:'oe_ms_apr',   date:'2026-04-03', amount:13.76,  category:'Software/Marketing', note:'Microsoft 365 (Apr) — North Shore'},
+      {id:'oe_ms_may',   date:'2026-05-04', amount:13.76,  category:'Software/Marketing', note:'Microsoft 365 (May) — North Shore'},
+      // --- PRINT MARKETING (Klarna*Printasti) ---
+      {id:'oe_pr_jan',   date:'2026-01-31', amount:25.69,  category:'Software/Marketing', note:'Printasti print marketing (Jan) — North Shore'},
+      {id:'oe_pr_feb',   date:'2026-03-02', amount:25.69,  category:'Software/Marketing', note:'Printasti print marketing (Mar) — North Shore'},
+      {id:'oe_pr_mar',   date:'2026-03-31', amount:25.71,  category:'Software/Marketing', note:'Printasti print marketing (Mar) — North Shore'},
+      {id:'oe_pr_apr',   date:'2026-04-18', amount:25.71,  category:'Software/Marketing', note:'Printasti print marketing (Apr) — North Shore'},
+      // --- CANVA (Design tool) ---
+      {id:'oe_cv_mar',   date:'2026-03-03', amount:30.00,  category:'Software/Marketing', note:'Canva subscription (Mar) — PNC'},
+      {id:'oe_cv_apr',   date:'2026-04-02', amount:30.00,  category:'Software/Marketing', note:'Canva subscription (Apr) — PNC'},
+      {id:'oe_cv_may',   date:'2026-05-04', amount:30.00,  category:'Software/Marketing', note:'Canva subscription (May) — PNC'},
+      {id:'oe_cv_jun',   date:'2026-06-02', amount:30.00,  category:'Software/Marketing', note:'Canva subscription (Jun) — PNC (pending)'},
+      // --- APOLLO.IO (Sales/CRM tool) ---
+      {id:'oe_ap_may',   date:'2026-05-15', amount:59.00,  category:'Software/Marketing', note:'Apollo.io sales tool (May) — PNC'},
+      // --- ZOHO (Business software — BlueVine) ---
+      {id:'oe_zo_may',   date:'2026-05-04', amount:35.00,  category:'Software/Marketing', note:'ZOHO subscription (May) — BlueVine'},
+      // --- NEXT INSURANCE (Gen Liability) ---
+      {id:'oe_ni_jan',   date:'2026-01-05', amount:37.74,  category:'Insurance', note:'NEXT Insur Gen Liability (Jan) — BlueVine'},
+      {id:'oe_ni_feb',   date:'2026-02-05', amount:37.74,  category:'Insurance', note:'NEXT Insur Gen Liability (Feb) — BlueVine'},
+      {id:'oe_ni_apr',   date:'2026-04-09', amount:16.70,  category:'Insurance', note:'NEXT Insur Gen Liability (Apr) — BlueVine'},
+      {id:'oe_ni_may',   date:'2026-05-08', amount:71.33,  category:'Insurance', note:'NEXT Insur Gen Liability (May) — PNC'},
+      // --- SUPPLIES / HARDWARE ---
+      {id:'oe_mn_jan',   date:'2026-01-09', amount:31.62,  category:'Supplies', note:'Menards supplies (Jan) — BlueVine'},
+      {id:'oe_mn_feb',   date:'2026-02-03', amount:31.64,  category:'Supplies', note:'Menards supplies (Feb) — BlueVine'},
+      // --- FEDEX / PRINTING ---
+      {id:'oe_fx_apr',   date:'2026-04-07', amount:55.75,  category:'Supplies', note:'FedEx Office printing (Apr) — PNC'},
+      // --- AMAZON BUSINESS EQUIPMENT ---
+      {id:'oe_amz_lap',  date:'2026-04-27', amount:299.99, category:'Equipment', note:'Lenovo Laptop (Amazon Business) — Mastercard'},
+      {id:'oe_amz_mon',  date:'2026-04-05', amount:149.99, category:'Equipment', note:'Dell 32" Monitor (Amazon Business) — PNC'},
+      // --- AMAZON BUSINESS OFFICE SUPPLIES ---
+      {id:'oe_amz_s1',   date:'2026-05-02', amount:28.73,  category:'Supplies', note:'Sheet protectors 500pk (Amazon Business)'},
+      {id:'oe_amz_s2',   date:'2026-05-02', amount:30.63,  category:'Supplies', note:'Sheet protectors 500pk (Amazon Business)'},
+      {id:'oe_amz_s3',   date:'2026-05-02', amount:24.74,  category:'Supplies', note:'Binder sheet protectors w/tabs (Amazon Business)'},
+      {id:'oe_amz_s4',   date:'2026-04-29', amount:131.72, category:'Supplies', note:'Toner 4-pk + binder supplies (Amazon Business)'},
+      {id:'oe_amz_s5',   date:'2026-04-22', amount:94.99,  category:'Supplies', note:'Toner cartridge 4-pk (Amazon Business)'},
+      {id:'oe_amz_s6',   date:'2026-04-10', amount:88.99,  category:'Supplies', note:'Toner cartridge 4-pk (Amazon Business)'},
+      {id:'oe_amz_s7',   date:'2026-04-10', amount:41.73,  category:'Supplies', note:'Binder supplies (Amazon Business)'},
+      {id:'oe_amz_s8',   date:'2026-04-10', amount:24.69,  category:'Supplies', note:'Amazon Basics sheet protectors 500pk (Amazon Business)'},
+      {id:'oe_amz_s9',   date:'2026-04-28', amount:15.47,  category:'Supplies', note:'Small sticky labels (Amazon Business)'},
+      {id:'oe_amz_s10',  date:'2026-03-16', amount:113.42, category:'Supplies', note:'Marine wire, circuit breaker, connectors, heat shrink, binders (Amazon Business)'},
+      {id:'oe_amz_s11',  date:'2026-03-12', amount:28.21,  category:'Supplies', note:'Heavy duty stapler (Amazon Business)'},
+      {id:'oe_amz_s12',  date:'2026-03-12', amount:32.48,  category:'Supplies', note:'Testosterone/L-Citrulline supps — ⚠️ REVIEW: may not be deductible'},
+      {id:'oe_amz_s13',  date:'2026-02-23', amount:20.89,  category:'Supplies', note:'Acrylic sign holders 6pk (Amazon Business)'},
+      {id:'oe_amz_s14',  date:'2026-02-19', amount:48.99,  category:'Supplies', note:'Acrylic donation/ballot boxes 6pk (Amazon Business)'},
+      {id:'oe_amz_s15',  date:'2026-02-19', amount:33.22,  category:'Supplies', note:'Acrylic raffle drum (Amazon Business)'},
+      {id:'oe_amz_s16',  date:'2026-03-25', amount:17.49,  category:'Supplies', note:'Marine dry box (Amazon Business) — show trailer'},
+      {id:'oe_amz_s17',  date:'2026-03-25', amount:37.97,  category:'Supplies', note:'LED trailer lights submersible (Amazon Business)'},
+      {id:'oe_amz_s18',  date:'2026-03-24', amount:32.18,  category:'Supplies', note:'Battery cable lugs + crimping tool (Amazon Business)'},
+      {id:'oe_amz_s19',  date:'2026-03-23', amount:34.69,  category:'Supplies', note:'Humminbird power cable (Amazon Business)'},
+      {id:'oe_amz_s20',  date:'2026-03-22', amount:14.99,  category:'Supplies', note:'LED navigation lights for boat (Amazon Business)'},
+      {id:'oe_amz_s21',  date:'2026-03-21', amount:28.75,  category:'Supplies', note:'Battery crimper + cable lugs (Amazon Business)'},
+      {id:'oe_amz_s22',  date:'2026-03-20', amount:193.99, category:'Equipment', note:'LiFePO4 12V 100Ah battery (Amazon Business) — show trailer/boat'},
+      {id:'oe_amz_s23',  date:'2026-03-20', amount:39.24,  category:'Supplies', note:'NOCO battery charger (Amazon Business)'},
+      {id:'oe_amz_s24',  date:'2026-03-20', amount:36.34,  category:'Supplies', note:'Marine LED nav pole light (Amazon Business)'},
+    ];
+    seed.forEach(e=>{
+      if(!d.otherExpenses.find(x=>x.id===e.id))d.otherExpenses.push(e);
+    });
+    d._applied['ytd_biz_expenses_2026_v1']=true;
+  }
+
+  // Jun 2026 reconciliation additions
+  if(!d._applied['jun2026_reconcile_v1']){
+    if(!d.otherExpenses)d.otherExpenses=[];
+    // JL Technical — ACT to ZOHO database migration (May 1, North Shore)
+    if(!d.otherExpenses.find(x=>x.id==='oe_jl_tech_may'))
+      d.otherExpenses.push({id:'oe_jl_tech_may',date:'2026-05-01',amount:500,category:'IT Services',note:'JL Technical — ACT to ZOHO CRM database migration (North Shore)'});
+    // Waukesha County Fair — correct booth payment date
+    const wcf=(d.shows||[]).find(sh=>(sh.name||'').toLowerCase().includes('waukesha county'));
+    if(wcf){
+      wcf.boothCost=380;
+      wcf.confirmed=true;
+      if(!wcf.boothPayments)wcf.boothPayments=[];
+      // Fix date on any payment that has placeholder date, or add if missing
+      const existing=wcf.boothPayments.find(p=>p.amount===380);
+      if(existing){existing.date='2026-05-18';existing.note='Paid via PNC May 18';}
+      else{wcf.boothPayments.push({amount:380,date:'2026-05-18',note:'Paid via PNC May 18'});}
+    }
+    // Burgoo Fest 2026 — update booth cost to $156 actual, log payment, mark confirmed
+    const bf=(d.shows||[]).find(sh=>(sh.name||'').toLowerCase().includes('burgoo')&&(sh.startDate||'').startsWith('2026'));
+    if(bf){
+      bf.boothCost=156;
+      bf.confirmed=true;
+      if(!bf.boothPayments)bf.boothPayments=[];
+      const bfPaid=bf.boothPayments.find(p=>p.amount===156||p.amount===150);
+      if(bfPaid){bfPaid.amount=156;bfPaid.date='2026-05-15';bfPaid.note='Deposit paid via PNC May 15';}
+      else{bf.boothPayments.push({amount:156,date:'2026-05-15',note:'Deposit paid via PNC May 15'});}
+    }
+    d._applied['jun2026_reconcile_v1']=true;
+  }
 }
 
 function buildPlannedShow(e){
