@@ -231,6 +231,7 @@
   <div id="pg-show" class="pg"></div>
   <div id="pg-calendar" class="pg"></div>
   <div id="pg-supplies" class="pg"></div>
+  <div id="pg-pnl" class="pg"></div>
   <div id="pg-settings" class="pg"></div>
 </div>
 
@@ -241,6 +242,7 @@
   <button class="nb" id="nb-shows" onclick="go('shows')"><span class="ni">🎪</span>SHOWS</button>
   <button class="nb" id="nb-calendar" onclick="go('calendar')"><span class="ni">📅</span>CAL</button>
   <button class="nb" id="nb-supplies" onclick="go('supplies')"><span class="ni">🧴</span>SUPPLY</button>
+  <button class="nb" id="nb-pnl" onclick="go('pnl')"><span class="ni">💰</span>P&amp;L</button>
   <button class="nb" id="nb-settings" onclick="go('settings')"><span class="ni">⚙️</span>SETUP</button>
 </div>
 
@@ -271,6 +273,32 @@ const PMTS=[
   {key:'zelle',  label:'Zelle',   icon:'🟣',color:'#6D1ED4'}
 ];
 const PREV_YEAR={gross:26850,cogs:7874,booth:3400,otherExp:6057,net:9088,shows:20,bestShow:'Cranberry Fest',bestProfit:2632};
+// ===================================================
+// 2025 SEASON DATA (real numbers from Excel workbook)
+// Totals: Gross $26,850 | COGS $7,874 | Booth $3,400 | Other $6,057 | Net $9,088
+// ===================================================
+const SHOWS_2025=[
+  {name:'Mukwonago Maxwell',         dates:'Jun 7-8, 2025',     location:'Mukwonago, WI',           numDays:2, gross:1015, cogs:343,  booth:70,  otherExp:235,  net:297,   note:''},
+  {name:'7 Mile Fair',               dates:'Jul 12-13, 2025',   location:'Caledonia, WI',            numDays:2, gross:500,  cogs:179,  booth:60,  otherExp:585,  net:-418,  note:'Weather risk hurt this one.'},
+  {name:'7 Mile Fair',               dates:'Jul 19-20, 2025',   location:'Caledonia, WI',            numDays:2, gross:525,  cogs:184,  booth:50,  otherExp:360,  net:-89,   note:'Rained Day 1.'},
+  {name:'Mukwonago Maxwell',         dates:'Jul 19-20, 2025',   location:'Mukwonago, WI',           numDays:2, gross:475,  cogs:164,  booth:70,  otherExp:734,  net:-508,  note:'High other expenses hurt profit.'},
+  {name:'Racine County Fair',        dates:'Jul 23-27, 2025',   location:'Racine, WI',               numDays:5, gross:1285, cogs:439,  booth:505, otherExp:720,  net:-379,  note:'Booth rent too high relative to sales.'},
+  {name:'7 Mile Fair',               dates:'Aug 2-3, 2025',     location:'Caledonia, WI',            numDays:2, gross:430,  cogs:147,  booth:75,  otherExp:240,  net:-72,   note:'3rd appearance, still losing money.'},
+  {name:'Rustic Fox — N. Aurora',    dates:'Aug 8, 2025',       location:'North Aurora, IL',         numDays:1, gross:735,  cogs:246,  booth:100, otherExp:225,  net:115,   note:''},
+  {name:'Wheaton All Night Flea',    dates:'Aug 2025',          location:'Wheaton, IL',              numDays:1, gross:485,  cogs:164,  booth:185, otherExp:50,   net:86,    note:''},
+  {name:'St. Martins Fest',          dates:'Aug 30, 2025',      location:'Franklin, WI',             numDays:1, gross:2710, cogs:906,  booth:245, otherExp:292,  net:1267,  note:'One-day monster. Close to home. REPEAT every year.'},
+  {name:'Rustic Fox — Carol Stream', dates:'Sep 6, 2025',       location:'Carol Stream, IL',         numDays:1, gross:665,  cogs:225,  booth:100, otherExp:50,   net:290,   note:''},
+  {name:'Rustic Fox — Carol Stream', dates:'Sep 20, 2025',      location:'Carol Stream, IL',         numDays:1, gross:645,  cogs:212,  booth:100, otherExp:90,   net:244,   note:''},
+  {name:'Cranberry Fest',            dates:'Sep 25-27, 2025',   location:'Warrens, WI',              numDays:3, gross:5170, cogs:1718, booth:200, otherExp:620,  net:2632,  note:'BEST SHOW OF THE YEAR. Stock up HUGE. Budget hotel ~$300.'},
+  {name:'Rustic Fox — Carol Stream', dates:'Oct 4, 2025',       location:'Carol Stream, IL',         numDays:1, gross:570,  cogs:140,  booth:100, otherExp:70,   net:200,   note:''},
+  {name:'Burgoo Fest',               dates:'Oct 10-12, 2025',   location:'Utica, IL',                numDays:3, gross:2900, cogs:909,  booth:175, otherExp:1366, net:691,   note:'$1,366 other exp includes commission. Review commission structure next year.'},
+  {name:'Rustic Fox Oct Holiday Mkt',dates:'Oct 2025',          location:'Carol Stream / N. Aurora, IL', numDays:1, gross:1835, cogs:543, booth:400, otherExp:170, net:817, note:'High booth cost for Rustic Fox — confirmed strong holiday show.'},
+  {name:'Carol Stream Market',       dates:'Oct 18, 2025',      location:'Carol Stream, IL',         numDays:1, gross:460,  cogs:154,  booth:100, otherExp:75,   net:176,   note:''},
+  {name:'Sip & Sleigh — Carol Stream',dates:'Nov 7-9, 2025',    location:'Carol Stream, IL',         numDays:3, gross:1800, cogs:570,  booth:200, otherExp:115,  net:1140,  note:'Strong holiday show.'},
+  {name:'Sip & Sleigh — N. Aurora',  dates:'Nov 14-16, 2025',   location:'North Aurora, IL',         numDays:3, gross:2185, cogs:719,  booth:400, otherExp:255,  net:1256,  note:'SATURDAY was the big day. Strong show.'},
+  {name:'Baraboo Womens Market',     dates:'Nov 22, 2025',      location:'Baraboo, WI',              numDays:1, gross:1260, cogs:421,  booth:65,  otherExp:225,  net:660,   note:''},
+  {name:'Kris Kringle — Carol Stream',dates:'Dec 2025',         location:'Carol Stream, IL',         numDays:1, gross:1200, cogs:391,  booth:200, otherExp:115,  net:294,   note:''},
+];
 const DEFAULT_SUPPLIES=[
   {id:'sup_bags_lg',   name:'Bags (Large)',      qty:0,low:5, unit:'pk'},
   {id:'sup_bags_sm',   name:'Bags (Small)',       qty:0,low:5, unit:'pk'},
@@ -303,7 +331,7 @@ const INIT={
 // ===================================================
 // STATE
 // ===================================================
-let S,curPg='home',curShow=null,curDay=0,calMonth=null;
+let S,curPg='home',curShow=null,curDay=0,calMonth=null,shows2025Mode=false;
 
 function normalizeShowDates(d){
   // Always fix startDate from dates[] on every load — no flags, always reliable
@@ -571,6 +599,7 @@ function applyOneTimeUpdates(d){
       {n:'st. martins fair',                  s:'2026-08-30'},
       {n:'sip & sleigh — carol stream',       s:'2026-11-07'},
       {n:'kris kringle — north aurora',       s:'2026-12-12'},
+      {n:'pewaukee beach party',              s:'2026-06-26'},
     ];
     (d.shows||[]).forEach(sh=>{
       const f=allFix.find(x=>x.n===(sh.name||'').toLowerCase());
@@ -584,6 +613,45 @@ function applyOneTimeUpdates(d){
   d.settings=Object.assign({tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},d.settings);
   // Safety: ensure otherExpenses always present
   if(!d.otherExpenses)d.otherExpenses=[];
+
+  // Pewaukee Beach Party 2026 — Jun 26-27, $425 booth, cleanup Jun 28 by 6am
+  if(!d._applied['pewaukee_beach_20260626']){
+    d.shows=d.shows||[];
+    const exists=d.shows.find(sh=>(sh.name||'').toLowerCase().includes('pewaukee'));
+    if(!exists){
+      const sh=buildPlannedShow({
+        name:'Pewaukee Beach Party',
+        location:'Pewaukee, WI',
+        startDate:'2026-06-26',
+        numDays:2,
+        boothCost:425,
+        miles:32,
+        boothPayments:[],
+        confirmed:true
+      });
+      sh.confirmed=true;
+      sh.notes='Booth: $425. Cleanup by 6am June 28. 2 show days Jun 26-27.';
+      d.shows.push(sh);
+    }
+    d._applied['pewaukee_beach_20260626']=true;
+  }
+
+  // Seed showExpenses array on all shows that don't have it
+  if(!d._applied['show_expenses_seed_v1']){
+    (d.shows||[]).forEach(sh=>{if(!sh.showExpenses)sh.showExpenses=[];});
+    d._applied['show_expenses_seed_v1']=true;
+  }
+
+  // Cranberry Fest 2026 — Airbnb in Merrillan WI, $600, 34 min from show
+  if(!d._applied['cranberry_airbnb_2026']){
+    d.shows=d.shows||[];
+    const cf=d.shows.find(sh=>(sh.name||'').toLowerCase().includes('cranberry'));
+    if(cf){
+      if(!cf.lodging||cf.lodging<600)cf.lodging=600;
+      cf.lodgingNote='Airbnb in Merrillan, WI — 34 min drive to show. $600.';
+    }
+    d._applied['cranberry_airbnb_2026']=true;
+  }
 }
 
 function buildPlannedShow(e){
@@ -599,7 +667,7 @@ function buildPlannedShow(e){
     id:'sh_auto_'+e.name.replace(/[^a-z0-9]/gi,'').toLowerCase().substring(0,20)+'_'+Date.now()+Math.floor(Math.random()*1000),
     name:e.name,location:e.location||'',numDays:e.numDays,dates,startDate:e.startDate,
     boothCost:e.boothCost||0,boothPayments:e.boothPayments||[],miles:e.miles||0,
-    status:'planned',confirmed:true,
+    status:'planned',confirmed:true,showExpenses:[],
     days,packedInventory:null,createdAt:new Date().toISOString()
   };
 }
@@ -610,6 +678,7 @@ function renderCur(){
   else if(curPg==='shows')rShows();else if(curPg==='show')rShow();
   else if(curPg==='calendar')rCalendar();
   else if(curPg==='supplies')rSupplies();
+  else if(curPg==='pnl')rPnL();
   else if(curPg==='settings')rSettings();
   updateSupplyBadge();
 }
@@ -647,6 +716,10 @@ function calcShow(sh){
     if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);gross+=calcRev(sold);cogs+=calcCOGS(sold);}
     if(d.expenses)exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);
   });
+  // Show-level other expenses (fuel, flights, car rental, supplies, etc.)
+  exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  // Lodging (if logged separately from per-day expenses)
+  exp+=(sh.lodging||0);
   const profit=gross-cogs-exp;
   return{gross,cogs,expenses:exp,profit,taxRes:Math.max(0,profit*S.settings.tax)};
 }
@@ -664,8 +737,12 @@ function calcYTD(){
       if(d.payments)PMTS.forEach(p=>pmtTotals[p.key]+=(parseFloat(d.payments[p.key])||0));
     });
   });
-  // Non-completed shows: booth payments already made count as real money out
-  S.shows.filter(s=>s.status!=='completed').forEach(sh=>{expenses+=boothPaid(sh);});
+  // Non-completed shows: booth payments + any logged show expenses count as real money out
+  S.shows.filter(s=>s.status!=='completed').forEach(sh=>{
+    expenses+=boothPaid(sh);
+    expenses+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+    expenses+=(sh.lodging||0);
+  });
   // Other expenses: supplies, equipment, misc — logged separately
   const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   expenses+=otherSpend;
@@ -1103,22 +1180,157 @@ function showSortKey(sh){
   return sh.createdAt||'9999';
 }
 function rShows(){
+  if(shows2025Mode){r2025Season();return;}
   const today=new Date().toISOString().split('T')[0];
   const upcoming=[...S.shows].filter(s=>showSortKey(s)>=today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const past=[...S.shows].filter(s=>showSortKey(s)<today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const all=[...upcoming,...past];
-  let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
+  let h=`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="shows2025Mode=true;rShows()">📊 View 2025 Season Results</button>`;
   if(all.length){h+=all.map(s=>showCard(s)).join('');}
   else{h+=`<div class="empty"><div class="ei">🎪</div>No shows yet. Tap + New Show to start.</div>`;}
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
 }
+
+// ===================================================
+// 2025 SEASON VIEW
+// ===================================================
+function r2025Season(){
+  // Official totals from the 2025 Excel workbook
+  const TOT={gross:26850,cogs:7874,booth:3400,otherExp:6057,net:9088,shows:20};
+  const totalSpent=TOT.cogs+TOT.booth+TOT.otherExp;
+  const margin=Math.round((TOT.net/TOT.gross)*100);
+  const spentPct=Math.min(100,Math.round((totalSpent/TOT.gross)*100));
+  const netPct=Math.min(100,Math.round((TOT.net/TOT.gross)*100));
+
+  let h=``;
+  h+=`<div class="sec-row">
+    <div class="sec-title">📊 2025 Season</div>
+    <button class="btn btn-ghost btn-sm" onclick="shows2025Mode=false;rShows()">← 2026 Shows</button>
+  </div>`;
+
+  // Summary banner
+  h+=`<div class="card gb" style="margin-bottom:12px">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:10px">2025 SEASON TOTALS — ${TOT.shows} SHOWS</div>
+    <div class="g2" style="gap:8px;margin-bottom:10px">
+      <div class="sbox gb"><div class="sl">Total Revenue</div><div class="sv">${fmt(TOT.gross)}</div></div>
+      <div class="sbox grb"><div class="sl">Net Profit</div><div class="sv g">${fmt(TOT.net)}</div></div>
+      <div class="sbox rb"><div class="sl">Total COGS</div><div class="sv r sm">${fmt(TOT.cogs)}</div></div>
+      <div class="sbox rb"><div class="sl">Booth Fees</div><div class="sv r sm">${fmt(TOT.booth)}</div></div>
+      <div class="sbox rb"><div class="sl">Other Expenses</div><div class="sv r sm">${fmt(TOT.otherExp)}</div></div>
+      <div class="sbox"><div class="sl">Profit Margin</div><div class="sv w sm">${margin}%</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:5px;font-weight:700">WHERE EVERY DOLLAR WENT</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Revenue: ${fmt(TOT.gross)}</div>
+    <div class="pbar-wrap" style="height:12px;margin-bottom:3px">
+      <div class="pbar-fill" style="width:${Math.round((TOT.cogs/TOT.gross)*100)}%;background:#FF4545;float:left;height:100%"></div>
+      <div class="pbar-fill" style="width:${Math.round((TOT.booth/TOT.gross)*100)}%;background:#FFB300;float:left;height:100%"></div>
+      <div class="pbar-fill" style="width:${Math.round((TOT.otherExp/TOT.gross)*100)}%;background:#FF7043;float:left;height:100%"></div>
+      <div class="pbar-fill" style="width:${netPct}%;background:#00D26A;float:left;height:100%"></div>
+    </div>
+    <div style="display:flex;gap:10px;font-size:10px;margin-top:4px;flex-wrap:wrap">
+      <span><span style="display:inline-block;width:8px;height:8px;background:#FF4545;border-radius:2px;margin-right:3px"></span>COGS ${Math.round((TOT.cogs/TOT.gross)*100)}%</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#FFB300;border-radius:2px;margin-right:3px"></span>Booth ${Math.round((TOT.booth/TOT.gross)*100)}%</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#FF7043;border-radius:2px;margin-right:3px"></span>Other ${Math.round((TOT.otherExp/TOT.gross)*100)}%</span>
+      <span><span style="display:inline-block;width:8px;height:8px;background:#00D26A;border-radius:2px;margin-right:3px"></span>Profit ${netPct}%</span>
+    </div>
+    <div style="margin-top:10px;padding:8px;background:rgba(0,210,106,0.07);border-radius:8px;font-size:12px">
+      <strong style="color:var(--gold)">Best Show:</strong> Cranberry Fest — ${fmt(5170)} gross, <strong style="color:var(--green)">${fmt(2632)} profit</strong><br>
+      <strong style="color:var(--gold)">Gas (all shows):</strong> $1,230 est. &nbsp;|&nbsp; <strong style="color:var(--gold)">Profitable shows:</strong> 13 of 20
+    </div>
+  </div>`;
+
+  // Show list
+  h+=`<div class="sec-lbl">ALL 20 SHOWS — TAP FOR DETAIL</div>`;
+  SHOWS_2025.forEach((sh,i)=>{
+    const totalCost=sh.cogs+sh.booth+sh.otherExp;
+    const netColor=sh.net>=0?'var(--green)':'var(--red)';
+    const netSign=sh.net>=0?'+':'';
+    h+=`<div class="card" style="cursor:pointer;margin-bottom:8px" onclick="show2025Detail(${i})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:900;font-size:15px">${sh.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${sh.location} · ${sh.dates}</div>
+          <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
+            <span class="chip gold" style="font-size:10px">${fmt(sh.gross)} gross</span>
+            <span class="chip" style="font-size:10px;background:var(--redbg);border-color:var(--redbd);color:var(--red)">${fmt(totalCost)} spent</span>
+          </div>
+        </div>
+        <div style="text-align:right;margin-left:12px;flex-shrink:0">
+          <div style="font-size:20px;font-weight:900;color:${netColor}">${netSign}${fmt(sh.net)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${sh.numDays} day${sh.numDays>1?'s':''} · tap for detail</div>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  h+=`<div style="text-align:center;margin-top:8px;margin-bottom:4px;font-size:11px;color:var(--muted)">Data from 2025 Excel workbook. Official totals: Gross ${fmt(26850)}, Net ${fmt(9088)}.</div>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px;margin-bottom:14px" onclick="shows2025Mode=false;rShows()">← Back to 2026 Shows</button>`;
+  h+=`<div style="height:10px"></div>`;
+  pg('shows').innerHTML=h;
+}
+
+function show2025Detail(i){
+  const sh=SHOWS_2025[i];
+  if(!sh)return;
+  const totalCost=sh.cogs+sh.booth+sh.otherExp;
+  const margin=sh.gross>0?Math.round((sh.net/sh.gross)*100):0;
+  const netColor=sh.net>=0?'var(--green)':'var(--red)';
+  const netSign=sh.net>=0?'+':'';
+  const costPct=sh.gross>0?Math.min(100,Math.round((totalCost/sh.gross)*100)):100;
+  const profitPct=sh.gross>0&&sh.net>0?Math.min(100,Math.round((sh.net/sh.gross)*100)):0;
+  mOpen(`<div class="mh"><div class="mt">${sh.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:14px">${sh.location} · ${sh.dates} · ${sh.numDays} day${sh.numDays>1?'s':''}</div>
+
+  <div class="g2" style="gap:8px;margin-bottom:12px">
+    <div class="sbox gb"><div class="sl">Gross Revenue</div><div class="sv" style="font-size:22px">${fmt(sh.gross)}</div></div>
+    <div class="sbox" style="border-color:${sh.net>=0?'var(--greenbd)':'var(--redbd)'};background:${sh.net>=0?'var(--greenbg)':'var(--redbg)'}"><div class="sl">Net Profit</div><div class="sv" style="font-size:22px;color:${netColor}">${netSign}${fmt(sh.net)}</div></div>
+  </div>
+
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);margin-bottom:8px">COST BREAKDOWN vs REVENUE</div>
+  <div class="pbar-wrap" style="height:10px;margin-bottom:6px">
+    <div style="width:${Math.round((sh.cogs/sh.gross)*100)}%;background:#FF4545;height:100%;float:left"></div>
+    <div style="width:${Math.round((sh.booth/sh.gross)*100)}%;background:#FFB300;height:100%;float:left"></div>
+    <div style="width:${Math.round((sh.otherExp/sh.gross)*100)}%;background:#FF7043;height:100%;float:left"></div>
+    ${sh.net>0?`<div style="width:${profitPct}%;background:#00D26A;height:100%;float:left"></div>`:''}
+  </div>
+
+  <div class="card" style="margin-bottom:10px">
+    <div class="sr"><span class="srl">Gross Revenue</span><span class="srv gold">${fmt(sh.gross)}</span></div>
+    <div class="sr"><span class="srl">Product COGS</span><span class="srv red">- ${fmt(sh.cogs)}</span></div>
+    <div class="sr"><span class="srl">Booth / Vendor Fee</span><span class="srv red">- ${fmt(sh.booth)}</span></div>
+    <div class="sr"><span class="srl">Other Expenses (gas, food, etc.)</span><span class="srv red">- ${fmt(sh.otherExp)}</span></div>
+    <div class="sr"><span class="srl b">Total Spent</span><span class="srv red lg">- ${fmt(totalCost)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl b">NET PROFIT</span><span class="srv lg" style="color:${netColor}">${netSign}${fmt(sh.net)}</span></div>
+  </div>
+
+  <div class="g2" style="gap:8px;margin-bottom:12px">
+    <div class="sbox"><div class="sl">Margin</div><div class="sv ${sh.net>=0?'g':'r'} sm">${margin}%</div></div>
+    <div class="sbox"><div class="sl">Revenue vs Spent</div><div class="sv w sm" style="font-size:14px">${fmt(sh.gross)} / ${fmt(totalCost)}</div></div>
+  </div>
+
+  ${sh.note?`<div class="wb gold" style="margin-bottom:12px">💡 ${sh.note}</div>`:''}
+  <button class="btn btn-ghost btn-full" onclick="mClose()">Close</button>`);
+}
 function calcBreakEven(sh){
   const mpg=S.settings.mpg||17.5;
   const gp=S.settings.gasPrice||3.50;
   const gas=(sh.miles||0)*2*(sh.numDays||1)/mpg*gp;
-  return (sh.boothCost||0)+gas+(sh.lodging||0);
+  const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  return (sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
 }
+const SHOW_EXP_CATS=[
+  {key:'fuel',   label:'Fuel',         icon:'⛽'},
+  {key:'hotel',  label:'Hotel/Lodging', icon:'🏨'},
+  {key:'flight', label:'Flight',        icon:'✈️'},
+  {key:'car',    label:'Car Rental',    icon:'🚗'},
+  {key:'supply', label:'Supplies',      icon:'🧴'},
+  {key:'food',   label:'Food & Meals',  icon:'🍔'},
+  {key:'park',   label:'Parking',       icon:'🅿️'},
+  {key:'tax',    label:'Sales Tax',     icon:'🧾'},
+  {key:'other',  label:'Other',         icon:'💸'},
+];
 function showCard(sh){
   const t=calcShow(sh);
   const cls=sh.status==='active'?'sa':sh.status==='completed'?'sd':'';
@@ -1157,8 +1369,9 @@ function showCard(sh){
       <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
       <span style="color:${beHit?'var(--green)':'var(--red)'};font-weight:700">${beHit?'✅ HIT — '+fmt(t.gross-be)+' over':'❌ MISSED by '+fmt(be-t.gross)}</span>
     </div>`:``}
-    <div style="margin-top:8px;text-align:center" onclick="event.stopPropagation()">
-      <button style="font-size:11px;padding:5px 14px;background:rgba(100,149,237,0.12);border:1px solid rgba(100,149,237,0.3);color:#7EB8F7;border-radius:6px;cursor:pointer;font-weight:700" onclick="showLodgingModal('${sh.id}')">${sh.lodging?'🏨 Lodging: '+fmt(sh.lodging):'🏨 Lodging Expenses'}</button>
+    <div style="margin-top:8px;display:flex;gap:6px" onclick="event.stopPropagation()">
+      <button style="flex:1;font-size:11px;padding:5px 8px;background:rgba(100,149,237,0.12);border:1px solid rgba(100,149,237,0.3);color:#7EB8F7;border-radius:6px;cursor:pointer;font-weight:700" onclick="showLodgingModal('${sh.id}')">${sh.lodging?'🏨 '+fmt(sh.lodging):'🏨 Lodging'}</button>
+      <button style="flex:1;font-size:11px;padding:5px 8px;background:${(sh.showExpenses||[]).length?'rgba(255,165,0,0.15)':'rgba(255,165,0,0.07)'};border:1px solid rgba(255,165,0,0.3);color:#FFA500;border-radius:6px;cursor:pointer;font-weight:700" onclick="showShowExpModal('${sh.id}')">${(sh.showExpenses||[]).length?'💸 Exp: '+fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0)):'💸 Other Expenses'}</button>
     </div>
   </div>`;
 }
@@ -1166,15 +1379,209 @@ function showLodgingModal(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
   mOpen(`<div class="mh"><div class="mt">🏨 Lodging Expenses</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="padding:8px 0 14px;font-size:13px;color:var(--muted)">${sh.name}</div>
+  ${sh.lodgingNote?`<div class="wb gold" style="margin-bottom:12px">📍 ${sh.lodgingNote}</div>`:''}
   <div class="fg"><label class="fl">Total Lodging Cost ($)</label><input class="fi" type="number" id="lod_amt" placeholder="0.00" step="0.01" min="0" value="${sh.lodging||''}"></div>
+  <div class="fg"><label class="fl">Lodging Notes</label><input class="fi" type="text" id="lod_note" placeholder="e.g. Airbnb in Merrillan WI — 34 min drive" value="${sh.lodgingNote||''}"></div>
   <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:12px">Lodging is added to your Break Even calculation automatically.</div>
   <button class="btn btn-gold btn-full" onclick="saveLodging('${id}')">Save Lodging</button>`);
 }
 function saveLodging(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
   sh.lodging=parseFloat($$('lod_amt').value)||0;
+  const note=($$('lod_note').value||'').trim();
+  if(note)sh.lodgingNote=note;
   saveS();mClose();toast('Lodging saved!');rShows();
 }
+
+// ===================================================
+// SHOW OTHER EXPENSES
+// ===================================================
+function showShowExpModal(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  if(!sh.showExpenses)sh.showExpenses=[];
+  const total=sh.showExpenses.reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const listHtml=sh.showExpenses.length?sh.showExpenses.map((e,i)=>{
+    const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};
+    return`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:18px">${cat.icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700">${cat.label}${e.desc?' — '+e.desc:''}</div>
+        <div style="font-size:11px;color:var(--muted)">${e.date||''}</div>
+      </div>
+      <div style="font-size:15px;font-weight:900;color:var(--red);margin-right:6px">-${fmt(e.amount)}</div>
+      <button style="background:var(--redbg);border:1px solid var(--redbd);color:var(--red);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;font-weight:700" onclick="delShowExp('${id}',${i})">✕</button>
+    </div>`;
+  }).join(''):`<div style="font-size:12px;color:var(--muted);padding:10px 0">No expenses logged yet.</div>`;
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">💸 Other Expenses</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${sh.name}</div>
+  ${total>0?`<div style="font-size:14px;font-weight:900;color:var(--red);margin-bottom:12px">Total: -${fmt(total)}</div>`:''}
+  ${listHtml}
+  <div style="margin-top:14px;padding-top:12px;border-top:2px solid var(--border)">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:10px">ADD EXPENSE</div>
+    <div class="fg"><label class="fl">Category</label>
+      <select class="fi" id="se_cat">
+        ${SHOW_EXP_CATS.map(c=>`<option value="${c.key}">${c.icon} ${c.label}</option>`).join('')}
+      </select>
+    </div>
+    <div class="g2" style="gap:10px">
+      <div class="fg"><label class="fl">Amount ($)</label><input class="fi" type="number" id="se_amt" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+      <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="se_date" value="${today}"></div>
+    </div>
+    <div class="fg"><label class="fl">Description (optional)</label><input class="fi" type="text" id="se_desc" placeholder="e.g. Round trip gas, Airbnb, supplies run"></div>
+    <button class="btn btn-gold btn-full" onclick="addShowExp('${id}')">Add Expense</button>
+  </div>`);
+}
+function addShowExp(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const amt=parseFloat($$('se_amt').value);
+  if(!amt||amt<=0){toast('Enter a valid amount');return;}
+  if(!sh.showExpenses)sh.showExpenses=[];
+  sh.showExpenses.push({
+    id:'se_'+Date.now(),
+    cat:$$('se_cat').value,
+    amount:amt,
+    desc:($$('se_desc').value||'').trim(),
+    date:$$('se_date').value||new Date().toISOString().split('T')[0]
+  });
+  saveS();toast('Expense added!');showShowExpModal(id);
+}
+function delShowExp(id,idx){
+  const sh=S.shows.find(s=>s.id===id);if(!sh||!sh.showExpenses)return;
+  if(!confirm('Delete this expense?'))return;
+  sh.showExpenses.splice(idx,1);
+  saveS();toast('Expense removed');showShowExpModal(id);
+}
+
+// ===================================================
+// P&L TAB
+// ===================================================
+function rPnL(){
+  const y=new Date().getFullYear();
+  const ytd=calcYTD();
+  const tax=S.settings.tax||0.28;
+  const taxAmt=Math.max(0,ytd.profit*tax);
+  const keep=Math.max(0,ytd.profit-taxAmt);
+  const qtr=taxAmt/4;
+
+  // Expense breakdown
+  let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0;
+  S.shows.forEach(sh=>{
+    if(sh.status==='completed'){
+      boothTotal+=sh.boothCost||0;
+      showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+      lodgingTotal+=sh.lodging||0;
+      (sh.days||[]).forEach(d=>{if(d.expenses)dayExpTotal+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);});
+    } else {
+      boothTotal+=boothPaid(sh);
+      showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+      lodgingTotal+=sh.lodging||0;
+    }
+  });
+  const globalSupply=ytd.otherSpend||0;
+
+  // Show-by-show P&L for completed shows
+  const done=S.shows.filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
+
+  // Category expense breakdown across all shows
+  const catTotals={};
+  S.shows.forEach(sh=>{
+    (sh.showExpenses||[]).forEach(e=>{
+      catTotals[e.cat]=(catTotals[e.cat]||0)+(parseFloat(e.amount)||0);
+    });
+  });
+
+  const margin=ytd.gross>0?Math.round((ytd.profit/ytd.gross)*100):0;
+  const expenseTotal=ytd.expenses;
+
+  let h=`<div class="sec-title" style="margin-bottom:12px">💰 P&amp;L — ${y}</div>`;
+
+  // Top summary
+  h+=`<div class="card gb" style="margin-bottom:12px">
+    <div class="g2" style="gap:8px;margin-bottom:10px">
+      <div class="sbox gb"><div class="sl">Gross Revenue</div><div class="sv">${fmt(ytd.gross)}</div></div>
+      <div class="sbox ${ytd.profit>=0?'grb':'rb'}"><div class="sl">Net Profit</div><div class="sv ${ytd.profit>=0?'g':'r'}">${fmt(ytd.profit)}</div></div>
+      <div class="sbox rb"><div class="sl">Total Expenses</div><div class="sv r sm">${fmt(expenseTotal)}</div></div>
+      <div class="sbox"><div class="sl">Profit Margin</div><div class="sv w sm">${margin}%</div></div>
+    </div>
+    <div class="sr"><span class="srl">Product COGS</span><span class="srv red">-${fmt(ytd.cogs)}</span></div>
+    <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
+    <div class="sr"><span class="srl">Show Expenses (fuel, hotel, etc.)</span><span class="srv red">-${fmt(showExpTotal+lodgingTotal+dayExpTotal)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl">Supply Purchases</span><span class="srv red">-${fmt(globalSupply)}</span></div>
+  </div>`;
+
+  // Tax reserve card
+  h+=`<div class="card rb" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧾 TAX RESERVE (${Math.round(tax*100)}%)</div>
+    <div class="g2" style="gap:8px;margin-bottom:10px">
+      <div class="sbox rb"><div class="sl">Set Aside Now</div><div class="sv r">${fmt(taxAmt)}</div></div>
+      <div class="sbox grb"><div class="sl">Keep (${100-Math.round(tax*100)}%)</div><div class="sv g">${fmt(keep)}</div></div>
+    </div>
+    <div class="sr"><span class="srl">Estimated Quarterly Payment</span><span class="srv red">${fmt(qtr)}</span></div>
+    <div class="sr"><span class="srl">Q1 Due (Apr 15)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div class="sr"><span class="srl">Q2 Due (Jun 15)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div class="sr"><span class="srl">Q3 Due (Sep 15)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl">Q4 Due (Jan 15 next yr)</span><span class="srv">${fmt(qtr)}</span></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px">Quarterly amounts are estimates based on even splits of total reserve. Adjust based on when income was earned. Change tax % in Setup.</div>
+  </div>`;
+
+  // Show expense category breakdown (if any)
+  const catKeys=Object.keys(catTotals);
+  if(catKeys.length>0){
+    h+=`<div class="sec-lbl">SHOW EXPENSE BREAKDOWN</div>
+    <div class="card" style="margin-bottom:12px">`;
+    catKeys.sort((a,b)=>catTotals[b]-catTotals[a]).forEach(k=>{
+      const cat=SHOW_EXP_CATS.find(c=>c.key===k)||{icon:'💸',label:'Other'};
+      h+=`<div class="sr"><span class="srl">${cat.icon} ${cat.label}</span><span class="srv red">-${fmt(catTotals[k])}</span></div>`;
+    });
+    h+=`<div class="sr" style="border-bottom:none"><span class="srl b">Total Show Expenses</span><span class="srv red lg">-${fmt(Object.values(catTotals).reduce((a,b)=>a+b,0))}</span></div>`;
+    h+=`</div>`;
+  }
+
+  // Completed shows P&L table
+  if(done.length>0){
+    h+=`<div class="sec-lbl">COMPLETED SHOWS — P&amp;L</div>`;
+    done.forEach(sh=>{
+      const t=calcShow(sh);
+      const netColor=t.profit>=0?'var(--green)':'var(--red)';
+      const netSign=t.profit>=0?'+':'';
+      h+=`<div class="card" style="cursor:pointer;padding:10px 14px;margin-bottom:7px" onclick="go('show','${sh.id}',0)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800;font-size:14px">${sh.name}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${sh.dates?sh.dates[0]:''}${sh.dates&&sh.dates.length>1?' – '+sh.dates[sh.dates.length-1]:''} · ${sh.numDays} day${sh.numDays>1?'s':''}</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">
+              <span class="chip" style="font-size:9px">${fmt(t.gross)} gross</span>
+              <span class="chip" style="font-size:9px;background:var(--redbg);color:var(--red);border-color:var(--redbd)">${fmt(t.expenses)} exp</span>
+            </div>
+          </div>
+          <div style="text-align:right;margin-left:12px;flex-shrink:0">
+            <div style="font-size:18px;font-weight:900;color:${netColor}">${netSign}${fmt(t.profit)}</div>
+            <div style="font-size:9px;color:var(--muted)">${t.gross>0?Math.round((t.profit/t.gross)*100):0}% margin</div>
+          </div>
+        </div>
+      </div>`;
+    });
+  } else {
+    h+=`<div class="empty"><div class="ei">📊</div><div>Complete some shows to see P&amp;L here.</div></div>`;
+  }
+
+  // Compare to last year
+  if(PREV_YEAR&&PREV_YEAR.gross>0){
+    h+=`<div class="sec-lbl">VS 2025 (FINAL)</div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="g2" style="gap:8px">
+        <div class="sbox"><div class="sl">2025 Gross</div><div class="sv w sm">${fmt(PREV_YEAR.gross)}</div></div>
+        <div class="sbox grb"><div class="sl">2025 Net</div><div class="sv g sm">${fmt(PREV_YEAR.net)}</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:var(--muted)">2025: ${PREV_YEAR.shows} shows · Best show: ${PREV_YEAR.bestShow} (${fmt(PREV_YEAR.bestProfit)} profit)</div>
+    </div>`;
+  }
+
+  h+=`<div style="height:10px"></div>`;
+  pg('pnl').innerHTML=h;
+}
+
 function showNewShowModal(){
   const today=new Date().toISOString().split('T')[0];
   mOpen(`<div class="mh"><div class="mt">🎪 New Show</div><button class="mx" onclick="mClose()">×</button></div>
@@ -1192,7 +1599,7 @@ function createShow(){
   if(ds){const s=new Date(ds+'T12:00:00');for(let i=0;i<nd;i++){const d=new Date(s);d.setDate(d.getDate()+i);dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}}
   const days=[];
   for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},notes:'',status:'open'});
-  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',days,packedInventory:null,createdAt:new Date().toISOString()};
+  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',showExpenses:[],days,packedInventory:null,createdAt:new Date().toISOString()};
   S.shows.push(sh);mClose();saveS();toast('Show created!');go('show',sh.id,0);
 }
 
@@ -1229,6 +1636,15 @@ function rShow(){
     <div class="sr"><span class="srl">Total Miles (${sh.numDays} days)</span><span class="srv">${(sh.miles||0)*2*sh.numDays} mi</span></div>
     <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt((sh.miles||0)*2*sh.numDays*S.settings.irsRate)}</span></div>
     <div class="sr"><span class="srl">Est. Gas Cost</span><span class="srv">${fmt(((sh.miles||0)*2*sh.numDays/S.settings.mpg)*S.settings.gasPrice)}</span></div>
+  </div>
+  <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700">💸 OTHER EXPENSES</div>
+      <button class="btn btn-xs" style="background:rgba(255,165,0,0.15);border:1px solid rgba(255,165,0,0.4);color:#FFA500" onclick="showShowExpModal('${sh.id}')">+ Add</button>
+    </div>
+    ${(sh.showExpenses||[]).length===0?`<div style="font-size:12px;color:var(--muted)">No expenses logged yet. Tap + Add to log fuel, hotel, flights, supplies, etc.</div>`:`
+    ${(sh.showExpenses||[]).map(e=>{const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};return`<div class="sr"><span class="srl">${cat.icon} ${cat.label}${e.desc?' — '+e.desc:''}</span><span class="srv red">-${fmt(e.amount)}</span></div>`;}).join('')}
+    <div class="sr" style="border-top:1px solid rgba(255,165,0,0.2);margin-top:4px"><span class="srl b">Total Other Expenses</span><span class="srv red lg">-${fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0))}</span></div>`}
   </div>
   <div style="height:10px"></div>`;
 }
