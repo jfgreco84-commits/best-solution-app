@@ -486,6 +486,15 @@ function applyOneTimeUpdates(d){
     d._applied['debt_seed_v1']=true;
   }
 
+  // Mark Martone payment 3 — $250 on 5-29-26, balance now $9,250
+  if(!d._applied['debt_pmt3_20260529']){
+    if(!d.productDebt)d.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
+    const pmts=d.productDebt.payments||[];
+    if(!pmts.find(p=>p.date==='2026-05-29'))pmts.push({amount:250,date:'2026-05-29',note:'Payment 3'});
+    d.productDebt.payments=pmts;
+    d._applied['debt_pmt3_20260529']=true;
+  }
+
   // Rustic Fox Events — added 2026-05-18
   if(!d._applied['rustic_fox_20260518']){
     d.shows=d.shows||[];
