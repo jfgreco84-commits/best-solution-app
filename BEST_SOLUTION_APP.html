@@ -264,13 +264,17 @@ const SKUS=[
   {key:'c5s', name:'C5 Small (2oz)',    short:'C5-S',emoji:'✨',cost:3.00,defP:10.00},
   {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00}
 ];
+// Commission rates — Debit/Square = card rate (30%), Cash/Venmo/Zelle = cash rate (40%)
+const COMM_CARD = 0.30;
+const COMM_CASH = 0.40;
 const PMTS=[
-  {key:'cash',   label:'Cash',    icon:'💵',color:'#00D26A'},
-  {key:'square', label:'Square',  icon:'⬛',color:'#4FC3F7'},
-  {key:'venmo',  label:'Venmo',   icon:'🔵',color:'#3D95CE'},
-  {key:'paypal', label:'PayPal',  icon:'🅿️', color:'#003087'},
-  {key:'cashapp',label:'Cash App',icon:'💚',color:'#00D632'},
-  {key:'zelle',  label:'Zelle',   icon:'🟣',color:'#6D1ED4'}
+  {key:'cash',   label:'Cash',    icon:'💵',color:'#00D26A', commRate:COMM_CASH},
+  {key:'square', label:'Square',  icon:'⬛',color:'#4FC3F7', commRate:COMM_CARD},
+  {key:'debit',  label:'Debit',   icon:'💳',color:'#7EC8E3', commRate:COMM_CARD},
+  {key:'venmo',  label:'Venmo',   icon:'🔵',color:'#3D95CE', commRate:COMM_CASH},
+  {key:'zelle',  label:'Zelle',   icon:'🟣',color:'#6D1ED4', commRate:COMM_CASH},
+  {key:'cashapp',label:'Cash App',icon:'💚',color:'#00D632', commRate:COMM_CASH},
+  {key:'paypal', label:'PayPal',  icon:'🅿️', color:'#003087', commRate:COMM_CASH},
 ];
 const PREV_YEAR={gross:26850,cogs:7874,booth:3400,otherExp:6057,net:9088,shows:20,bestShow:'Cranberry Fest',bestProfit:2632};
 // ===================================================
@@ -323,6 +327,7 @@ const INIT={
   supplies:JSON.parse(JSON.stringify(DEFAULT_SUPPLIES)),
   productDebt:{supplier:'Mark Martone',originalBalance:10000,payments:[]},
   otherExpenses:[],
+  reps:[],  // global rep roster — reused across all shows
   prices:{'32oz':22.50,'16oz':15.00,'8oz':10.00,'2oz':5.00,'c5s':10.00,'c5l':20.00},
   settings:{tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},
   _applied:{}
@@ -776,6 +781,36 @@ function applyOneTimeUpdates(d){
     d._applied['jun2026_reconcile_v1']=true;
   }
 
+  // Seed global rep roster (Jun 2026)
+  if(!d._applied['reps_seed_v1']){
+    if(!d.reps)d.reps=[];
+    const DEFAULT_REPS=[
+      {id:'rep_justin', name:'Justin (Froggy)', isSelf:true,  active:true, payments:[]},
+      {id:'rep_batman', name:'Batman',           isSelf:false, active:true, payments:[]},
+      {id:'rep_isaiah', name:'Isaiah',           isSelf:false, active:true, payments:[]},
+      {id:'rep_anthony',name:'Anthony',          isSelf:false, active:true, payments:[]},
+      {id:'rep_alivia', name:'Alivia',           isSelf:false, active:true, payments:[]},
+      {id:'rep_tj',     name:'T.J.',             isSelf:false, active:true, payments:[]},
+      {id:'rep_snacks', name:'Snacks',           isSelf:false, active:true, payments:[]},
+      {id:'rep_ronnynb',name:'Ronny B',          isSelf:false, active:true, payments:[]},
+      {id:'rep_cutty',  name:'Cutty',            isSelf:false, active:true, payments:[]},
+    ];
+    DEFAULT_REPS.forEach(r=>{if(!d.reps.find(x=>x.id===r.id))d.reps.push(r);});
+    d._applied['reps_seed_v1']=true;
+  }
+  // Add repIds + repOnlyShow fields to all shows that don't have them
+  if(!d._applied['show_rep_fields_v1']){
+    (d.shows||[]).forEach(sh=>{
+      if(!sh.repIds)sh.repIds=[];
+      if(sh.repOnlyShow===undefined)sh.repOnlyShow=false;
+      (sh.days||[]).forEach(day=>{
+        if(!day.repSales)day.repSales=[];
+        if(!day.payments.debit)day.payments.debit=0;
+      });
+    });
+    d._applied['show_rep_fields_v1']=true;
+  }
+
   // Jun 2026 expense CORRECTION — remove DBW/office/personal items that don't belong in Best Solution P&L
   if(!d._applied['jun2026_expense_fix_v2']){
     if(!d.otherExpenses)d.otherExpenses=[];
@@ -821,11 +856,12 @@ function buildPlannedShow(e){
     dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
   }
   const days=[];
-  for(let i=0;i<e.numDays;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},notes:'',status:'open'});
+  for(let i=0;i<e.numDays;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'});
   return{
     id:'sh_auto_'+e.name.replace(/[^a-z0-9]/gi,'').toLowerCase().substring(0,20)+'_'+Date.now()+Math.floor(Math.random()*1000),
     name:e.name,location:e.location||'',numDays:e.numDays,dates,startDate:e.startDate,
     boothCost:e.boothCost||0,boothPayments:e.boothPayments||[],miles:e.miles||0,
+    repIds:[],repOnlyShow:false,
     status:'planned',confirmed:true,showExpenses:[],
     days,packedInventory:null,createdAt:new Date().toISOString()
   };
@@ -875,12 +911,13 @@ function calcShow(sh){
     if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);gross+=calcRev(sold);cogs+=calcCOGS(sold);}
     if(d.expenses)exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);
   });
-  // Show-level other expenses (fuel, flights, car rental, supplies, etc.)
   exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
-  // Lodging (if logged separately from per-day expenses)
   exp+=(sh.lodging||0);
+  // Rep commissions — paid reps only (owner's comp = net profit, not an expense)
+  const commissions=calcShowComm(sh);
+  exp+=commissions;
   const profit=gross-cogs-exp;
-  return{gross,cogs,expenses:exp,profit,taxRes:Math.max(0,profit*S.settings.tax)};
+  return{gross,cogs,expenses:exp,commissions,profit,taxRes:Math.max(0,profit*S.settings.tax)};
 }
 function calcYTD(){
   let gross=0,cogs=0,expenses=0,units={};
@@ -905,12 +942,14 @@ function calcYTD(){
   // Other expenses: supplies, equipment, misc — logged separately
   const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   expenses+=otherSpend;
-  // True profit = gross minus every dollar that left your pocket
+  // Total rep commissions earned across all shows
+  const totalCommissions=(S.shows||[]).reduce((t,sh)=>t+calcShowComm(sh),0);
+  // (commissions already included in expenses via calcShow/boothPaid paths above)
   const profit=gross-cogs-expenses;
   const taxRes=Math.max(0,profit*S.settings.tax);
   const keep=Math.max(0,profit-taxRes);
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
-  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,otherSpend};
+  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,otherSpend,totalCommissions};
 }
 function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
 function boothPaid(sh){return(sh.boothPayments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);}
@@ -929,6 +968,45 @@ function calcBoothTally(){
     }
   });
   return{paid,owed,due,confirmedCnt,possibleCnt,paidShows,unpaidShows};
+}
+// ===================================================
+// COMMISSION CALCULATIONS
+// ===================================================
+function calcRepSalesComm(rs){
+  // rs = { repId, square, debit, venmo, zelle, cashapp, paypal, cash }
+  // Owner (isSelf) earns nothing — profit is their compensation
+  const rep=(S.reps||[]).find(r=>r.id===rs.repId);
+  if(!rep||rep.isSelf)return 0;
+  const cardAmt=(parseFloat(rs.square)||0)+(parseFloat(rs.debit)||0);
+  const cashAmt=(parseFloat(rs.venmo)||0)+(parseFloat(rs.zelle)||0)+(parseFloat(rs.cashapp)||0)+(parseFloat(rs.paypal)||0)+(parseFloat(rs.cash)||0);
+  return cardAmt*COMM_CARD+cashAmt*COMM_CASH;
+}
+function calcDayComm(day){
+  return (day.repSales||[]).reduce((t,rs)=>t+calcRepSalesComm(rs),0);
+}
+function calcShowComm(sh){
+  return (sh.days||[]).reduce((t,d)=>t+calcDayComm(d),0);
+}
+function repEarned(repId,shId){
+  // Total commission EARNED by a rep for a specific show (or all shows if shId=null)
+  let total=0;
+  (S.shows||[]).forEach(sh=>{
+    if(shId&&sh.id!==shId)return;
+    (sh.days||[]).forEach(day=>{
+      (day.repSales||[]).forEach(rs=>{
+        if(rs.repId===repId)total+=calcRepSalesComm(rs);
+      });
+    });
+  });
+  return total;
+}
+function repPaid(repId,shId){
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return 0;
+  return (rep.payments||[]).filter(p=>!shId||p.showId===shId).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
+}
+function repOwed(repId,shId){return Math.max(0,repEarned(repId,shId)-repPaid(repId,shId));}
+function allRepsOwed(){
+  return (S.reps||[]).filter(r=>!r.isSelf&&r.active).map(r=>({rep:r,earned:repEarned(r.id),paid:repPaid(r.id),owed:repOwed(r.id)})).filter(x=>x.earned>0||x.owed>0);
 }
 function getShowDates(sh){
   // Returns array of YYYY-MM-DD dates this show occupies. Needs startDate.
@@ -1274,7 +1352,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.2</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.3</div>
   `;
 
   pg('home').innerHTML=html;
@@ -1477,7 +1555,18 @@ function calcBreakEven(sh){
   const gp=S.settings.gasPrice||3.50;
   const gas=(sh.miles||0)*2*(sh.numDays||1)/mpg*gp;
   const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
-  return (sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
+  const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
+  // If paid reps assigned, breakeven needs to account for commission variable cost
+  // Use algebraic solution: BE = fixedCosts / (1 - cogsRate - blendedCommRate)
+  // cogsRate ≈ 30% (2025 average), blendedCommRate = 60% cash × 40% + 40% card × 30% = 36%
+  const paidReps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&!r.isSelf&&r.active;}).length;
+  if(paidReps>0){
+    const cogsRate=0.30;
+    const blendedCommRate=0.60*COMM_CASH+0.40*COMM_CARD; // 0.36
+    const variableRate=cogsRate+blendedCommRate;
+    return variableRate>=1?fixedCosts*3:fixedCosts/(1-variableRate);
+  }
+  return fixedCosts/(1-0.30); // no reps: just account for COGS
 }
 const SHOW_EXP_CATS=[
   {key:'fuel',   label:'Fuel',         icon:'⛽'},
@@ -1667,6 +1756,21 @@ function rPnL(){
     <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
     <div class="sr"><span class="srl">Show Expenses (fuel, hotel, etc.)</span><span class="srv red">-${fmt(showExpTotal+lodgingTotal+dayExpTotal)}</span></div>
     <div class="sr" style="border-bottom:none"><span class="srl">Supply Purchases</span><span class="srv red">-${fmt(globalSupply)}</span></div>
+    ${ytd.totalCommissions>0?`<div class="sr" style="border-top:1px solid var(--redbd);margin-top:4px;border-bottom:none"><span class="srl">Rep Commissions (earned)</span><span class="srv red">-${fmt(ytd.totalCommissions)}</span></div>`:''}
+  </div>
+  ${(()=>{
+    const owedReps=allRepsOwed();if(!owedReps.length)return'';
+    const totalOwed=owedReps.reduce((t,x)=>t+x.owed,0);
+    return`<div class="sec-lbl">REP COMMISSIONS</div>
+    <div class="card ${totalOwed>0?'rb':'grb'}" style="margin-bottom:12px">
+      <div class="g2" style="gap:8px;margin-bottom:10px">
+        <div class="sbox rb"><div class="sl">Total Earned YTD</div><div class="sv r sm">${fmt(owedReps.reduce((t,x)=>t+x.earned,0))}</div></div>
+        <div class="sbox ${totalOwed>0?'rb':'grb'}"><div class="sl">Still Owed</div><div class="sv ${totalOwed>0?'r':'g'} sm">${fmt(totalOwed)}</div></div>
+      </div>
+      ${owedReps.map(x=>`<div class="sr"><span class="srl">${x.rep.name}</span><div style="text-align:right"><div style="font-size:12px;color:var(--red)">Earned ${fmt(x.earned)}</div>${x.owed>0?`<div style="font-size:11px;color:var(--gold);font-weight:800">Owed ${fmt(x.owed)}</div>`:`<div style="font-size:11px;color:var(--green)">✓ Paid</div>`}</div></div>`).join('')}
+      <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="go('settings')">Manage Rep Payments → Setup Tab</button>
+    </div>`;
+  })()} <div style="display:none" id="pnl-after-comm"></div>`;
   </div>`;
 
   // Tax reserve card
@@ -1757,8 +1861,8 @@ function createShow(){
   const dates=[];
   if(ds){const s=new Date(ds+'T12:00:00');for(let i=0;i<nd;i++){const d=new Date(s);d.setDate(d.getDate()+i);dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}}
   const days=[];
-  for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},notes:'',status:'open'});
-  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',showExpenses:[],days,packedInventory:null,createdAt:new Date().toISOString()};
+  for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'});
+  const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',showExpenses:[],repIds:[],repOnlyShow:false,days,packedInventory:null,createdAt:new Date().toISOString()};
   S.shows.push(sh);mClose();saveS();toast('Show created!');go('show',sh.id,0);
 }
 
@@ -1805,6 +1909,36 @@ function rShow(){
     ${(sh.showExpenses||[]).map(e=>{const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};return`<div class="sr"><span class="srl">${cat.icon} ${cat.label}${e.desc?' — '+e.desc:''}</span><span class="srv red">-${fmt(e.amount)}</span></div>`;}).join('')}
     <div class="sr" style="border-top:1px solid rgba(255,165,0,0.2);margin-top:4px"><span class="srl b">Total Other Expenses</span><span class="srv red lg">-${fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0))}</span></div>`}
   </div>
+  ${(()=>{
+    const allReps=(S.reps||[]).filter(r=>r.active);
+    const assignedIds=sh.repIds||[];
+    const assigned=assignedIds.map(id=>allReps.find(r=>r.id===id)).filter(Boolean);
+    const showComm=calcShowComm(sh);
+    return`<div class="card" style="margin-top:10px;border-color:rgba(79,195,247,0.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700">👥 Reps This Show</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${sh.repOnlyShow?'<span style="font-size:10px;color:var(--gold);font-weight:700">REP-ONLY SHOW</span>':''}
+          <button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAssignReps('${sh.id}')">✏️ Edit</button>
+        </div>
+      </div>
+      ${assigned.length===0?`<div style="font-size:12px;color:var(--muted)">No reps assigned. Tap Edit to assign reps to this show.</div>`:`
+      ${assigned.map(r=>{
+        const earned=repEarned(r.id,sh.id);
+        const paid=repPaid(r.id,sh.id);
+        const owed=Math.max(0,earned-paid);
+        return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <span style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</span>
+          <div style="text-align:right">
+            ${earned>0?`<div style="color:var(--red)">Earned: ${fmt(earned)}</div>
+            ${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}`:'<div style="color:var(--muted)">No sales yet</div>'}
+          </div>
+        </div>`;}).join('')}
+      ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800">
+        <span>Total Commissions</span><span style="color:var(--red)">-${fmt(showComm)}</span>
+      </div>`:''}`}
+    </div>`;
+  })()}
   <div style="height:10px"></div>`;
 }
 
@@ -1817,7 +1951,8 @@ function rDay(sh,di){
   const pmtT=calcPmt(d.payments||{});
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
-  const profit=rev-cogs-dayExp-bpd;
+  const dayComm=calcDayComm(d);
+  const profit=rev-cogs-dayExp-bpd-dayComm;
   const taxRes=Math.max(0,profit*S.settings.tax);
   const soldChips=sold?SKUS.filter(s=>(sold[s.key]||0)>0).map(s=>`<span class="chip gold">${s.short}: <strong>${sold[s.key]}</strong></span>`).join(''):'';
   let moneyCheck='';
@@ -1867,11 +2002,39 @@ function rDay(sh,di){
     <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv">-${fmt(cogs)}</span></div>
     <div class="sr"><span class="srl">Day Expenses</span><span class="srv">-${fmt(dayExp)}</span></div>
     <div class="sr"><span class="srl">Booth Share</span><span class="srv">-${fmt(bpd)}</span></div>
+    ${dayComm>0?`<div class="sr"><span class="srl">Rep Commissions</span><span class="srv red">-${fmt(dayComm)}</span></div>`:''}
     <div class="sr"><span class="srl b">Net Profit</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve (${Math.round(S.settings.tax*100)}%)</span><span class="srv red">-${fmt(taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
     ${isA?`<div class="div"></div><div class="fg"><label class="fl">Notes / What Worked</label><textarea class="fi" placeholder="Best sellers? Weather? What to restock?" onchange="saveDayNote('${sh.id}',${di},this.value)">${d.notes||''}</textarea></div>`
     :d.notes?`<div class="div"></div><div style="font-size:12px;color:var(--muted)"><strong>Notes:</strong> ${d.notes}</div>`:''}
+    ${(()=>{
+      const showReps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;});
+      if(!showReps.length)return'';
+      const dayComm=calcDayComm(d);
+      const repRows=showReps.map(repId=>{
+        const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return'';
+        const rs=(d.repSales||[]).find(x=>x.repId===repId)||{square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0};
+        const repTotal=PMTS.reduce((t,p)=>t+(parseFloat(rs[p.key])||0),0);
+        const repComm=calcRepSalesComm({...rs,repId});
+        return`<div style="background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:800;font-size:13px">${rep.name}${rep.isSelf?' 👑':''}</div>
+            <div style="text-align:right">
+              <div style="font-size:13px;font-weight:900;color:var(--gold)">${fmt(repTotal)}</div>
+              ${!rep.isSelf&&repComm>0?`<div style="font-size:10px;color:var(--red)">Comm: ${fmt(repComm)}</div>`:''}
+            </div>
+          </div>
+          <button class="btn btn-xs btn-ghost" style="width:100%" onclick="openRepSalesEntry('${sh.id}',${di},'${repId}')">✏️ Log Sales for ${rep.name}</button>
+        </div>`;
+      }).join('');
+      return`<div class="div"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rep Sales & Commissions</div>
+          ${dayComm>0?`<div style="font-size:11px;color:var(--red);font-weight:700">Total Comm: ${fmt(dayComm)}</div>`:''}
+        </div>
+        ${repRows}`;
+    })()}
   </div>`;
 }
 
@@ -2232,6 +2395,142 @@ function addSupItem(){
 }
 
 // ===================================================
+// REP MANAGEMENT MODALS
+// ===================================================
+function openAddRep(){
+  mOpen(`<div class="mh"><div class="mt">👤 Add Rep</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">Name</label><input class="fi" id="ar_name" placeholder="e.g. Batman"></div>
+  <div class="fg"><label class="fl">Phone (optional)</label><input class="fi" id="ar_phone" type="tel" placeholder="414-555-0100"></div>
+  <button class="btn btn-gold btn-full" onclick="saveNewRep()">Add Rep</button>`);
+}
+function saveNewRep(){
+  const name=($$('ar_name').value||'').trim();
+  if(!name){toast('Enter a name');return;}
+  if(!S.reps)S.reps=[];
+  const id='rep_'+name.toLowerCase().replace(/[^a-z0-9]/g,'')+'_'+Date.now();
+  S.reps.push({id,name,phone:($$('ar_phone').value||'').trim(),isSelf:false,active:true,payments:[]});
+  mClose();saveS();toast('✅ '+name+' added!');rSettings();
+}
+function openEditRep(repId){
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return;
+  mOpen(`<div class="mh"><div class="mt">✏️ Edit Rep</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">Name</label><input class="fi" id="er_name" value="${rep.name}"></div>
+  <div class="fg"><label class="fl">Phone</label><input class="fi" id="er_phone" value="${rep.phone||''}"></div>
+  <div style="margin-bottom:12px">
+    <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="er_active" ${rep.active?'checked':''} style="width:18px;height:18px">
+      <span>Active (appears in show rosters)</span>
+    </label>
+  </div>
+  ${(()=>{
+    const earned=repEarned(repId);const paid=repPaid(repId);const owed=Math.max(0,earned-paid);
+    if(!earned)return'';
+    return`<div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px">
+      <div style="font-weight:700;margin-bottom:4px">Season Stats</div>
+      <div>Earned: <span style="color:var(--red)">${fmt(earned)}</span> · Paid: <span style="color:var(--green)">${fmt(paid)}</span>${owed>0?` · <span style="color:var(--gold);font-weight:800">Owes ${fmt(owed)}</span>`:' ✓'}</div>
+      <div style="margin-top:6px">${(rep.payments||[]).slice(-3).reverse().map(p=>`<div style="color:var(--muted);">${p.date}: ${fmt(p.amount)}${p.note?' — '+p.note:''}</div>`).join('')}</div>
+    </div>`;
+  })()}
+  <button class="btn btn-gold btn-full" style="margin-bottom:8px" onclick="saveEditRep('${repId}')">Save Changes</button>
+  ${!rep.isSelf?`<button class="btn btn-ghost btn-full" onclick="mClose();openLogRepPmt('${repId}')">💰 Log Payment to ${rep.name}</button>`:''}
+  `);
+}
+function saveEditRep(repId){
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return;
+  rep.name=($$('er_name').value||rep.name).trim();
+  rep.phone=($$('er_phone').value||'').trim();
+  rep.active=$$('er_active').checked;
+  mClose();saveS();toast('✅ Saved!');rSettings();
+}
+function openLogRepPmt(repId){
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep||rep.isSelf)return;
+  const earned=repEarned(repId);const paid=repPaid(repId);const owed=Math.max(0,earned-paid);
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">💰 Pay ${rep.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="background:var(--redbg);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px">
+    Earned: <strong style="color:var(--red)">${fmt(earned)}</strong> · Paid so far: <strong style="color:var(--green)">${fmt(paid)}</strong><br>
+    <strong style="color:var(--gold);font-size:14px">Outstanding: ${fmt(owed)}</strong>
+  </div>
+  <div class="fg"><label class="fl">Amount ($)</label><input class="fi" type="number" id="lp_amt" placeholder="${owed.toFixed(2)}" step="0.01" min="0" value="${owed>0?owed.toFixed(2):''}"></div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="lp_date" value="${today}"></div>
+  <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="lp_note" placeholder="e.g. Cash after Cranberry Fest"></div>
+  <button class="btn btn-gold btn-full" onclick="saveRepPmt('${repId}')">✅ Log Payment</button>`);
+}
+function saveRepPmt(repId){
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return;
+  const amt=parseFloat($$('lp_amt').value);
+  if(!amt||amt<=0){toast('Enter an amount');return;}
+  const date=$$('lp_date').value||new Date().toISOString().split('T')[0];
+  const note=($$('lp_note').value||'').trim();
+  if(!rep.payments)rep.payments=[];
+  rep.payments.push({id:'rp_'+Date.now(),date,amount:amt,note});
+  mClose();saveS();toast('✅ Payment logged for '+rep.name);rSettings();
+}
+function openAssignReps(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  if(!sh.repIds)sh.repIds=[];
+  const reps=(S.reps||[]).filter(r=>r.active);
+  mOpen(`<div class="mh"><div class="mt">👥 Assign Reps</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${sh.name} — select everyone working this show</div>
+  ${reps.map(r=>`<label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer">
+    <input type="checkbox" id="ar_${r.id}" ${sh.repIds.includes(r.id)?'checked':''} style="width:20px;height:20px">
+    <div><div style="font-weight:700">${r.name}${r.isSelf?' 👑 (You)':''}</div></div>
+  </label>`).join('')}
+  <div style="margin-top:12px">
+    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0;border-top:1px solid var(--border)">
+      <input type="checkbox" id="ar_reponly" ${sh.repOnlyShow?'checked':''} style="width:20px;height:20px">
+      <div style="font-size:12px;color:var(--muted)"><strong>Rep-only show</strong> — Justin not attending</div>
+    </label>
+  </div>
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveAssignReps('${shId}')">✅ Save Roster</button>`);
+}
+function saveAssignReps(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const reps=(S.reps||[]).filter(r=>r.active);
+  sh.repIds=reps.filter(r=>$$('ar_'+r.id)&&$$('ar_'+r.id).checked).map(r=>r.id);
+  sh.repOnlyShow=!!($$('ar_reponly')&&$$('ar_reponly').checked);
+  // Ensure all show days have repSales slots for each rep
+  (sh.days||[]).forEach(day=>{
+    if(!day.repSales)day.repSales=[];
+    sh.repIds.forEach(repId=>{
+      if(!day.repSales.find(x=>x.repId===repId))
+        day.repSales.push({repId,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0});
+    });
+  });
+  mClose();saveS();toast('✅ Roster saved!');rShow();
+}
+function openRepSalesEntry(shId,di,repId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const day=sh.days[di];if(!day)return;
+  if(!day.repSales)day.repSales=[];
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return;
+  let rs=day.repSales.find(x=>x.repId===repId);
+  if(!rs){rs={repId,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0};day.repSales.push(rs);}
+  const pmtFields=PMTS.map(p=>`<div class="fg"><label class="fl">${p.icon} ${p.label}${!rep.isSelf?` (${Math.round(p.commRate*100)}% comm)`:''}</label><input class="fi" type="number" id="rs_${p.key}" placeholder="0.00" step="0.01" min="0" value="${rs[p.key]||''}" inputmode="decimal"></div>`).join('');
+  const currentComm=calcRepSalesComm({...rs,repId});
+  mOpen(`<div class="mh"><div class="mt">💰 ${rep.name}${rep.isSelf?' 👑':''} — ${day.date}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter totals collected by ${rep.name} for this day. Each payment type separately.</div>
+  ${pmtFields}
+  ${!rep.isSelf?`<div style="background:var(--redbg);border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;text-align:center">
+    Commission will auto-calculate on save
+  </div>`:''}
+  <button class="btn btn-gold btn-full" onclick="saveRepSalesEntry('${shId}',${di},'${repId}')">✅ Save Sales</button>`);
+}
+function saveRepSalesEntry(shId,di,repId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const day=sh.days[di];if(!day)return;
+  if(!day.repSales)day.repSales=[];
+  let rs=day.repSales.find(x=>x.repId===repId);
+  if(!rs){rs={repId};day.repSales.push(rs);}
+  PMTS.forEach(p=>{rs[p.key]=parseFloat($$('rs_'+p.key).value)||0;});
+  const comm=calcRepSalesComm({...rs,repId});
+  mClose();saveS();
+  const rep=(S.reps||[]).find(r=>r.id===repId);
+  toast('✅ Sales saved'+(comm>0?` · Comm: ${fmt(comm)}`:''));
+  go('show',shId,di);
+}
+
+// ===================================================
 // SETTINGS
 // ===================================================
 function rSettings(){
@@ -2271,9 +2570,37 @@ function rSettings(){
     <button class="btn btn-ghost btn-full" onclick="importData()">📥 Import Data</button>
   </div>
   </div>
+  <div class="card" id="rep-section" style="border-color:rgba(79,195,247,0.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700">👥 SALES REPS</div>
+      <button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAddRep()">+ Add Rep</button>
+    </div>
+    ${(()=>{
+      const reps=(S.reps||[]).filter(r=>r.active);
+      if(!reps.length)return'<div style="font-size:12px;color:var(--muted)">No reps yet.</div>';
+      return reps.map(r=>{
+        const earned=repEarned(r.id);
+        const paid=repPaid(r.id);
+        const owed=Math.max(0,earned-paid);
+        return`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-weight:800;font-size:13px">${r.name}${r.isSelf?' 👑 (You)':''}</div>
+            ${earned>0?`<div style="font-size:11px;color:var(--muted)">Earned ${fmt(earned)} · Paid ${fmt(paid)}${owed>0?' · <span style="color:var(--gold);font-weight:800">Owes '+fmt(owed)+'</span>':'<span style="color:var(--green)"> ✓</span>'}</div>`:'<div style="font-size:11px;color:var(--muted)">No shows yet</div>'}
+          </div>
+          <div style="display:flex;gap:6px">
+            ${!r.isSelf&&owed>0?`<button class="btn btn-xs btn-green" onclick="openLogRepPmt('${r.id}')">💰 Pay</button>`:''}
+            <button class="btn btn-xs btn-ghost" onclick="openEditRep('${r.id}')">Edit</button>
+          </div>
+        </div>`;
+      }).join('');
+    })()}
+    ${allRepsOwed().length>0?`<div style="margin-top:10px;padding:8px;background:var(--redbg);border-radius:6px;font-size:12px;color:var(--red);font-weight:700;text-align:center">
+      Total Outstanding: ${fmt(allRepsOwed().reduce((t,x)=>t+x.owed,0))}
+    </div>`:''}
+  </div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v18<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v6.3<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
