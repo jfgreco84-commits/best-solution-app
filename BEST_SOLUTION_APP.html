@@ -1380,7 +1380,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.3</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.0</div>
   `;
 
   pg('home').innerHTML=html;
@@ -2628,7 +2628,7 @@ function rSettings(){
   </div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v6.3<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.0<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
@@ -2714,7 +2714,7 @@ function applyImport(){
     const parsed=JSON.parse(txt);
     if(!parsed.inventory||!parsed.shows){toast('Invalid data. Make sure you copied the full export.');return;}
     parsed.v=INIT.v;S=parsed;
-    localStorage.setItem('dd_bs_v6',JSON.stringify(S));
+    localStorage.setItem('dd_bs_v7',JSON.stringify(S));
     mClose();renderCur();toast('✅ Data imported successfully!');go('home');
   }catch(e){toast('Import failed. Invalid format.');}
 }
