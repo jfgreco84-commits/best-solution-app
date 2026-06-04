@@ -2685,7 +2685,7 @@ function applyClaudeCmd(){
     toast('Unknown command. Start with INV:, ADD:, or SOLD:');
   }catch(e){toast('Command error: '+e.message);}
 }
-function confirmReset(){if(confirm('RESET ALL DATA? Cannot be undone.')){localStorage.removeItem('dd_bs_v6');S=JSON.parse(JSON.stringify(INIT));saveS();toast('Reset!');go('home');}}
+function confirmReset(){if(confirm('RESET ALL DATA? Cannot be undone.')){localStorage.removeItem('dd_bs_v7');S=JSON.parse(JSON.stringify(INIT));saveS();toast('Reset!');go('home');}}
 function exportData(){
   try{
     const txt=JSON.stringify(S,null,2);
