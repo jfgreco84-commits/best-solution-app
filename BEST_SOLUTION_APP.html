@@ -743,8 +743,7 @@ function applyOneTimeUpdates(d){
       {id:'oe_amz_s19',  date:'2026-03-23', amount:34.69,  category:'Supplies', note:'Humminbird power cable (Amazon Business)'},
       {id:'oe_amz_s20',  date:'2026-03-22', amount:14.99,  category:'Supplies', note:'LED navigation lights for boat (Amazon Business)'},
       {id:'oe_amz_s21',  date:'2026-03-21', amount:28.75,  category:'Supplies', note:'Battery crimper + cable lugs (Amazon Business)'},
-      {id:'oe_amz_s22',  date:'2026-03-20', amount:193.99, category:'Equipment', note:'LiFePO4 12V 100Ah battery (Amazon Business) — show trailer/boat'},
-      {id:'oe_amz_s23',  date:'2026-03-20', amount:39.24,  category:'Supplies', note:'NOCO battery charger (Amazon Business)'},
+      // oe_amz_s22 (LiFePO4 battery) and oe_amz_s23 (NOCO charger) removed — not Best Solution expenses
       {id:'oe_amz_s24',  date:'2026-03-20', amount:36.34,  category:'Supplies', note:'Marine LED nav pole light (Amazon Business)'},
     ];
     seed.forEach(e=>{
@@ -834,19 +833,46 @@ function applyOneTimeUpdates(d){
     ]);
     d.otherExpenses=d.otherExpenses.filter(e=>!BAD_IDS.has(e.id));
 
-    // Add legitimate items that were missed
-    const addIfMissing=[
-      // Claude.ai subscription — Dot Dynasty LLC BlueVine account (used for Best Solution planning/app)
-      {id:'oe_claude_may',date:'2026-05-29',amount:167.66,category:'Software',note:'Claude.ai subscription — Dot Dynasty LLC (BlueVine) — show planning & business tools'},
-      // USPS shipping costs from AMEX — likely shipping show-related items
-      {id:'oe_usps_may',date:'2026-05-26',amount:44,category:'Supplies',note:'USPS postage (May 26) — AMEX'},
-      {id:'oe_usps_apr',date:'2026-04-08',amount:6.08,category:'Supplies',note:'USPS postage (Apr 8) — AMEX'},
-    ];
+    // (USPS postage, Claude.ai, NOCO charger, LiFePO4 battery removed in v3 fix — not BS expenses)
+    const addIfMissing=[];
     addIfMissing.forEach(e=>{
       if(!d.otherExpenses.find(x=>x.id===e.id))d.otherExpenses.push(e);
     });
 
     d._applied['jun2026_expense_fix_v2']=true;
+  }
+
+  // Jun 2026 expense cleanup v3 — remove USPS postage, Claude.ai, NOCO charger, LiFePO4 battery
+  if(!d._applied['jun2026_expense_fix_v3']){
+    if(!d.otherExpenses)d.otherExpenses=[];
+    const REMOVE_V3=new Set(['oe_claude_may','oe_usps_may','oe_usps_apr','oe_amz_s22','oe_amz_s23']);
+    d.otherExpenses=d.otherExpenses.filter(e=>!REMOVE_V3.has(e.id));
+    d._applied['jun2026_expense_fix_v3']=true;
+  }
+
+  // Jun 2026 — mark all confirmed show booth fees as PAID
+  if(!d._applied['booth_fees_paid_v1']){
+    const PAY_DATE='2026-06-04';
+    const PAID_SHOWS=[
+      {match:'maxwell street days',     amt:70,  note:'Maxwell Street Days booth fee paid'},
+      {match:'pewaukee beach',          amt:425, note:'Pewaukee Beach Party booth fee paid'},
+      {match:'mchenry county',          amt:400, note:'McHenry County Fair booth fee paid'},
+      {match:'baraboo',                 amt:75,  note:'Baraboo Christmas Market booth fee paid'},
+      {match:'burgoo',                  amt:150, note:'Burgoo Fest booth fee paid'},
+    ];
+    (d.shows||[]).forEach(sh=>{
+      const nm=(sh.name||'').toLowerCase();
+      const match=PAID_SHOWS.find(p=>nm.includes(p.match));
+      if(!match)return;
+      if(!sh.boothPayments)sh.boothPayments=[];
+      // Only add payment if none exists yet
+      const alreadyPaid=sh.boothPayments.reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
+      if(alreadyPaid<(sh.boothCost||match.amt)){
+        const remaining=(sh.boothCost||match.amt)-alreadyPaid;
+        sh.boothPayments.push({amount:remaining,date:PAY_DATE,note:match.note});
+      }
+    });
+    d._applied['booth_fees_paid_v1']=true;
   }
 }
 
@@ -1274,7 +1300,6 @@ function rHome(){
   }
 
   // ---- VS 2025 ----
-  const displayBest=bestProfit>-Infinity?bestProfit:0;
   html+=`<div class="sec-lbl">2026 vs 2025 COMPARISON</div>
   <div class="card">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;text-align:center;margin-bottom:12px">
@@ -1286,7 +1311,7 @@ function rHome(){
       {lbl:'Gross',v25:PREV_YEAR.gross,v26:ytd.gross},
       {lbl:'Net Profit',v25:PREV_YEAR.net,v26:ytd.profit},
       {lbl:'Shows Done',v25:PREV_YEAR.shows,v26:done.length,isCnt:true},
-      {lbl:'Best Show',v25:PREV_YEAR.bestProfit,v26:displayBest},
+      {lbl:'Best Show',v25:PREV_YEAR.bestProfit,v26:bestProfit>-Infinity?bestProfit:0},
     ].map(row=>{
       const diff=row.v26-row.v25;
       const better=diff>0;
@@ -1355,7 +1380,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.0</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.3</div>
   `;
 
   pg('home').innerHTML=html;
@@ -1774,6 +1799,7 @@ function rPnL(){
       <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="go('settings')">Manage Rep Payments → Setup Tab</button>
     </div>`;
   })()} <div style="display:none" id="pnl-after-comm"></div>`;
+  </div>`;
 
   // Tax reserve card
   h+=`<div class="card rb" style="margin-bottom:12px">
@@ -2602,7 +2628,7 @@ function rSettings(){
   </div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.0<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v6.3<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
@@ -2659,7 +2685,7 @@ function applyClaudeCmd(){
     toast('Unknown command. Start with INV:, ADD:, or SOLD:');
   }catch(e){toast('Command error: '+e.message);}
 }
-function confirmReset(){if(confirm('RESET ALL DATA? Cannot be undone.')){localStorage.removeItem('dd_bs_v7');S=JSON.parse(JSON.stringify(INIT));saveS();toast('Reset!');go('home');}}
+function confirmReset(){if(confirm('RESET ALL DATA? Cannot be undone.')){localStorage.removeItem('dd_bs_v6');S=JSON.parse(JSON.stringify(INIT));saveS();toast('Reset!');go('home');}}
 function exportData(){
   try{
     const txt=JSON.stringify(S,null,2);
@@ -2688,7 +2714,7 @@ function applyImport(){
     const parsed=JSON.parse(txt);
     if(!parsed.inventory||!parsed.shows){toast('Invalid data. Make sure you copied the full export.');return;}
     parsed.v=INIT.v;S=parsed;
-    localStorage.setItem('dd_bs_v7',JSON.stringify(S));
+    localStorage.setItem('dd_bs_v6',JSON.stringify(S));
     mClose();renderCur();toast('✅ Data imported successfully!');go('home');
   }catch(e){toast('Import failed. Invalid format.');}
 }
