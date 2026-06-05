@@ -945,17 +945,19 @@ function calcShow(sh){
   const commissions=calcShowComm(sh);
   exp+=commissions;
   const profit=gross-cogs-exp;
-  return{gross,cogs,expenses:exp,commissions,profit,taxRes:Math.max(0,profit*S.settings.tax)};
+  return{gross,cogs,expenses:exp,commissions,profit,taxRes:Math.max(0,profit*showTaxRate(sh))};
 }
 function calcYTD(){
   let gross=0,cogs=0,expenses=0,units={};
   SKUS.forEach(s=>units[s.key]=0);
   let pmtTotals={cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0};
-  let miles=0;
+  let miles=0,gas=0,taxResSum=0;
   // Completed shows: gross, cogs, and all show-level expenses (booth + daily gas/food/etc)
   S.shows.filter(s=>s.status==='completed').forEach(sh=>{
     const t=calcShow(sh);gross+=t.gross;cogs+=t.cogs;expenses+=t.expenses;
-    miles+=(sh.miles||0)*2*(sh.numDays||1);
+    taxResSum+=t.taxRes;
+    miles+=showMiles(sh);
+    gas+=showGas(sh);
     (sh.days||[]).forEach(d=>{
       if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);SKUS.forEach(s=>units[s.key]+=(sold[s.key]||0));}
       if(d.payments)PMTS.forEach(p=>pmtTotals[p.key]+=(parseFloat(d.payments[p.key])||0));
@@ -974,10 +976,10 @@ function calcYTD(){
   const totalCommissions=(S.shows||[]).reduce((t,sh)=>t+calcShowComm(sh),0);
   // (commissions already included in expenses via calcShow/boothPaid paths above)
   const profit=gross-cogs-expenses;
-  const taxRes=Math.max(0,profit*S.settings.tax);
+  const taxRes=taxResSum;
   const keep=Math.max(0,profit-taxRes);
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
-  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,otherSpend,totalCommissions};
+  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalCommissions};
 }
 function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
 function boothPaid(sh){return(sh.boothPayments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);}
@@ -1275,7 +1277,7 @@ function rHome(){
       <div class="g3">
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(ytd.miles)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(mileDeduct)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
-        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(ytd.gas!=null?ytd.gas:ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
       </div>
       <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
     </div>`;
@@ -1329,7 +1331,7 @@ function rHome(){
     html+=`<div class="sec-lbl">UPCOMING SHOWS (${planned.length})</div>`;
     planned.forEach(sh=>{
       const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
-      const gasEst=sh.miles?(sh.miles*2*sh.numDays/S.settings.mpg*S.settings.gasPrice):0;
+      const gasEst=showGas(sh);
       html+=`<div class="card" style="cursor:pointer" onclick="go('show','${sh.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
@@ -1380,7 +1382,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.0</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.1</div>
   `;
 
   pg('home').innerHTML=html;
@@ -1578,10 +1580,46 @@ function show2025Detail(i){
   ${sh.note?`<div class="wb gold" style="margin-bottom:12px">💡 ${sh.note}</div>`:''}
   <button class="btn btn-ghost btn-full" onclick="mClose()">Close</button>`);
 }
+// ---- Per-show cost helpers (fall back to old behavior when fields are empty) ----
+function showRoundTrips(sh){ return (sh.roundTrips!=null && sh.roundTrips!=='') ? (parseFloat(sh.roundTrips)||0) : (sh.numDays||1); }
+function showGas(sh){
+  if(sh.gasOverride!=null && sh.gasOverride!=='') return parseFloat(sh.gasOverride)||0;
+  const mpg=S.settings.mpg||17.5, gp=S.settings.gasPrice||3.50;
+  return (sh.miles||0)*2*showRoundTrips(sh)/mpg*gp;
+}
+function showMiles(sh){ return (sh.miles||0)*2*showRoundTrips(sh); }
+function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax||0.28); }
+function showEditCosts(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const autoGas=showGas({miles:sh.miles,roundTrips:sh.roundTrips,numDays:sh.numDays});
+  const gpct=Math.round((S.settings.tax||0.28)*100);
+  mOpen(`<div class="mh"><div class="mt">✏️ Edit Show Costs</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="padding:8px 0 14px;font-size:13px;color:var(--muted)">${sh.name}</div>
+  <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
+  <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Default is 1 round trip per day (${sh.numDays||1}). Lower it if you stay overnight instead of driving home each day.</div>
+  <div class="fg"><label class="fl">Actual Gas $ — optional, overrides estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
+  <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
+  <button class="btn btn-gold btn-full" onclick="saveEditCosts('${id}')">Save Costs</button>`);
+}
+function saveEditCosts(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const v=k=>{const el=$$(k);return el?(el.value||'').trim():'';};
+  sh.boothCost=parseFloat(v('ec_booth'))||0;
+  sh.miles=parseFloat(v('ec_miles'))||0;
+  const tr=v('ec_trips'); sh.roundTrips = tr===''?null:(parseFloat(tr)||0);
+  const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
+  sh.lodging=parseFloat(v('ec_lodging'))||0;
+  const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
+  saveS();mClose();toast('Show costs saved!');rShows();
+}
 function calcBreakEven(sh){
   const mpg=S.settings.mpg||17.5;
   const gp=S.settings.gasPrice||3.50;
-  const gas=(sh.miles||0)*2*(sh.numDays||1)/mpg*gp;
+  const gas=showGas(sh);
   const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
   // If paid reps assigned, breakeven needs to account for commission variable cost
@@ -1645,7 +1683,10 @@ function showCard(sh){
       <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
       <span style="color:${beHit?'var(--green)':'var(--red)'};font-weight:700">${beHit?'✅ HIT — '+fmt(t.gross-be)+' over':'❌ MISSED by '+fmt(be-t.gross)}</span>
     </div>`:``}
-    <div style="margin-top:8px;display:flex;gap:6px" onclick="event.stopPropagation()">
+    <div style="margin-top:8px" onclick="event.stopPropagation()">
+      <button style="width:100%;font-size:11px;padding:6px 8px;background:rgba(255,215,0,0.14);border:1px solid var(--goldbd);color:var(--gold);border-radius:6px;cursor:pointer;font-weight:800" onclick="showEditCosts('${sh.id}')">✏️ Edit Costs — miles · gas · lodging · booth · tax</button>
+    </div>
+    <div style="margin-top:6px;display:flex;gap:6px" onclick="event.stopPropagation()">
       <button style="flex:1;font-size:11px;padding:5px 8px;background:rgba(100,149,237,0.12);border:1px solid rgba(100,149,237,0.3);color:#7EB8F7;border-radius:6px;cursor:pointer;font-weight:700" onclick="showLodgingModal('${sh.id}')">${sh.lodging?'🏨 '+fmt(sh.lodging):'🏨 Lodging'}</button>
       <button style="flex:1;font-size:11px;padding:5px 8px;background:${(sh.showExpenses||[]).length?'rgba(255,165,0,0.15)':'rgba(255,165,0,0.07)'};border:1px solid rgba(255,165,0,0.3);color:#FFA500;border-radius:6px;cursor:pointer;font-weight:700" onclick="showShowExpModal('${sh.id}')">${(sh.showExpenses||[]).length?'💸 Exp: '+fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0)):'💸 Other Expenses'}</button>
     </div>
@@ -1920,12 +1961,18 @@ function rShow(){
   ${actBtn}
   ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
   <div class="card" style="margin-top:12px">
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">SHOW DETAILS</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">SHOW DETAILS</div>
+      <button class="btn btn-xs" style="background:rgba(255,215,0,0.15);border:1px solid var(--goldbd);color:var(--gold)" onclick="showEditCosts('${sh.id}')">✏️ Edit Costs</button>
+    </div>
     <div class="sr"><span class="srl">Booth Cost</span><span class="srv">${fmt(sh.boothCost||0)}</span></div>
     <div class="sr"><span class="srl">One-Way Miles</span><span class="srv">${sh.miles||0} mi</span></div>
-    <div class="sr"><span class="srl">Total Miles (${sh.numDays} days)</span><span class="srv">${(sh.miles||0)*2*sh.numDays} mi</span></div>
-    <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt((sh.miles||0)*2*sh.numDays*S.settings.irsRate)}</span></div>
-    <div class="sr"><span class="srl">Est. Gas Cost</span><span class="srv">${fmt(((sh.miles||0)*2*sh.numDays/S.settings.mpg)*S.settings.gasPrice)}</span></div>
+    <div class="sr"><span class="srl">Round Trips</span><span class="srv">${showRoundTrips(sh)}${(sh.roundTrips!=null&&sh.roundTrips!=='')?'':' (auto: 1/day)'}</span></div>
+    <div class="sr"><span class="srl">Total Miles Driven</span><span class="srv">${fmtN(showMiles(sh))} mi</span></div>
+    <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt(showMiles(sh)*S.settings.irsRate)}</span></div>
+    <div class="sr"><span class="srl">Gas Cost${(sh.gasOverride!=null&&sh.gasOverride!=='')?' (manual)':' (est.)'}</span><span class="srv">${fmt(showGas(sh))}</span></div>
+    <div class="sr"><span class="srl">Lodging / Hotel</span><span class="srv">${fmt(sh.lodging||0)}</span></div>
+    <div class="sr"><span class="srl">Tax Rate</span><span class="srv">${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?'':' (global)'}</span></div>
   </div>
   <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -2627,7 +2674,7 @@ function rSettings(){
   </div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.0<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.1<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
