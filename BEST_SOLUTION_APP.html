@@ -945,7 +945,7 @@ function calcShow(sh){
   const commissions=calcShowComm(sh);
   exp+=commissions;
   const profit=gross-cogs-exp;
-  return{gross,cogs,expenses:exp,commissions,profit,taxRes:Math.max(0,profit*showTaxRate(sh))};
+  return{gross,cogs,expenses:exp,commissions,profit,taxRes:showTaxRes(sh)};
 }
 function calcYTD(){
   let gross=0,cogs=0,expenses=0,units={};
@@ -1140,7 +1140,7 @@ function rHome(){
   <div class="g3" style="margin-bottom:8px">
     <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
     <div class="sbox"><div class="sl">TOTAL EXPENSES</div><div class="sv sm w">${fmt(ytd.expenses)}</div><div class="ss">Booth + travel + supplies + misc</div></div>
-    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% set aside</div></div>
+    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of card sales</div></div>
   </div>
   <div class="g3" style="margin-bottom:8px">
     <div class="sbox"><div class="sl">UNITS SOLD</div><div class="sv sm w">${fmtN(ytd.totalUnits)}</div><div class="ss">YTD total</div></div>
@@ -1382,7 +1382,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.1</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.2</div>
   `;
 
   pg('home').innerHTML=html;
@@ -1589,12 +1589,35 @@ function showGas(sh){
 }
 function showMiles(sh){ return (sh.miles||0)*2*showRoundTrips(sh); }
 function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax||0.28); }
+// Card/Square sales = taxable base. Counts only card-type payments (Square + Debit), NOT cash/Venmo/Zelle/etc.
+function showCardSales(sh){
+  let t=0;
+  (sh.days||[]).forEach(d=>{ if(d.payments) PMTS.forEach(p=>{ if(p.commRate===COMM_CARD) t+=parseFloat(d.payments[p.key])||0; }); });
+  return t;
+}
+function showTaxRes(sh){ return Math.max(0, showCardSales(sh)*showTaxRate(sh)); }
+function _bsBlankDay(n,dateStr){ return {dayNum:n,date:dateStr||('Day '+n),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'}; }
+function _bsDatesFor(startDate,n){ const out=[]; if(startDate){ const s=new Date(startDate+'T12:00:00'); for(let i=0;i<n;i++){ const d=new Date(s); d.setDate(d.getDate()+i); out.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } } else { for(let i=0;i<n;i++) out.push('Day '+(i+1)); } return out; }
+function resizeShowDays(sh,newND){
+  sh.days=sh.days||[]; newND=Math.max(1,Math.round(newND)||1);
+  if(newND<sh.days.length){ let lastData=0; sh.days.forEach((d,i)=>{ const hasData=d.morningCount||d.eveningCount||(d.payments&&Object.values(d.payments).some(v=>parseFloat(v)>0)); if(hasData)lastData=i+1; }); newND=Math.max(newND,lastData); }
+  const dates=_bsDatesFor(sh.startDate,newND);
+  if(newND>sh.days.length){ for(let i=sh.days.length;i<newND;i++) sh.days.push(_bsBlankDay(i+1,dates[i])); }
+  else if(newND<sh.days.length){ sh.days=sh.days.slice(0,newND); }
+  sh.days.forEach((d,i)=>{ if(dates[i])d.date=dates[i]; d.dayNum=i+1; });
+  sh.numDays=newND; sh.dates=dates; return newND;
+}
 function showEditCosts(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
   const autoGas=showGas({miles:sh.miles,roundTrips:sh.roundTrips,numDays:sh.numDays});
   const gpct=Math.round((S.settings.tax||0.28)*100);
-  mOpen(`<div class="mh"><div class="mt">✏️ Edit Show Costs</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="padding:8px 0 14px;font-size:13px;color:var(--muted)">${sh.name}</div>
+  const esc=v=>(v||'').replace(/"/g,'&quot;');
+  mOpen(`<div class="mh"><div class="mt">✏️ Edit Show</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="padding:8px 0 12px;font-size:13px;color:var(--muted)">Edit anything below, then Save.</div>
+  <div class="fg"><label class="fl">Show Name</label><input class="fi" type="text" id="ec_name" value="${esc(sh.name)}" placeholder="Show name"></div>
+  <div class="fg"><label class="fl">Location</label><input class="fi" type="text" id="ec_loc" value="${esc(sh.location)}" placeholder="City, ST"></div>
+  <div class="fg"><label class="fl">Number of Days</label><input class="fi" type="number" id="ec_days" step="1" min="1" value="${sh.numDays||1}" placeholder="1"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
   <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
   <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)"></div>
@@ -1608,13 +1631,16 @@ function showEditCosts(id){
 function saveEditCosts(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
   const v=k=>{const el=$$(k);return el?(el.value||'').trim():'';};
+  const nm=v('ec_name'); if(nm)sh.name=nm;
+  sh.location=v('ec_loc');
+  const ndRaw=v('ec_days'); if(ndRaw!==''){ const nd=Math.max(1,parseInt(ndRaw,10)||1); if(nd!==sh.numDays) resizeShowDays(sh,nd); }
   sh.boothCost=parseFloat(v('ec_booth'))||0;
   sh.miles=parseFloat(v('ec_miles'))||0;
   const tr=v('ec_trips'); sh.roundTrips = tr===''?null:(parseFloat(tr)||0);
   const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
   sh.lodging=parseFloat(v('ec_lodging'))||0;
   const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
-  saveS();mClose();toast('Show costs saved!');rShows();
+  saveS();mClose();toast('Show saved!');renderCur();
 }
 function calcBreakEven(sh){
   const mpg=S.settings.mpg||17.5;
@@ -1684,7 +1710,7 @@ function showCard(sh){
       <span style="color:${beHit?'var(--green)':'var(--red)'};font-weight:700">${beHit?'✅ HIT — '+fmt(t.gross-be)+' over':'❌ MISSED by '+fmt(be-t.gross)}</span>
     </div>`:``}
     <div style="margin-top:8px" onclick="event.stopPropagation()">
-      <button style="width:100%;font-size:11px;padding:6px 8px;background:rgba(255,215,0,0.14);border:1px solid var(--goldbd);color:var(--gold);border-radius:6px;cursor:pointer;font-weight:800" onclick="showEditCosts('${sh.id}')">✏️ Edit Costs — miles · gas · lodging · booth · tax</button>
+      <button style="width:100%;font-size:11px;padding:6px 8px;background:rgba(255,215,0,0.14);border:1px solid var(--goldbd);color:var(--gold);border-radius:6px;cursor:pointer;font-weight:800" onclick="showEditCosts('${sh.id}')">✏️ Edit Show — name · days · costs · tax</button>
     </div>
     <div style="margin-top:6px;display:flex;gap:6px" onclick="event.stopPropagation()">
       <button style="flex:1;font-size:11px;padding:5px 8px;background:rgba(100,149,237,0.12);border:1px solid rgba(100,149,237,0.3);color:#7EB8F7;border-radius:6px;cursor:pointer;font-weight:700" onclick="showLodgingModal('${sh.id}')">${sh.lodging?'🏨 '+fmt(sh.lodging):'🏨 Lodging'}</button>
@@ -1777,7 +1803,7 @@ function rPnL(){
   const y=new Date().getFullYear();
   const ytd=calcYTD();
   const tax=S.settings.tax||0.28;
-  const taxAmt=Math.max(0,ytd.profit*tax);
+  const taxAmt=ytd.taxRes; // card/Square sales × per-show tax rate (cash excluded)
   const keep=Math.max(0,ytd.profit-taxAmt);
   const qtr=taxAmt/4;
 
@@ -1843,7 +1869,7 @@ function rPnL(){
 
   // Tax reserve card
   h+=`<div class="card rb" style="margin-bottom:12px">
-    <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧾 TAX RESERVE (${Math.round(tax*100)}%)</div>
+    <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧾 TAX RESERVE (${Math.round(tax*100)}% of card/Square sales)</div>
     <div class="g2" style="gap:8px;margin-bottom:10px">
       <div class="sbox rb"><div class="sl">Set Aside Now</div><div class="sv r">${fmt(taxAmt)}</div></div>
       <div class="sbox grb"><div class="sl">Keep (${100-Math.round(tax*100)}%)</div><div class="sv g">${fmt(keep)}</div></div>
@@ -1963,7 +1989,7 @@ function rShow(){
   <div class="card" style="margin-top:12px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">SHOW DETAILS</div>
-      <button class="btn btn-xs" style="background:rgba(255,215,0,0.15);border:1px solid var(--goldbd);color:var(--gold)" onclick="showEditCosts('${sh.id}')">✏️ Edit Costs</button>
+      <button class="btn btn-xs" style="background:rgba(255,215,0,0.15);border:1px solid var(--goldbd);color:var(--gold)" onclick="showEditCosts('${sh.id}')">✏️ Edit Show</button>
     </div>
     <div class="sr"><span class="srl">Booth Cost</span><span class="srv">${fmt(sh.boothCost||0)}</span></div>
     <div class="sr"><span class="srl">One-Way Miles</span><span class="srv">${sh.miles||0} mi</span></div>
@@ -2674,7 +2700,7 @@ function rSettings(){
   </div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.1<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.2<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
