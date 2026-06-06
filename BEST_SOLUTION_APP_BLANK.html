@@ -610,9 +610,12 @@ function rHome(){
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
         <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(ytd.otherSpend)}</div>
       </div>
-      <button class="btn btn-gold btn-sm" onclick="openOtherExpense()">+ Log Expense</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="openManageExpenses()">✏️ Manage</button>
+        <button class="btn btn-gold btn-sm" onclick="openOtherExpense()">+ Log</button>
+      </div>
     </div>
-    ${recentOther.length?`<div style="border-top:1px solid var(--border);padding-top:8px">${recentOther.map(e=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${e.note||e.category||'Expense'}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.category?'['+e.category+']':''}</span></div><div style="text-align:right"><span style="color:var(--red);font-weight:900">${fmt(e.amount)}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.date}</span></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--muted);text-align:center;padding:4px 0">No expenses logged yet. Track bags, paper towels, equipment, etc.</div>'}
+    ${recentOther.length?`<div style="border-top:1px solid var(--border);padding-top:8px">${recentOther.map(e=>`<div onclick="openOtherExpense('','${e.id}')" style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer"><div><span style="font-weight:700">${e.note||e.category||'Expense'}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.category?'['+e.category+']':''}</span></div><div style="text-align:right"><span style="color:var(--red);font-weight:900">${fmt(e.amount)}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.date}</span></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--muted);text-align:center;padding:4px 0">No expenses logged yet. Track bags, paper towels, equipment, etc.</div>'}
   </div>`;
 
   // ---- MARK MARTONE PRODUCT DEBT ----
@@ -1487,28 +1490,66 @@ function saveBoothPmt(shId){
 // ===================================================
 // OTHER EXPENSES (supplies, equipment, misc)
 // ===================================================
-function openOtherExpense(presetCategory){
-  const cat=presetCategory||'';
+function openOtherExpense(presetCategory,editId){
+  const ex=editId?(S.otherExpenses||[]).find(e=>e.id===editId):null;
+  const cat=ex?(ex.category||''):(presetCategory||'');
   const today=new Date().toISOString().split('T')[0];
-  const categories=['Supplies','Equipment','Marketing','Travel','Other'];
-  mOpen(`<div class="mh"><div class="mt">💸 Log Expense</div><button class="mx" onclick="mClose()">×</button></div>
+  const categories=['Supplies','Equipment','Marketing','Travel','Insurance','Software/Marketing','IT Services','Other'];
+  if(cat&&!categories.includes(cat))categories.unshift(cat);
+  const noteVal=String(ex&&ex.note!=null?ex.note:'').replace(/"/g,'&quot;');
+  mOpen(`<div class="mh"><div class="mt">${ex?'✏️ Edit Expense':'💸 Log Expense'}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Bags, paper towels, equipment, canopy, table — anything you spent money on.</div>
-  <div class="fg"><label class="fl">AMOUNT ($)</label><input class="fi" type="number" id="oe_amt" placeholder="0.00" step="0.01" min="0.01"></div>
-  <div class="fg"><label class="fl">WHAT WAS IT? (description)</label><input class="fi" id="oe_note" placeholder="e.g. Paper bags x2 packs, Costco run"></div>
+  <div class="fg"><label class="fl">AMOUNT ($)</label><input class="fi" type="number" id="oe_amt" placeholder="0.00" step="0.01" min="0.01" value="${ex?ex.amount:''}"></div>
+  <div class="fg"><label class="fl">WHAT WAS IT? (description)</label><input class="fi" id="oe_note" placeholder="e.g. Paper bags x2 packs, Costco run" value="${noteVal}"></div>
   <div class="fg"><label class="fl">CATEGORY</label><select class="fi" id="oe_cat">${categories.map(c=>`<option value="${c}"${c===cat?' selected':''}>${c}</option>`).join('')}</select></div>
-  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="oe_date" value="${today}"></div>
-  <button class="btn btn-gold btn-full" onclick="saveOtherExpense()">✅ Save Expense</button>
-  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="oe_date" value="${ex?ex.date:today}"></div>
+  <button class="btn btn-gold btn-full" onclick="saveOtherExpense(${ex?`'${ex.id}'`:''})">✅ ${ex?'Save Changes':'Save Expense'}</button>
+  ${ex?`<button class="btn btn-full" style="margin-top:8px;background:var(--redbg);border:1px solid var(--redbd);color:var(--red)" onclick="delOtherExpense('${ex.id}')">🗑️ Delete This Expense</button>`:''}
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="${ex?'openManageExpenses()':'mClose()'}">${ex?'← Back to list':'Cancel'}</button>`);
 }
-function saveOtherExpense(){
+function saveOtherExpense(editId){
   const amt=parseFloat($$('oe_amt').value);
   if(!amt||amt<=0){toast('Enter a valid amount');return;}
   const note=$$('oe_note').value||'';
   const category=$$('oe_cat').value||'Other';
   const date=$$('oe_date').value||new Date().toISOString().split('T')[0];
   if(!S.otherExpenses)S.otherExpenses=[];
-  S.otherExpenses.push({id:'oe_'+Date.now(),amount:amt,note,category,date});
-  mClose();saveS();toast('✅ Expense logged — '+fmt(amt));
+  if(editId){
+    const ex=S.otherExpenses.find(e=>e.id===editId);
+    if(ex){ex.amount=amt;ex.note=note;ex.category=category;ex.date=date;}
+    saveS();openManageExpenses();toast('✅ Expense updated');
+  }else{
+    S.otherExpenses.push({id:'oe_'+Date.now(),amount:amt,note,category,date});
+    mClose();saveS();toast('✅ Expense logged — '+fmt(amt));
+  }
+}
+function delOtherExpense(id){
+  const ex=(S.otherExpenses||[]).find(e=>e.id===id);if(!ex)return;
+  if(!confirm('Delete this expense?\n\n'+(ex.note||ex.category||'Expense')+' — '+fmt(ex.amount)))return;
+  S.otherExpenses=(S.otherExpenses||[]).filter(e=>e.id!==id);
+  saveS();openManageExpenses();toast('🗑️ Expense deleted');
+}
+function openManageExpenses(){
+  const list=[...(S.otherExpenses||[])].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const total=list.reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const rows=list.length?list.map(e=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="min-width:0;flex:1;cursor:pointer" onclick="openOtherExpense('','${e.id}')">
+        <div style="font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.note||e.category||'Expense')}</div>
+        <div style="font-size:10px;color:var(--muted)">${esc(e.date||'')}${e.category?' · '+esc(e.category):''}</div>
+      </div>
+      <div style="color:var(--red);font-weight:900;font-size:13px;white-space:nowrap">${fmt(e.amount)}</div>
+      <button class="btn btn-xs btn-ghost" title="Edit" onclick="openOtherExpense('','${e.id}')">✏️</button>
+      <button class="btn btn-xs" title="Delete" style="background:var(--redbg);border:1px solid var(--redbd);color:var(--red)" onclick="delOtherExpense('${e.id}')">🗑️</button>
+    </div>`).join(''):'<div style="font-size:12px;color:var(--muted);text-align:center;padding:14px 0">No expenses logged yet. Tap “+ Add” to log one.</div>';
+  mOpen(`<div class="mh"><div class="mt">🧾 Manage Expenses</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="font-size:12px;color:var(--muted)">${list.length} item(s) · Total <strong style="color:var(--red)">${fmt(total)}</strong></div>
+    <button class="btn btn-gold btn-sm" onclick="openOtherExpense()">+ Add</button>
+  </div>
+  <div id="manageExpList" style="max-height:58vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>
+  <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="mClose()">Done</button>`);
 }
 
 // ===================================================
