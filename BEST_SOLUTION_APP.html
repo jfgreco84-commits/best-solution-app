@@ -324,7 +324,7 @@ const DEFAULT_SUPPLIES=[
 ];
 const INIT={
   v:7,
-  inventory:{'32oz':25,'16oz':27,'8oz':43,'2oz':3,'c5s':288,'c5l':32},
+  inventory:{'32oz':39,'16oz':29,'8oz':68,'2oz':85,'c5s':290,'c5l':68},
   shows:[],
   supplies:JSON.parse(JSON.stringify(DEFAULT_SUPPLIES)),
   productDebt:{supplier:'Mark Martone',originalBalance:10000,payments:[]},
@@ -736,13 +736,11 @@ function applyOneTimeUpdates(d){
       {id:'oe_amz_s12',  date:'2026-03-12', amount:32.48,  category:'Supplies', note:'Testosterone/L-Citrulline supps — ⚠️ REVIEW: may not be deductible'},
       {id:'oe_amz_s13',  date:'2026-02-23', amount:20.89,  category:'Supplies', note:'Acrylic sign holders 6pk (Amazon Business)'},
       {id:'oe_amz_s14',  date:'2026-02-19', amount:48.99,  category:'Supplies', note:'Acrylic donation/ballot boxes 6pk (Amazon Business)'},
-      {id:'oe_amz_s15',  date:'2026-02-19', amount:33.22,  category:'Supplies', note:'Acrylic raffle drum (Amazon Business)'},
-      {id:'oe_amz_s16',  date:'2026-03-25', amount:17.49,  category:'Supplies', note:'Marine dry box (Amazon Business) — show trailer'},
-      {id:'oe_amz_s17',  date:'2026-03-25', amount:37.97,  category:'Supplies', note:'LED trailer lights submersible (Amazon Business)'},
-      {id:'oe_amz_s18',  date:'2026-03-24', amount:32.18,  category:'Supplies', note:'Battery cable lugs + crimping tool (Amazon Business)'},
+      // oe_amz_s15 (Acrylic raffle drum), s16 (Marine dry box), s17 (LED trailer lights),
+      // s18 (Battery cable lugs + crimping tool) removed Jun 6 2026 — not Best Solution expenses
       {id:'oe_amz_s19',  date:'2026-03-23', amount:34.69,  category:'Supplies', note:'Humminbird power cable (Amazon Business)'},
       {id:'oe_amz_s20',  date:'2026-03-22', amount:14.99,  category:'Supplies', note:'LED navigation lights for boat (Amazon Business)'},
-      {id:'oe_amz_s21',  date:'2026-03-21', amount:28.75,  category:'Supplies', note:'Battery crimper + cable lugs (Amazon Business)'},
+      // oe_amz_s21 (Battery crimper + cable lugs) removed Jun 6 2026 — not Best Solution expense
       // oe_amz_s22 (LiFePO4 battery) and oe_amz_s23 (NOCO charger) removed — not Best Solution expenses
       {id:'oe_amz_s24',  date:'2026-03-20', amount:36.34,  category:'Supplies', note:'Marine LED nav pole light (Amazon Business)'},
     ];
@@ -873,6 +871,34 @@ function applyOneTimeUpdates(d){
       }
     });
     d._applied['booth_fees_paid_v1']=true;
+  }
+
+  // Jun 6 2026 expense cleanup v4 — owner removed non-business items (NOT real Best Solution expenses):
+  // Battery crimper, Battery cable lugs, LED trailer lights, Marine dry box, Acrylic raffle drum
+  if(!d._applied['jun2026_expense_fix_v4']){
+    if(!d.otherExpenses)d.otherExpenses=[];
+    const REMOVE_V4_IDS=new Set(['oe_amz_s15','oe_amz_s16','oe_amz_s17','oe_amz_s18','oe_amz_s21']);
+    const REMOVE_V4_NOTES=new Set([
+      'Acrylic raffle drum (Amazon Business)',
+      'Marine dry box (Amazon Business) — show trailer',
+      'LED trailer lights submersible (Amazon Business)',
+      'Battery cable lugs + crimping tool (Amazon Business)',
+      'Battery crimper + cable lugs (Amazon Business)'
+    ]);
+    d.otherExpenses=d.otherExpenses.filter(e=>!REMOVE_V4_IDS.has(e.id)&&!REMOVE_V4_NOTES.has(e.note));
+    d._applied['jun2026_expense_fix_v4']=true;
+  }
+
+  // Jun 6 2026 — set inventory to exact physical count (owner-provided). Runs once per device.
+  if(!d._applied['inventory_set_20260606']){
+    d.inventory=d.inventory||{};
+    d.inventory['32oz']=39;
+    d.inventory['16oz']=29;
+    d.inventory['8oz']=68;
+    d.inventory['2oz']=85;
+    d.inventory['c5s']=290; // C5 (small)
+    d.inventory['c5l']=68;  // C5X (large)
+    d._applied['inventory_set_20260606']=true;
   }
 }
 
