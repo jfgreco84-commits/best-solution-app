@@ -2129,6 +2129,101 @@ function delTransfer(id){
 }
 
 // ===================================================
+// REPORTS & EXPORT — CSV download + print-to-PDF (offline, no libraries)
+// ===================================================
+function _csv(v){ if(v==null)v=''; v=String(v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function _csvRows(rows){ return rows.map(r=>r.map(_csv).join(',')).join('\r\n'); }
+function _stamp(){ return new Date().toISOString().split('T')[0]; }
+function dlFile(name,text,mime){
+  try{
+    const blob=new Blob([text],{type:(mime||'text/csv')+';charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click();
+    setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},150);
+    toast('📤 Saved '+name);
+  }catch(e){ toast('Export failed'); }
+}
+function _slug(s){ return String(s||'show').replace(/[^a-z0-9]+/gi,'-').toLowerCase().replace(/^-|-$/g,''); }
+function exportSeasonCSV(){
+  const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Commissions','Net Profit','Tax Reserve']];
+  (S.shows||[]).slice().sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
+    rows.push([sh.name,sh.status,(sh.dates||[]).join(' - '),sh.location||'',sh.numDays||1,showPotentialRev(sh).toFixed(2),showActualRev(sh).toFixed(2),showDiscountTotal(sh).toFixed(2),t.cogs.toFixed(2),t.expenses.toFixed(2),(t.commissions||0).toFixed(2),t.profit.toFixed(2),(t.taxRes||0).toFixed(2)]); });
+  const y=calcYTD(); rows.push([]); rows.push(['SEASON TOTAL','','','','','','','',y.cogs.toFixed(2),y.expenses.toFixed(2),(y.totalCommissions||0).toFixed(2),y.profit.toFixed(2),(y.taxRes||0).toFixed(2)]);
+  dlFile('best-solution-season-'+_stamp()+'.csv',_csvRows(rows));
+}
+function exportShowCSV(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const t=calcShow(sh);
+  const rows=[['Day','Date','SKU','Units Sold','Unit Price','Line Revenue']];
+  (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=calcSold(d.morningCount,d.eveningCount); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) rows.push([i+1,d.date||'',s.short,q,getP(s.key).toFixed(2),(q*getP(s.key)).toFixed(2)]); }); } });
+  rows.push([]); rows.push(['Payments collected by method']); PMTS.forEach(p=>{ let tot=0; (sh.days||[]).forEach(d=>tot+=parseFloat((d.payments||{})[p.key])||0); if(tot>0)rows.push([p.label,'','','','',tot.toFixed(2)]); });
+  if((sh.discounts||[]).length){ rows.push([]); rows.push(['Discounts / Freebies']); (sh.discounts||[]).forEach(x=>rows.push([x.date||'',x.note||'','','','',(parseFloat(x.amount)||0).toFixed(2)])); }
+  rows.push([]); rows.push(['SUMMARY']);
+  rows.push(['Potential Gross','','','','',showPotentialRev(sh).toFixed(2)]);
+  rows.push(['Actual Collected','','','','',showActualRev(sh).toFixed(2)]);
+  rows.push(['Discounts','','','','',showDiscountTotal(sh).toFixed(2)]);
+  rows.push(['COGS','','','','',t.cogs.toFixed(2)]);
+  rows.push(['Expenses','','','','',t.expenses.toFixed(2)]);
+  rows.push(['Commissions','','','','',(t.commissions||0).toFixed(2)]);
+  rows.push(['Net Profit','','','','',t.profit.toFixed(2)]);
+  dlFile('best-solution-'+_slug(sh.name)+'-'+_stamp()+'.csv',_csvRows(rows));
+}
+function exportRepCSV(){
+  const rows=[['Rep','Owner?','Earned','Paid','Owed']];
+  (S.reps||[]).forEach(r=>{ const e=repEarned(r.id),p=repPaid(r.id); rows.push([r.name,r.isSelf?'yes':'no',e.toFixed(2),p.toFixed(2),Math.max(0,e-p).toFixed(2)]); });
+  dlFile('best-solution-rep-commissions-'+_stamp()+'.csv',_csvRows(rows));
+}
+function exportExpensesCSV(){
+  const rows=[['Date','Category','Amount','Note']];
+  (S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
+  rows.push([]); rows.push(['TOTAL','',(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
+  dlFile('best-solution-expenses-'+_stamp()+'.csv',_csvRows(rows));
+}
+function _money(n){return '$'+(Number(n)||0).toFixed(2);}
+function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// Print-to-PDF via a Blob URL window (no document.write) — user picks "Save as PDF" in the print dialog.
+function _printHTML(title,body){
+  const doc='<!doctype html><html><head><meta charset="utf-8"><title>'+_esc(title)+'</title>'+
+  '<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;margin:24px;font-size:13px}h1{font-size:20px;margin:0 0 2px}h2{font-size:15px;margin:18px 0 6px;border-bottom:2px solid #333;padding-bottom:3px}table{border-collapse:collapse;width:100%;margin:6px 0}td,th{border:1px solid #ccc;padding:5px 8px;text-align:left}th{background:#f0f0f0}.r{text-align:right}.muted{color:#666;font-size:11px}.tot{font-weight:800;background:#fafafa}@media print{.noprint{display:none}}</style>'+
+  '</head><body>'+body+'<div class="noprint" style="margin-top:20px"><button onclick="window.print()" style="padding:10px 16px;font-size:14px">Print / Save as PDF</button></div>'+
+  '<script>setTimeout(function(){window.print();},400);</'+'script></body></html>';
+  const url=URL.createObjectURL(new Blob([doc],{type:'text/html'}));
+  const w=window.open(url,'_blank');
+  if(!w){ toast('Allow pop-ups to print / save PDF'); }
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+function printFullReport(){
+  const y=calcYTD();
+  const showRows=(S.shows||[]).slice().sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).map(sh=>{const t=calcShow(sh);return '<tr><td>'+_esc(sh.name)+'</td><td>'+sh.status+'</td><td>'+_esc((sh.dates||[]).join(' - '))+'</td><td class="r">'+_money(showPotentialRev(sh))+'</td><td class="r">'+_money(showActualRev(sh))+'</td><td class="r">'+_money(t.cogs)+'</td><td class="r">'+_money(t.expenses)+'</td><td class="r">'+_money(t.profit)+'</td></tr>';}).join('');
+  const repRows=(S.reps||[]).filter(r=>!r.isSelf).map(r=>{const e=repEarned(r.id),p=repPaid(r.id);return (e>0||p>0)?'<tr><td>'+_esc(r.name)+'</td><td class="r">'+_money(e)+'</td><td class="r">'+_money(p)+'</td><td class="r">'+_money(Math.max(0,e-p))+'</td></tr>':'';}).join('');
+  const expRows=(S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(e=>'<tr><td>'+_esc(e.date||'')+'</td><td>'+_esc(e.category||'')+'</td><td class="r">'+_money(e.amount)+'</td><td>'+_esc(e.note||'')+'</td></tr>').join('');
+  const expTot=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  _printHTML('Best Solution — Season Report',
+    '<h1>Best Solution — 2026 Season Report</h1><div class="muted">Generated '+_stamp()+' · Dot Dynasty LLC</div>'+
+    '<h2>Season Totals</h2><table><tr><th>Gross</th><th>COGS</th><th>Expenses</th><th>Net Profit</th><th>Tax Reserve</th><th>Units Sold</th></tr><tr class="tot"><td class="r">'+_money(y.gross)+'</td><td class="r">'+_money(y.cogs)+'</td><td class="r">'+_money(y.expenses)+'</td><td class="r">'+_money(y.profit)+'</td><td class="r">'+_money(y.taxRes)+'</td><td class="r">'+fmtN(y.totalUnits)+'</td></tr></table>'+
+    '<h2>All Shows</h2><table><tr><th>Show</th><th>Status</th><th>Dates</th><th>Potential</th><th>Collected</th><th>COGS</th><th>Expenses</th><th>Profit</th></tr>'+showRows+'</table>'+
+    (repRows?'<h2>Rep Commissions</h2><table><tr><th>Rep</th><th>Earned</th><th>Paid</th><th>Owed</th></tr>'+repRows+'</table>':'')+
+    (expRows?'<h2>Other Expenses (write-offs)</h2><table><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th></tr>'+expRows+'<tr class="tot"><td>TOTAL</td><td></td><td class="r">'+_money(expTot)+'</td><td></td></tr></table>':''));
+}
+function printShowReport(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const t=calcShow(sh);
+  let dayRows='';
+  (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=calcSold(d.morningCount,d.eveningCount); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) dayRows+='<tr><td>'+_esc(d.date||('Day '+(i+1)))+'</td><td>'+s.short+'</td><td class="r">'+q+'</td><td class="r">'+_money(getP(s.key))+'</td><td class="r">'+_money(q*getP(s.key))+'</td></tr>'; }); } });
+  let payRows=''; PMTS.forEach(p=>{ let tot=0; (sh.days||[]).forEach(d=>tot+=parseFloat((d.payments||{})[p.key])||0); if(tot>0)payRows+='<tr><td>'+p.label+'</td><td class="r">'+_money(tot)+'</td></tr>'; });
+  _printHTML('Best Solution — '+sh.name,
+    '<h1>'+_esc(sh.name)+'</h1><div class="muted">'+_esc(sh.location||'')+' · '+_esc((sh.dates||[]).join(' - '))+' · Generated '+_stamp()+'</div>'+
+    '<h2>Units Sold</h2><table><tr><th>Date</th><th>Product</th><th>Units</th><th>Price</th><th>Revenue</th></tr>'+(dayRows||'<tr><td colspan="5">No sales recorded</td></tr>')+'</table>'+
+    (payRows?'<h2>Payments Collected</h2><table><tr><th>Method</th><th>Amount</th></tr>'+payRows+'</table>':'')+
+    '<h2>Summary</h2><table>'+
+    '<tr><td>Potential Gross</td><td class="r">'+_money(showPotentialRev(sh))+'</td></tr>'+
+    '<tr><td>Actual Collected</td><td class="r">'+_money(showActualRev(sh))+'</td></tr>'+
+    '<tr><td>Discounts / Freebies</td><td class="r">'+_money(showDiscountTotal(sh))+'</td></tr>'+
+    '<tr><td>COGS</td><td class="r">'+_money(t.cogs)+'</td></tr>'+
+    '<tr><td>Expenses</td><td class="r">'+_money(t.expenses)+'</td></tr>'+
+    '<tr><td>Commissions</td><td class="r">'+_money(t.commissions||0)+'</td></tr>'+
+    '<tr class="tot"><td>Net Profit</td><td class="r">'+_money(t.profit)+'</td></tr></table>');
+}
+
+// ===================================================
 // SHOW DETAIL
 // ===================================================
 function rShow(){
@@ -2163,6 +2258,10 @@ function rShow(){
   </div>
   ${actBtn}
   ${(sh.status==='active'||sh.status==='planned')?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock to/from Another Show</button>`:''}
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
+    <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
+  </div>
   ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
   <div class="card" style="margin-top:12px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -2924,6 +3023,15 @@ function rSettings(){
       Total Outstanding: ${fmt(allRepsOwed().reduce((t,x)=>t+x.owed,0))}
     </div>`:''}
   </div>
+  <div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">📊 REPORTS & EXPORT</div>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Download spreadsheets (CSV) or print a PDF for taxes & records.</div>
+  <div class="g2" style="gap:8px;margin-bottom:8px">
+    <button class="btn btn-ghost btn-full" onclick="exportSeasonCSV()">📄 Season CSV</button>
+    <button class="btn btn-ghost btn-full" onclick="exportExpensesCSV()">📄 Expenses CSV</button>
+    <button class="btn btn-ghost btn-full" onclick="exportRepCSV()">📄 Rep Commission CSV</button>
+    <button class="btn btn-gold btn-full" onclick="printFullReport()">🖨️ Full Report (PDF)</button>
+  </div>
+  <div style="font-size:11px;color:var(--muted)">Tip: open any show and tap Export for a single-show CSV or PDF.</div></div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
   <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.2<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
