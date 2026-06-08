@@ -305,7 +305,7 @@ const INIT={
 // ===================================================
 // STATE
 // ===================================================
-let S,curPg='home',curShow=null,curDay=0,calMonth=null;
+let S,curPg='home',curShow=null,curDay=0,calMonth=null,showsTab='upcoming';
 
 function normalizeShowDates(d){
   // Always fix startDate from dates[] on every load — no flags, always reliable
@@ -350,6 +350,11 @@ function loadS(){
 function applyOneTimeUpdates(d){
   // Blank template app: no seeded shows, inventory, or debt.
   d._applied=d._applied||{};
+  // One-time DEFENSIVE snapshot before the v8 feature pass. Only ADDS a backup key; never clears live state.
+  if(!d._applied['prechange_backup_v8']){
+    try{ localStorage.setItem('dd_bs_blank_prechange_v8_'+Date.now(), JSON.stringify(d)); }catch(e){}
+    d._applied['prechange_backup_v8']=true;
+  }
   // Seed showExpenses array on all shows that don't have it
   if(!d._applied['show_expenses_seed_v1']){
     (d.shows||[]).forEach(sh=>{if(!sh.showExpenses)sh.showExpenses=[];});
@@ -423,6 +428,20 @@ function calcShow(sh){
   exp+=(sh.lodging||0);
   const profit=gross-cogs-exp;
   return{gross,cogs,expenses:exp,profit,taxRes:showTaxRes(sh)};
+}
+// ---- Revenue: Potential vs Actual vs Discounts (Change 2) ----
+function showPotentialRev(sh){
+  let g=0;
+  (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ g+=calcRev(calcSold(d.morningCount,d.eveningCount)); } });
+  return g;
+}
+function showActualRev(sh){
+  let a=0;
+  (sh.days||[]).forEach(d=>{ if(d.payments) a+=calcPmt(d.payments); });
+  return a;
+}
+function showDiscountTotal(sh){
+  return (sh.discounts||[]).reduce((t,x)=>t+(parseFloat(x.amount)||0),0);
 }
 function calcYTD(){
   let gross=0,cogs=0,expenses=0,units={};
@@ -516,7 +535,7 @@ function rHome(){
   const invCost=calcInvCost(S.inventory);
   const invRetail=calcInvRetail(S.inventory);
   const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
-  const active=S.shows.find(s=>s.status==='active');
+  const activeShows=S.shows.filter(s=>s.status==='active');
   const done=S.shows.filter(s=>s.status==='completed');
   const planned=[...S.shows].filter(s=>s.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const avgProfit=done.length?ytd.profit/done.length:0;
@@ -541,30 +560,36 @@ function rHome(){
 
   let html='';
 
-  // ---- ACTIVE SHOW BANNER ----
-  if(active){
-    const t=calcShow(active);
-    const dateStr=active.dates?(active.dates.length>1?active.dates[0]+' - '+active.dates[active.dates.length-1]:active.dates[0]):'';
-    html+=`
-    <div class="card gb" style="cursor:pointer" onclick="go('show','${active.id}')">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:9px">
-          <span style="font-size:26px">🔴</span>
-          <div>
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--gold);font-weight:800">ACTIVE SHOW</div>
-            <div style="font-size:19px;font-weight:900">${active.name}</div>
-            <div style="font-size:11px;color:var(--muted)">${active.location||''} ${dateStr?'· '+dateStr:''}</div>
+  // ---- ACTIVE SHOW BANNERS (one card per active show — no cap) ----
+  if(activeShows.length){
+    html+=`<div class="sec-lbl">🔴 ${activeShows.length>1?`ACTIVE SHOWS (${activeShows.length})`:'ACTIVE SHOW'}</div>`;
+    activeShows.forEach(a=>{
+      const t=calcShow(a);
+      const dateStr=a.dates?(a.dates.length>1?a.dates[0]+' - '+a.dates[a.dates.length-1]:a.dates[0]):'';
+      const daysDone=(a.days||[]).filter(d=>d.morningCount&&d.eveningCount).length;
+      const aActual=showActualRev(a), aDisc=showDiscountTotal(a);
+      html+=`
+      <div class="card gb" style="cursor:pointer;margin-bottom:8px" onclick="go('show','${a.id}')">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="font-size:26px">🔴</span>
+            <div>
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--gold);font-weight:800">ACTIVE SHOW</div>
+              <div style="font-size:19px;font-weight:900">${a.name}</div>
+              <div style="font-size:11px;color:var(--muted)">${a.location||''} ${dateStr?'· '+dateStr:''}</div>
+            </div>
           </div>
+          <span style="color:var(--gold);font-size:22px;margin-right:2px">→</span>
         </div>
-        <span style="color:var(--gold);font-size:22px;margin-right:2px">→</span>
-      </div>
-      <div class="g4">
-        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${fmt(t.gross)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gross</div></div>
-        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Profit</div></div>
-        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${fmt(t.cogs)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">COGS</div></div>
-        <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${active.days.filter(d=>d.morningCount&&d.eveningCount).length}/${active.numDays}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Days</div></div>
-      </div>
-    </div>`;
+        <div class="g4">
+          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${fmt(t.gross)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Potential</div></div>
+          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--green)">${fmt(aActual)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Collected</div></div>
+          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Profit</div></div>
+          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${daysDone}/${a.numDays}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Days</div></div>
+        </div>
+        ${aDisc>0?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px">Discounts/freebies logged: <strong style="color:var(--red)">${fmt(aDisc)}</strong></div>`:''}
+      </div>`;
+    });
   }
 
   // ---- SEASON OVERVIEW ----
@@ -805,7 +830,7 @@ function rHome(){
             </div>
           </div>
           <div style="text-align:right;margin-left:10px">
-            <div style="font-size:20px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div>
+            <div style="font-size:20px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div>
             <div style="font-size:11px;color:var(--muted)">margin: ${margin}%</div>
           </div>
         </div>
@@ -820,7 +845,7 @@ function rHome(){
     <button class="btn btn-ghost" onclick="showSetAllInv()">📋 Update Stock</button>
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
-  ${active?`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${active.id}')">🔴 Open Active Show: ${active.name}</button>`:''}
+  ${activeShows.map(a=>`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${a.id}')">🔴 Open Active Show: ${a.name}</button>`).join('')}
   <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v6.3</div>
   `;
 
@@ -838,6 +863,21 @@ function rStock(){
     <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:22px;font-weight:900">${fmt(cost)}</div></div>
     <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(retail)}</div></div>
   </div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock Between Shows</button>
+  </div>
+  ${(()=>{
+    const packed=transferableShows().filter(s=>s.packedInventory&&Object.values(s.packedInventory).some(v=>(v||0)!==0));
+    if(!packed.length)return'';
+    return `<div class="card" style="margin-bottom:12px;border-color:rgba(79,195,247,0.3)">
+      <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 Packed To Shows — On-Hand At Booths</div>
+      ${packed.map(s=>`<div class="sr"><span class="srl">${s.name}${s.status==='active'?' 🔴':''}</span><span class="srv" style="font-size:11px;font-weight:600">${SKUS.filter(k=>(s.packedInventory[k.key]||0)!==0).map(k=>k.short+': '+(s.packedInventory[k.key]||0)).join(' · ')||'—'}</span></div>`).join('')}
+    </div>`;
+  })()}
+  ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
+    ${[...(S.transfers||[])].slice().reverse().slice(0,12).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}<span style="color:var(--muted)"> · ${tr.date||''}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
+  </div>`:''}
   ${SKUS.map(s=>{
     const q=S.inventory[s.key]||0;const val=q*s.cost;const margin=Math.round(((getP(s.key)-s.cost)/getP(s.key))*100);const low=q<5;
     return`<div class="card ${low?'rb':''}">
@@ -886,13 +926,17 @@ function showSortKey(sh){
   return sh.createdAt||'9999';
 }
 function rShows(){
-  const today=new Date().toISOString().split('T')[0];
-  const upcoming=[...S.shows].filter(s=>showSortKey(s)>=today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const past=[...S.shows].filter(s=>showSortKey(s)<today).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const all=[...upcoming,...past];
+  const upcoming=[...S.shows].filter(s=>s.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const completed=[...S.shows].filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
+  const tab=(showsTab==='completed')?'completed':'upcoming';
+  const list=tab==='completed'?completed:upcoming;
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
-  if(all.length){h+=all.map(s=>showCard(s)).join('');}
-  else{h+=`<div class="empty"><div class="ei">🎪</div>No shows yet. Tap + New Show to start.</div>`;}
+  h+=`<div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="showsTab='upcoming';rShows()">📅 Upcoming (${upcoming.length})</button>
+    <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="showsTab='completed';rShows()">✅ Completed (${completed.length})</button>
+  </div>`;
+  if(list.length){h+=list.map(s=>showCard(s)).join('');}
+  else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':'No upcoming shows. Tap + New Show to start.'}</div>`;}
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
 }
@@ -937,8 +981,14 @@ function showEditCosts(id){
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
   <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
+  <div class="fg"><label class="fl">Travel Type</label>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="var d=parseInt(($$('ec_days')||{}).value)||${sh.numDays||1};$$('ec_trips').value=d;">🚗 Round-trip daily</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="$$('ec_trips').value=1;">🏨 Hotel stay</button>
+    </div>
+  </div>
   <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)"></div>
-  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Default is 1 round trip per day (${sh.numDays||1}). Lower it if you stay overnight instead of driving home each day.</div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Round-trip daily = drive home each night (1 trip/day). Hotel stay = drive there once & back once (1 trip total). Gas auto-calcs at ${S.settings.mpg||17.5} mpg × $${(S.settings.gasPrice||3.5).toFixed(2)}/gal (change in Settings); enter Actual Gas below to override.</div>
   <div class="fg"><label class="fl">Actual Gas $ — optional, overrides estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
   <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
@@ -982,12 +1032,14 @@ function showCard(sh){
   const cls=sh.status==='active'?'sa':sh.status==='completed'?'sd':'';
   const bdg=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED';
   const dateStr=sh.dates?sh.dates.join(' → '):'';
+  const dateBig=(sh.dates&&sh.dates.length)?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):(sh.startDate||'Date TBD');
   const be=calcBreakEven(sh);
   const beHit=sh.status==='completed'&&t.gross>=be;
   return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
     <span class="sc-badge ${sh.status}">${bdg}</span>
     <div class="sc-name">${sh.name}</div>
-    <div class="sc-loc">${sh.location?sh.location+' · ':''}${dateStr}${sh.numDays>1?' · '+sh.numDays+' days':''}</div>
+    <div style="font-size:21px;font-weight:900;color:var(--gold);letter-spacing:.3px;margin:3px 0 4px;line-height:1.15">📅 ${dateBig}${sh.numDays>1?` · ${sh.numDays} days`:''}</div>
+    <div class="sc-loc">${sh.location||''}</div>
     ${sh.status==='planned'?`
     <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2)">
       <div style="font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}</div>
@@ -998,7 +1050,7 @@ function showCard(sh){
       <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
       <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
       <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
-      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
+      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
     </div>
     <div style="margin-top:6px;padding:5px 8px;background:rgba(255,200,0,0.08);border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
       <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
@@ -1009,7 +1061,7 @@ function showCard(sh){
       <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
       <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
       <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
-      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)}'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
+      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
     </div>
     <div style="margin-top:6px;padding:5px 8px;background:${beHit?'rgba(0,200,100,0.08)':'rgba(255,60,60,0.08)'};border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
       <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
@@ -1210,6 +1262,83 @@ function createShow(){
 }
 
 // ===================================================
+// DISCOUNTS / FREEBIES (Change 2) — a log + summary only.
+// Never touches sold counts, payments, or revenue math.
+// ===================================================
+function openDiscountModal(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const today=new Date().toISOString().split('T')[0];
+  mOpen(`<div class="mh"><div class="mt">🏷️ Log Discount / Freebie</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Money you gave up — a discount, a free bottle, a promo, a damaged unit. Tracked separately; does NOT change unit counts or sales.</div>
+  <div class="fg"><label class="fl">Amount Given Up ($)</label><input class="fi" type="number" id="disc_amt" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+  <div class="fg"><label class="fl">Notes (what & why)</label><input class="fi" id="disc_note" placeholder="e.g. 2 free 2oz to the vendor next door"></div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="disc_date" value="${today}"></div>
+  <button class="btn btn-gold btn-full" onclick="saveDiscount('${shId}')">✅ Save</button>`);
+}
+function saveDiscount(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const amt=parseFloat($$('disc_amt').value);
+  if(!amt||amt<=0){toast('Enter an amount');return;}
+  if(!sh.discounts)sh.discounts=[];
+  sh.discounts.push({id:'disc_'+Date.now(),amount:amt,note:($$('disc_note').value||'').trim(),date:$$('disc_date').value||new Date().toISOString().split('T')[0],ts:new Date().toISOString()});
+  mClose();saveS();toast('🏷️ Discount logged — '+fmt(amt));
+}
+function delDiscount(shId,id){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh||!sh.discounts)return;
+  if(!confirm('Remove this discount entry?'))return;
+  sh.discounts=sh.discounts.filter(x=>x.id!==id);
+  saveS();toast('Removed');
+}
+
+// ===================================================
+// INVENTORY TRANSFERS (Change 1) — move packed stock between shows.
+// NOT a sale; never touches day counts, payments, revenue, or units-sold.
+// ===================================================
+function transferableShows(){ return (S.shows||[]).filter(s=>s.status==='active'||s.status==='planned'); }
+function openTransferModal(presetFromId){
+  const shows=transferableShows();
+  if(shows.length<2){ toast('Need 2+ active/planned shows to transfer between'); return; }
+  const from=presetFromId&&shows.find(s=>s.id===presetFromId)?presetFromId:shows[0].id;
+  const toDefault=(shows.find(s=>s.id!==from)||{}).id;
+  const opt=(sel)=>shows.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}${s.status==='active'?' 🔴':''}</option>`).join('');
+  mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock Between Shows</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Moves packed units from one show to another (e.g. one booth ran out). This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
+  <div class="fg"><label class="fl">Product</label><select class="fi" id="tr_sku">${SKUS.map(s=>`<option value="${s.key}">${s.name}</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">Quantity</label><input class="fi" type="number" id="tr_qty" placeholder="0" min="1" step="1" inputmode="numeric"></div>
+  <div class="fg"><label class="fl">From Show</label><select class="fi" id="tr_from">${opt(from)}</select></div>
+  <div class="fg"><label class="fl">To Show</label><select class="fi" id="tr_to">${opt(toDefault)}</select></div>
+  <button class="btn btn-gold btn-full" onclick="saveTransfer()">✅ Transfer</button>`);
+}
+function saveTransfer(){
+  const sku=$$('tr_sku').value, qty=parseInt($$('tr_qty').value)||0;
+  const fromId=$$('tr_from').value, toId=$$('tr_to').value;
+  if(qty<=0){toast('Enter a quantity');return;}
+  if(fromId===toId){toast('Pick two different shows');return;}
+  const from=S.shows.find(s=>s.id===fromId), to=S.shows.find(s=>s.id===toId);
+  if(!from||!to){toast('Show not found');return;}
+  from.packedInventory=from.packedInventory||{}; to.packedInventory=to.packedInventory||{};
+  const avail=from.packedInventory[sku]||0;
+  if(qty>avail&&!confirm(`${from.name} only shows ${avail} packed. Transfer anyway?`))return;
+  from.packedInventory[sku]=(from.packedInventory[sku]||0)-qty;
+  to.packedInventory[sku]=(to.packedInventory[sku]||0)+qty;
+  if(!S.transfers)S.transfers=[];
+  S.transfers.push({id:'tr_'+Date.now(),ts:new Date().toISOString(),date:new Date().toISOString().split('T')[0],sku,qty,fromShowId:fromId,fromName:from.name,toShowId:toId,toName:to.name});
+  mClose();saveS();
+  const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
+  toast(`🔄 Moved ${qty} ${sName}: ${from.name} → ${to.name}`);
+}
+function delTransfer(id){
+  if(!S.transfers)return;
+  const tr=S.transfers.find(x=>x.id===id);if(!tr)return;
+  if(!confirm('Undo this transfer? Units move back from '+tr.toName+' to '+tr.fromName+'.'))return;
+  const from=S.shows.find(s=>s.id===tr.fromShowId), to=S.shows.find(s=>s.id===tr.toShowId);
+  if(from){from.packedInventory=from.packedInventory||{};from.packedInventory[tr.sku]=(from.packedInventory[tr.sku]||0)+tr.qty;}
+  if(to){to.packedInventory=to.packedInventory||{};to.packedInventory[tr.sku]=(to.packedInventory[tr.sku]||0)-tr.qty;}
+  S.transfers=S.transfers.filter(x=>x.id!==id);
+  saveS();toast('Transfer undone');
+}
+
+// ===================================================
 // SHOW DETAIL
 // ===================================================
 function rShow(){
@@ -1233,7 +1362,17 @@ function rShow(){
     <div><div class="sl">Tax Reserve</div><div class="sv sm r" style="font-size:14px">${fmt(t.taxRes)}</div></div>
     <div><div class="sl">Keep</div><div class="sv sm g" style="font-size:14px">${fmt(Math.max(0,t.profit-t.taxRes))}</div></div>
   </div>
+  <div class="card" style="margin-bottom:12px;border-color:rgba(0,210,106,0.25)">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">💵 REVENUE — POTENTIAL vs ACTUAL</div>
+    <div class="sr"><span class="srl">Potential (units sold × full price)</span><span class="srv gold">${fmt(showPotentialRev(sh))}</span></div>
+    <div class="sr"><span class="srl">Actual Collected (cash + card + apps)</span><span class="srv green">${fmt(showActualRev(sh))}</span></div>
+    <div class="sr"><span class="srl">Discounts / Freebies / Promos</span><span class="srv red">-${fmt(showDiscountTotal(sh))}</span></div>
+    <div class="sr" style="border-top:1px solid var(--border);margin-top:4px"><span class="srl b">Variance (Potential − Actual)</span><span class="srv b">${fmt(showPotentialRev(sh)-showActualRev(sh))}</span></div>
+    <button class="btn btn-xs btn-ghost" style="width:100%;margin-top:8px" onclick="openDiscountModal('${sh.id}')">+ Log Discount / Freebie / Promo</button>
+    ${(sh.discounts||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">${[...(sh.discounts||[])].slice().reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0"><span style="color:var(--muted);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.note||'(no note)'} <span style="opacity:.6">${x.date||''}</span></span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--red);font-weight:700">-${fmt(x.amount)}</span><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delDiscount('${sh.id}','${x.id}')">✕</span></span></div>`).join('')}</div>`:''}
+  </div>
   ${actBtn}
+  ${(sh.status==='active'||sh.status==='planned')?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock to/from Another Show</button>`:''}
   ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
   <div class="card" style="margin-top:12px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -1271,7 +1410,7 @@ function rDay(sh,di){
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
   const profit=rev-cogs-dayExp-bpd;
-  const taxRes=Math.max(0,profit*S.settings.tax);
+  const taxRes=Math.max(0,profit*showTaxRate(sh));
   const soldChips=sold?SKUS.filter(s=>(sold[s.key]||0)>0).map(s=>`<span class="chip gold">${s.short}: <strong>${sold[s.key]}</strong></span>`).join(''):'';
   let moneyCheck='';
   if(haP&&rev>0){const diff=Math.abs(pmtT-rev);moneyCheck=diff>0.50?`<div class="wb ${pmtT>rev?'gold':'red'}" style="margin-top:8px">${pmtT>rev?'⚠️ Collected MORE than inventory shows. Check counts.':'⚠️ Missing '+fmt(rev-pmtT)+'. Collected less than inventory.'}</div>`:`<div class="wb green" style="margin-top:8px">✓ Money matches inventory. Good to go.</div>`;}
@@ -1321,7 +1460,7 @@ function rDay(sh,di){
     <div class="sr"><span class="srl">Day Expenses</span><span class="srv">-${fmt(dayExp)}</span></div>
     <div class="sr"><span class="srl">Booth Share</span><span class="srv">-${fmt(bpd)}</span></div>
     <div class="sr"><span class="srl b">Net Profit</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
-    <div class="sr"><span class="srl">Tax Reserve (${Math.round(S.settings.tax*100)}%)</span><span class="srv red">-${fmt(taxRes)}</span></div>
+    <div class="sr"><span class="srl">Tax Reserve (${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?' · show rate':''})</span><span class="srv red">-${fmt(taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
     ${isA?`<div class="div"></div><div class="fg"><label class="fl">Notes / What Worked</label><textarea class="fi" placeholder="Best sellers? Weather? What to restock?" onchange="saveDayNote('${sh.id}',${di},this.value)">${d.notes||''}</textarea></div>`
     :d.notes?`<div class="div"></div><div style="font-size:12px;color:var(--muted)"><strong>Notes:</strong> ${d.notes}</div>`:''}
