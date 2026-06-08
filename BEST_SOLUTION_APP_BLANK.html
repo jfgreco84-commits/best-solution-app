@@ -461,6 +461,43 @@ function showActualRev(sh){
 function showDiscountTotal(sh){
   return (sh.discounts||[]).reduce((t,x)=>t+(parseFloat(x.amount)||0),0);
 }
+// ---- Dashboard v9 helpers: show date/state, per-show breakdowns, work hours ----
+function _todayKey(){ return new Date().toISOString().split('T')[0]; }
+function showEndKey(sh){
+  const start=showSortKey(sh);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(start))return start;
+  const d=new Date(start+'T12:00:00'); d.setDate(d.getDate()+((sh.numDays||1)-1));
+  return d.toISOString().split('T')[0];
+}
+function isMissed(sh){ return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
+function isUpcoming(sh){ return sh.status!=='completed' && !isMissed(sh); }
+function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const sold=calcSold(d.morningCount,d.eveningCount); SKUS.forEach(s=>u[s.key]+=(sold[s.key]||0)); } }); return u; }
+function showPmtTotals(sh){ const p={}; PMTS.forEach(x=>p[x.key]=0); (sh.days||[]).forEach(d=>{ if(d.payments) PMTS.forEach(x=>p[x.key]+=(parseFloat(d.payments[x.key])||0)); }); return p; }
+function showHours(sh){ return (parseFloat(sh.hoursPerDay)||8)*(sh.numDays||1); }
+function bestShowCardHTML(sh,label){
+  const t=calcShow(sh), u=showUnitsSold(sh), p=showPmtTotals(sh);
+  const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+  const units=SKUS.filter(s=>(u[s.key]||0)>0).map(s=>`<span class="chip gold" style="font-size:10px">${s.short}: ${u[s.key]}</span>`).join('')||'<span style="color:var(--muted);font-size:11px">No unit data</span>';
+  const pmts=PMTS.filter(x=>(p[x.key]||0)>0).map(x=>`<span class="chip" style="font-size:10px">${x.label}: ${fmt(p[x.key])}</span>`).join('')||'<span style="color:var(--muted);font-size:11px">No payment data</span>';
+  return `<div class="card grb" style="cursor:pointer;margin-bottom:8px" onclick="go('show','${sh.id}')">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--gold);font-weight:800;margin-bottom:4px">${label}</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div><div style="font-size:17px;font-weight:900">🏆 ${sh.name}</div><div style="font-size:11px;color:var(--muted)">${sh.location||''} ${dateStr?'· '+dateStr:''}</div></div>
+      <div style="text-align:right"><div style="font-size:20px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div style="font-size:10px;color:var(--muted)">profit</div></div>
+    </div>
+    <div class="g4" style="margin-top:10px">
+      <div style="text-align:center"><div style="font-size:14px;font-weight:900;color:var(--gold)">${fmt(t.gross)}</div><div style="font-size:9px;color:var(--muted)">GROSS</div></div>
+      <div style="text-align:center"><div style="font-size:14px;font-weight:900">${sh.numDays||1}</div><div style="font-size:9px;color:var(--muted)">DAYS</div></div>
+      <div style="text-align:center"><div style="font-size:14px;font-weight:900">${fmt(sh.boothCost||0)}</div><div style="font-size:9px;color:var(--muted)">BOOTH</div></div>
+      <div style="text-align:center"><div style="font-size:14px;font-weight:900">${fmt(t.expenses)}</div><div style="font-size:9px;color:var(--muted)">EXPENSES</div></div>
+    </div>
+    ${t.commissions>0?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">Commissions: <strong style="color:var(--red)">${fmt(t.commissions)}</strong></div>`:''}
+    <div style="margin-top:8px;font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Units Sold</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${units}</div>
+    <div style="margin-top:8px;font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Payments Collected</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${pmts}</div>
+  </div>`;
+}
 function calcYTD(){
   let gross=0,cogs=0,expenses=0,units={};
   SKUS.forEach(s=>units[s.key]=0);
@@ -555,27 +592,28 @@ function rHome(){
   const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
   const activeShows=S.shows.filter(s=>s.status==='active');
   const done=S.shows.filter(s=>s.status==='completed');
-  const planned=[...S.shows].filter(s=>s.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const avgProfit=done.length?ytd.profit/done.length:0;
-  const keep=ytd.keep;
-  const keepPct=ytd.profit>0?Math.round((keep/ytd.profit)*100):0;
-  const taxPct=ytd.profit>0?Math.round((ytd.taxRes/ytd.profit)*100):0;
+  const upcomingShows=[...S.shows].filter(s=>isUpcoming(s)&&s.status!=='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
+  const missedShows=S.shows.filter(s=>isMissed(s));
+  const plannedCount=upcomingShows.length+activeShows.length;
+  const nextUp=upcomingShows[0]||null;
+  const completedNet=done.reduce((t,sh)=>t+calcShow(sh).profit,0);
+  const avgShowProfit=done.length?completedNet/done.length:0;
+  const avgShowGross=done.length?ytd.gross/done.length:0;
+  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed').reduce((t,sh)=>t+boothPaid(sh),0);
+  const overhead=(ytd.otherSpend||0)+upcomingDeposits;
+  const taxRes=ytd.taxRes;
+  const cleanKeep=Math.max(0,completedNet-taxRes);
+  const keepPct=completedNet>0?Math.round((cleanKeep/completedNet)*100):0;
+  const taxPct=completedNet>0?Math.round((taxRes/completedNet)*100):0;
   const mileDeduct=ytd.miles*S.settings.irsRate;
-
-  // Best show this season
-  let bestShow=null,bestProfit=-Infinity;
-  done.forEach(sh=>{const t=calcShow(sh);if(t.profit>bestProfit){bestProfit=t.profit;bestShow=sh;}});
-
-  // YTD payment totals
+  const plannedDays=[...upcomingShows,...activeShows].reduce((t,sh)=>t+(sh.numDays||1),0);
+  const completedDays=done.reduce((t,sh)=>t+(sh.numDays||1),0);
+  const plannedHours=[...upcomingShows,...activeShows].reduce((t,sh)=>t+showHours(sh),0);
+  const completedHours=done.reduce((t,sh)=>t+showHours(sh),0);
+  let bestGross=null,bgVal=-Infinity,bestProfit=null,bpVal=-Infinity;
+  done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
   const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
-
-  // vs 2025
-  const profitDiff=ytd.profit-PREV_YEAR.net;
-  const grossDiff=ytd.gross-PREV_YEAR.gross;
-
-  // Low stock items
   const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
-
   let html='';
 
   // ---- ACTIVE SHOW BANNERS (one card per active show — no cap) ----
@@ -610,21 +648,62 @@ function rHome(){
     });
   }
 
-  // ---- SEASON OVERVIEW ----
+  // ---- NEXT UP + SHOWS BUTTONS ----
+  html+=`<div class="sec-lbl">NEXT UP</div>`;
+  if(nextUp){
+    const nuDate=nextUp.dates?(nextUp.dates.length>1?nextUp.dates[0]+' - '+nextUp.dates[nextUp.dates.length-1]:nextUp.dates[0]):'';
+    const nuGas=showGas(nextUp);
+    html+=`<div class="card" style="cursor:pointer;margin-bottom:8px" onclick="go('show','${nextUp.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:17px;font-weight:900">📅 ${nextUp.name}</div><div style="font-size:11px;color:var(--muted)">${nextUp.location?nextUp.location+' · ':''}${nuDate} · ${nextUp.numDays} day${nextUp.numDays>1?'s':''}</div></div>
+        <div style="text-align:right"><div style="font-size:13px;font-weight:700">${fmt(nextUp.boothCost||0)} booth</div><div style="font-size:11px;color:var(--muted)">${nextUp.miles?nextUp.miles+' mi · ~'+fmt(nuGas)+' gas':''}</div></div>
+      </div>
+    </div>`;
+  } else if(!activeShows.length){
+    html+=`<div class="card" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:8px">No upcoming shows. Tap + New Show to add one.</div>`;
+  }
+  html+=`<div class="g2" style="margin-bottom:8px;gap:8px">
+    <button class="btn btn-ghost" onclick="showsTab='upcoming';go('shows')">📅 Upcoming Shows (${plannedCount})</button>
+    <button class="btn btn-ghost" onclick="showsTab='completed';go('shows')">✅ Completed Shows (${done.length})</button>
+  </div>
+  ${missedShows.length?`<button class="btn btn-ghost btn-full" style="margin-bottom:8px;border-color:var(--redbd);color:var(--red)" onclick="showsTab='missed';go('shows')">⚠️ Missed / Did Not Do (${missedShows.length})</button>`:''}`;
+
+  // ---- SEASON OVERVIEW (completed-show economics; overhead separate) ----
   html+=`<div class="sec-lbl">2026 SEASON OVERVIEW</div>
   <div class="g2" style="margin-bottom:8px">
-    <div class="sbox gb"><div class="sl">YTD GROSS SALES</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">${done.length} show${done.length!==1?'s':''} completed</div></div>
-    <div class="sbox ${ytd.keep>=0?'grb':'rb'}"><div class="sl">AFTER-TAX KEEP</div><div class="sv ${ytd.keep>=0?'g':'r'}">${fmt(ytd.keep)}</div><div class="ss">What you actually pocket</div></div>
+    <div class="sbox gb"><div class="sl">YTD GROSS (completed)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">${done.length} show${done.length!==1?'s':''} completed</div></div>
+    <div class="sbox ${completedNet>=0?'grb':'rb'}"><div class="sl">COMPLETED SHOWS NET</div><div class="sv ${completedNet>=0?'g':'r'}">${fmt(completedNet)}</div><div class="ss">Sum of each show's profit</div></div>
   </div>
   <div class="g3" style="margin-bottom:8px">
     <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
-    <div class="sbox"><div class="sl">TOTAL EXPENSES</div><div class="sv sm w">${fmt(ytd.expenses)}</div><div class="ss">Booth + travel + supplies + misc</div></div>
-    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of card sales</div></div>
+    <div class="sbox"><div class="sl">AVG / SHOW PROFIT</div><div class="sv sm ${avgShowProfit>=0?'g':'r'}">${fmt(avgShowProfit)}</div><div class="ss">Completed only</div></div>
+    <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Completed only</div></div>
   </div>
-  <div class="g3" style="margin-bottom:8px">
-    <div class="sbox"><div class="sl">UNITS SOLD</div><div class="sv sm w">${fmtN(ytd.totalUnits)}</div><div class="ss">YTD total</div></div>
-    <div class="sbox"><div class="sl">AVG/SHOW</div><div class="sv sm w">${fmt(avgProfit)}</div><div class="ss">Avg profit</div></div>
-    <div class="sbox"><div class="sl">SHOWS DONE</div><div class="sv sm w">${done.length}</div><div class="ss">${planned.length} planned</div></div>
+  <div class="g2" style="margin-bottom:8px">
+    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of card sales</div></div>
+    <div class="sbox"><div class="sl">BUSINESS OVERHEAD</div><div class="sv sm w">${fmt(overhead)}</div><div class="ss">Supplies + upcoming deposits (separate)</div></div>
+  </div>`;
+
+  // ---- UNITS SOLD BY PRODUCT ----
+  html+=`<div class="sec-lbl">UNITS SOLD — BY PRODUCT</div>
+  <div class="card">
+    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units (completed)</span><span class="srv lg" style="color:var(--gold)">${fmtN(ytd.totalUnits)}</span></div>
+    ${SKUS.map(s=>{const u=ytd.units[s.key]||0;const rev=u*getP(s.key);return`<div class="sr"><span class="srl">${s.emoji} ${s.name}</span><span class="srv">${u} units · <span style="color:var(--gold)">${fmt(rev)}</span></span></div>`;}).join('')}
+  </div>`;
+
+  // ---- WORKLOAD ----
+  html+=`<div class="sec-lbl">WORKLOAD</div>
+  <div class="card">
+    <div class="g3" style="margin-bottom:8px">
+      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${done.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Done</div></div>
+      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${plannedCount}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Planned</div></div>
+      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:${missedShows.length?'var(--red)':'var(--muted)'}">${missedShows.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Missed</div></div>
+    </div>
+    <div class="sr"><span class="srl">Total planned show days</span><span class="srv">${plannedDays}</span></div>
+    <div class="sr"><span class="srl">Completed show days</span><span class="srv">${completedDays}</span></div>
+    <div class="sr"><span class="srl">Est. planned work hours</span><span class="srv">${fmtN(plannedHours)}h</span></div>
+    <div class="sr"><span class="srl">Completed work hours</span><span class="srv">${fmtN(completedHours)}h</span></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:6px">Hours = each show's "hours/day" (default 8) × its days — set per show in Edit Show.</div>
   </div>`;
 
   // ---- BOOTH COSTS — full season committed ----
@@ -643,22 +722,16 @@ function rHome(){
     ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
   </div>`;
 
-  // ---- OTHER EXPENSES (supplies, equipment, misc) ----
-  const otherExp=S.otherExpenses||[];
-  const recentOther=[...otherExp].reverse().slice(0,5);
-  html+=`<div class="sec-lbl">OTHER EXPENSES — SUPPLIES & MISC</div>
+  // ---- OTHER EXPENSES (button + YTD total only; full itemized list lives in openManageExpenses) ----
+  html+=`<div class="sec-lbl">OTHER EXPENSES</div>
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${otherExp.length?10:0}px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
         <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(ytd.otherSpend)}</div>
       </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="openManageExpenses()">✏️ Manage</button>
-        <button class="btn btn-gold btn-sm" onclick="openOtherExpense()">+ Log</button>
-      </div>
+      <button class="btn btn-gold btn-sm" onclick="openManageExpenses()">Other Expenses →</button>
     </div>
-    ${recentOther.length?`<div style="border-top:1px solid var(--border);padding-top:8px">${recentOther.map(e=>`<div onclick="openOtherExpense('','${e.id}')" style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer"><div><span style="font-weight:700">${e.note||e.category||'Expense'}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.category?'['+e.category+']':''}</span></div><div style="text-align:right"><span style="color:var(--red);font-weight:900">${fmt(e.amount)}</span><span style="color:var(--muted);font-size:10px;margin-left:6px">${e.date}</span></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--muted);text-align:center;padding:4px 0">No expenses logged yet. Track bags, paper towels, equipment, etc.</div>'}
   </div>`;
 
   // ---- MARK MARTONE PRODUCT DEBT ----
@@ -678,17 +751,17 @@ function rHome(){
     <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
   </div>`;
 
-  // ---- TAX + KEEP ----
-  html+=`<div class="sec-lbl">MONEY SPLIT</div>
+  // ---- MONEY SPLIT (from COMPLETED shows; overhead shown separately) ----
+  html+=`<div class="sec-lbl">MONEY SPLIT — COMPLETED SHOWS</div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
       <div>
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Clean Keep (after ${taxPct}% tax)</div>
-        <div style="font-size:28px;font-weight:900;color:var(--green)">${fmt(keep)}</div>
+        <div style="font-size:28px;font-weight:900;color:var(--green)">${fmt(cleanKeep)}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Set Aside for Tax</div>
-        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(ytd.taxRes)}</div>
+        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(taxRes)}</div>
       </div>
     </div>
     <div style="display:flex;gap:4px;height:12px;border-radius:6px;overflow:hidden">
@@ -699,6 +772,7 @@ function rHome(){
       <span>Keep: ${keepPct}%</span>
       <span>Tax: ${taxPct}%</span>
     </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px">Completed-show net <strong>${fmt(completedNet)}</strong> − tax <strong>${fmt(taxRes)}</strong> = clean keep. Business overhead <strong>${fmt(overhead)}</strong> (supplies + upcoming deposits) is tracked separately.</div>
   </div>`;
 
   // ---- PAYMENT BREAKDOWN ----
@@ -736,21 +810,7 @@ function rHome(){
     <div style="margin-top:10px;font-size:12px;color:var(--muted)">Potential margin on current stock: <strong style="color:var(--green)">${fmt(invRetail-invCost)}</strong></div>
   </div>`;
 
-  // ---- YTD UNITS SOLD BY SKU ----
-  if(ytd.totalUnits>0){
-    html+=`<div class="sec-lbl">UNITS SOLD YTD (BY PRODUCT)</div>
-    <div class="card">
-      ${SKUS.map(s=>{const u=ytd.units[s.key]||0;const pct=ytd.totalUnits>0?Math.round((u/ytd.totalUnits)*100):0;const rev=u*getP(s.key);return`
-      <div style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span style="font-size:13px;font-weight:700">${s.emoji} ${s.name}</span>
-          <span style="font-size:13px;font-weight:900;color:var(--gold)">${u} units · ${fmt(rev)}</span>
-        </div>
-        <div class="pbar-wrap"><div class="pbar-fill" style="width:${pct}%;background:var(--gold)"></div></div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px">${pct}% of total units sold</div>
-      </div>`;}).join('')}
-    </div>`;
-  }
+  // (Units-by-product now shown compactly in the Season Overview area above)
 
   // ---- MILEAGE DEDUCTION ----
   if(ytd.miles>0){
@@ -765,96 +825,15 @@ function rHome(){
     </div>`;
   }
 
-  // ---- BEST SHOW THIS SEASON ----
-  if(bestShow){
-    const bt=calcShow(bestShow);
-    html+=`<div class="sec-lbl">BEST SHOW THIS SEASON</div>
-    <div class="card grb" style="cursor:pointer" onclick="go('show','${bestShow.id}')">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div><div style="font-size:18px;font-weight:900">🏆 ${bestShow.name}</div><div style="font-size:11px;color:var(--muted)">${bestShow.location||''} ${bestShow.dates?'· '+bestShow.dates.join(' → '):''}</div></div>
-        <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(bt.profit)}</div><div style="font-size:11px;color:var(--muted)">profit</div></div>
-      </div>
-      <div class="g4" style="margin-top:10px">
-        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(bt.gross)}</div><div style="font-size:9px;color:var(--muted)">GROSS</div></div>
-        <div style="text-align:center"><div style="font-size:15px;font-weight:900">${fmt(bt.cogs)}</div><div style="font-size:9px;color:var(--muted)">COGS</div></div>
-        <div style="text-align:center"><div style="font-size:15px;font-weight:900">${fmt(bt.expenses)}</div><div style="font-size:9px;color:var(--muted)">EXPENSES</div></div>
-        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--red)">${fmt(bt.taxRes)}</div><div style="font-size:9px;color:var(--muted)">TAX RES.</div></div>
-      </div>
-    </div>`;
+  // ---- BEST SHOWS: highest grossing + highest profit (completed) ----
+  if(bestGross||bestProfit){
+    html+=`<div class="sec-lbl">BEST SHOWS THIS SEASON</div>`;
+    if(bestGross)html+=bestShowCardHTML(bestGross,'🥇 Highest Grossing Show');
+    if(bestProfit&&bestProfit!==bestGross)html+=bestShowCardHTML(bestProfit,'💰 Highest Profit Show');
+    else if(bestProfit&&bestProfit===bestGross)html+=`<div style="font-size:11px;color:var(--muted);margin:-2px 0 8px;text-align:center">Same show is both highest grossing and highest profit.</div>`;
   }
 
-  // ---- VS 2025 ----
-  html+=`<div class="sec-lbl">2026 vs 2025 COMPARISON</div>
-  <div class="card">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;text-align:center;margin-bottom:12px">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;padding-bottom:6px">METRIC</div>
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;padding-bottom:6px">2025 FINAL</div>
-      <div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;padding-bottom:6px">2026 YTD</div>
-    </div>
-    ${[
-      {lbl:'Gross',v25:PREV_YEAR.gross,v26:ytd.gross},
-      {lbl:'Net Profit',v25:PREV_YEAR.net,v26:ytd.profit},
-      {lbl:'Shows Done',v25:PREV_YEAR.shows,v26:done.length,isCnt:true},
-      {lbl:'Best Show',v25:PREV_YEAR.bestProfit,v26:bestProfit>-Infinity?bestProfit:0},
-    ].map(row=>{
-      const diff=row.v26-row.v25;
-      const better=diff>0;
-      return`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;padding:8px 0;border-top:1px solid var(--border);align-items:center;text-align:center">
-        <div style="font-size:13px;font-weight:700;text-align:left">${row.lbl}</div>
-        <div style="font-size:13px;color:var(--muted)">${row.isCnt?row.v25:fmt(row.v25)}</div>
-        <div style="font-size:13px;font-weight:900;color:var(--gold)">${row.isCnt?row.v26:fmt(row.v26)} <span style="font-size:10px;color:${better?'var(--green)':'var(--red)'}">${better?'▲':'▼'} ${row.isCnt?Math.abs(diff):fmt(Math.abs(diff))}</span></div>
-      </div>`;
-    }).join('')}
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">2025 best show: ${PREV_YEAR.bestShow} — ${fmt(PREV_YEAR.bestProfit)} profit</div>
-  </div>`;
-
-  // ---- UPCOMING SHOWS ----
-  if(planned.length){
-    html+=`<div class="sec-lbl">UPCOMING SHOWS (${planned.length})</div>`;
-    planned.forEach(sh=>{
-      const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
-      const gasEst=showGas(sh);
-      html+=`<div class="card" style="cursor:pointer" onclick="go('show','${sh.id}')">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-size:16px;font-weight:900">📅 ${sh.name}</div>
-            <div style="font-size:11px;color:var(--muted)">${sh.location?sh.location+' · ':''}${dateStr} · ${sh.numDays} day${sh.numDays>1?'s':''}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:13px;font-weight:700">${fmt(sh.boothCost||0)} booth</div>
-            <div style="font-size:11px;color:var(--muted)">${sh.miles?sh.miles+' mi · est. '+fmt(gasEst)+' gas':''}</div>
-          </div>
-        </div>
-      </div>`;
-    });
-  }
-
-  // ---- RECENT COMPLETED ----
-  if(done.length){
-    html+=`<div class="sec-lbl">COMPLETED SHOWS</div>`;
-    done.slice(-5).reverse().forEach(sh=>{
-      const t=calcShow(sh);
-      const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
-      const margin=t.gross>0?Math.round((t.profit/t.gross)*100):0;
-      html+=`<div class="card sd" style="cursor:pointer" onclick="go('show','${sh.id}')">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start">
-          <div style="flex:1">
-            <div style="font-weight:900;font-size:15px">${sh.name}</div>
-            <div style="font-size:11px;color:var(--muted)">${sh.location?sh.location+' · ':''}${dateStr}</div>
-            <div style="margin-top:6px;display:flex;gap:5px;flex-wrap:wrap">
-              <span class="chip">${fmt(t.gross)} gross</span>
-              <span class="chip">${fmt(t.cogs)} COGS</span>
-              <span class="chip">${fmt(t.expenses)} exp</span>
-            </div>
-          </div>
-          <div style="text-align:right;margin-left:10px">
-            <div style="font-size:20px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div>
-            <div style="font-size:11px;color:var(--muted)">margin: ${margin}%</div>
-          </div>
-        </div>
-      </div>`;
-    });
-  }
+  // (vs-2025 table + full Upcoming/Completed lists moved off home — lists live on the Shows page)
 
   // ---- QUICK ACTIONS ----
   html+=`<div class="sec-lbl">QUICK ACTIONS</div>
@@ -944,17 +923,20 @@ function showSortKey(sh){
   return sh.createdAt||'9999';
 }
 function rShows(){
-  const upcoming=[...S.shows].filter(s=>s.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const upcoming=[...S.shows].filter(s=>isUpcoming(s)).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const completed=[...S.shows].filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
-  const tab=(showsTab==='completed')?'completed':'upcoming';
-  const list=tab==='completed'?completed:upcoming;
+  const missed=[...S.shows].filter(s=>isMissed(s)).sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
+  const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':'upcoming');
+  const list=tab==='completed'?completed:(tab==='missed'?missed:upcoming);
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
-  h+=`<div style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="showsTab='upcoming';rShows()">📅 Upcoming (${upcoming.length})</button>
-    <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="showsTab='completed';rShows()">✅ Completed (${completed.length})</button>
+  h+=`<div style="display:flex;gap:6px;margin-bottom:12px">
+    <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='upcoming';rShows()">📅 Upcoming (${upcoming.length})</button>
+    <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='completed';rShows()">✅ Completed (${completed.length})</button>
+    <button class="btn ${tab==='missed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px${(missed.length&&tab!=='missed')?';border-color:var(--redbd);color:var(--red)':''}" onclick="showsTab='missed';rShows()">⚠️ Missed (${missed.length})</button>
   </div>`;
+  if(tab==='missed'&&missed.length){h+=`<div class="wb red" style="margin-bottom:10px">These shows' dates passed but were never completed. Open one to mark it done if you actually did it, or edit/delete it.</div>`;}
   if(list.length){h+=list.map(s=>showCard(s)).join('');}
-  else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':'No upcoming shows. Tap + New Show to start.'}</div>`;}
+  else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':'No upcoming shows. Tap + New Show to start.'}</div>`;}
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
 }
@@ -1011,6 +993,8 @@ function showEditCosts(id){
   <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
+  <div class="fg"><label class="fl">Work hours per show day</label><input class="fi" type="number" id="ec_hours" step="0.5" min="0" value="${(sh.hoursPerDay!=null&&sh.hoursPerDay!=='')?sh.hoursPerDay:''}" placeholder="8 (default)"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Used for the workload stats (planned vs actual hours). Default 8h/day if blank.</div>
   <button class="btn btn-gold btn-full" onclick="saveEditCosts('${id}')">Save Costs</button>`);
 }
 function saveEditCosts(id){
@@ -1025,6 +1009,7 @@ function saveEditCosts(id){
   const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
   sh.lodging=parseFloat(v('ec_lodging'))||0;
   const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
+  const hrs=v('ec_hours'); sh.hoursPerDay = hrs===''?null:(parseFloat(hrs)||0);
   saveS();mClose();toast('Show saved!');renderCur();
 }
 function calcBreakEven(sh){
@@ -1047,14 +1032,15 @@ const SHOW_EXP_CATS=[
 ];
 function showCard(sh){
   const t=calcShow(sh);
-  const cls=sh.status==='active'?'sa':sh.status==='completed'?'sd':'';
-  const bdg=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED';
+  const missed=isMissed(sh);
+  const cls=missed?'sd':(sh.status==='active'?'sa':sh.status==='completed'?'sd':'');
+  const bdg=missed?'❌ MISSED / DID NOT DO':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED');
   const dateStr=sh.dates?sh.dates.join(' → '):'';
   const dateBig=(sh.dates&&sh.dates.length)?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):(sh.startDate||'Date TBD');
   const be=calcBreakEven(sh);
   const beHit=sh.status==='completed'&&t.gross>=be;
   return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
-    <span class="sc-badge ${sh.status}">${bdg}</span>
+    <span class="sc-badge ${sh.status}"${missed?' style="background:var(--redbg);color:var(--red);border:1px solid var(--redbd)"':''}>${bdg}</span>
     <div class="sc-name">${sh.name}</div>
     <div style="font-size:21px;font-weight:900;color:var(--gold);letter-spacing:.3px;margin:3px 0 4px;line-height:1.15">📅 ${dateBig}${sh.numDays>1?` · ${sh.numDays} days`:''}</div>
     <div class="sc-loc">${sh.location||''}</div>
