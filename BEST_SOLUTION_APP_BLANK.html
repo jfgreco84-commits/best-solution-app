@@ -476,7 +476,7 @@ function isMissed(sh){ return sh.status!=='completed' && sh.status!=='active' &&
 function isUpcoming(sh){ return sh.status!=='completed' && !isMissed(sh); }
 function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const sold=calcSold(d.morningCount,d.eveningCount); SKUS.forEach(s=>u[s.key]+=(sold[s.key]||0)); } }); return u; }
 function showPmtTotals(sh){ const p={}; PMTS.forEach(x=>p[x.key]=0); (sh.days||[]).forEach(d=>{ if(d.payments) PMTS.forEach(x=>p[x.key]+=(parseFloat(d.payments[x.key])||0)); }); return p; }
-function showHours(sh){ return (parseFloat(sh.hoursPerDay)||8)*(sh.numDays||1); }
+function showHours(sh){ return (typeof showWorkHoursTotal==='function')?showWorkHoursTotal(sh):((parseFloat(sh.hoursPerDay)||8)*(sh.numDays||1)); }
 function bestShowCardHTML(sh,label){
   const t=calcShow(sh), u=showUnitsSold(sh), p=showPmtTotals(sh);
   const dateStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
@@ -617,7 +617,8 @@ function rHome(){
   const bookedCount=bookedShowsW.length;
   const bookedShowDays=bookedShowsW.reduce((t,sh)=>t+(sh.numDays||1),0);
   const totalStaffedHours=bookedShowsW.reduce((t,sh)=>t+staffedHours(sh),0);
-  const myHoursTotal=(S.shows||[]).reduce((t,sh)=>t+(parseFloat(sh.myHours)||0),0);
+  const _ownerId=((S.reps||[]).find(r=>r.isSelf)||{}).id;
+  const myHoursTotal=(S.shows||[]).reduce((t,sh)=>{ const h=(_ownerId&&sh.repHours&&sh.repHours[_ownerId]!=null)?parseFloat(sh.repHours[_ownerId]):parseFloat(sh.myHours); return t+(h||0); },0);
   let bestGross=null,bgVal=-Infinity,bestProfit=null,bpVal=-Infinity;
   done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
   const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
@@ -990,12 +991,17 @@ function showSupplyCost(sh){
   cost+=showBagCost(sh)+showFlatOverhead(sh);
   return cost;
 }
-function showStaffCount(sh){ const reps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;}).length; return reps + (sh.repOnlyShow?0:1); }
-function showHoursPerDay(sh){ return (parseFloat(sh.hoursPerDay)||8); }
-function staffedHours(sh){ return showHoursPerDay(sh)*(sh.numDays||1)*showStaffCount(sh); }
-function _hmToMin(t){ if(!t||!/^\d{1,2}:\d{2}$/.test(t))return null; const [h,m]=t.split(':').map(Number); return h*60+m; }
+function showStaffCount(sh){ const reps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active&&!r.isSelf;}).length; return reps + (sh.repOnlyShow?0:1); }
+function _hmToMin(t){ if(t==null)return null; t=String(t); if(!/^\d{1,2}:\d{2}$/.test(t))return null; const [h,m]=t.split(':').map(Number); return h*60+m; }
 function _minToHM(mins){ mins=((mins%1440)+1440)%1440; const h=Math.floor(mins/60),m=mins%60; const ap=h<12?'AM':'PM'; let hh=h%12; if(hh===0)hh=12; return hh+(m?(':'+String(m).padStart(2,'0')):'')+' '+ap; }
-function showCallClose(sh){ const open=_hmToMin(sh.openTime)??600, close=_hmToMin(sh.closeTime)??960; return { call:_minToHM(open-60), open:_minToHM(open), close:_minToHM(close) }; }
+function _dayHasTimes(sh,di){ const d=(sh.days||[])[di]; return !!((d&&(d.openTime||d.closeTime))||sh.openTime||sh.closeTime); }
+function dayOpenMin(sh,di){ const d=(sh.days||[])[di]; return _hmToMin(d&&d.openTime) ?? _hmToMin(sh.openTime) ?? 600; }
+function dayCloseMin(sh,di){ const d=(sh.days||[])[di]; return _hmToMin(d&&d.closeTime) ?? _hmToMin(sh.closeTime) ?? 960; }
+function dayCallClose(sh,di){ const o=dayOpenMin(sh,di),c=dayCloseMin(sh,di); return { call:_minToHM(o-60), open:_minToHM(o), close:_minToHM(c) }; }
+function dayWorkHours(sh,di){ if(_dayHasTimes(sh,di)){ const o=dayOpenMin(sh,di),c=dayCloseMin(sh,di); return Math.max(0,(c-o+60)/60); } return parseFloat(sh.hoursPerDay)||8; }
+function showCallClose(sh){ return dayCallClose(sh,0); }
+function showWorkHoursTotal(sh){ const n=(sh.numDays||((sh.days||[]).length)||1); let t=0; for(let i=0;i<n;i++)t+=dayWorkHours(sh,i); return t; }
+function staffedHours(sh){ return showWorkHoursTotal(sh)*showStaffCount(sh); }
 function _bsBlankDay(n,dateStr){ return {dayNum:n,date:dateStr||('Day '+n),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'}; }
 function _bsDatesFor(startDate,n){ const out=[]; if(startDate){ const s=new Date(startDate+'T12:00:00'); for(let i=0;i<n;i++){ const d=new Date(s); d.setDate(d.getDate()+i); out.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } } else { for(let i=0;i<n;i++) out.push('Day '+(i+1)); } return out; }
 function resizeShowDays(sh,newND){
@@ -1035,17 +1041,33 @@ function showEditCosts(id){
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
   <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
   <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
-  <div class="g2" style="gap:8px">
-    <div class="fg"><label class="fl">Open time</label><input class="fi" type="time" id="ec_open" value="${sh.openTime||'10:00'}"></div>
-    <div class="fg"><label class="fl">Close time</label><input class="fi" type="time" id="ec_close" value="${sh.closeTime||'16:00'}"></div>
+  <div class="fg"><label class="fl">Hours — set each day's open &amp; close</label>
+    ${Array.from({length:sh.numDays||1},(_,i)=>{
+      const d=(sh.days||[])[i]||{}; const dl=(sh.dates&&sh.dates[i])?sh.dates[i]:('Day '+(i+1));
+      const o=(d.openTime||sh.openTime||'10:00'), c=(d.closeTime||sh.closeTime||'16:00');
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="min-width:62px;font-size:12px;color:var(--muted)">${dl}</div><input class="fi" type="time" id="ec_open_${i}" value="${o}" style="flex:1"><span style="color:var(--muted);font-size:12px">to</span><input class="fi" type="time" id="ec_close_${i}" value="${c}" style="flex:1"></div>`;
+    }).join('')}
   </div>
-  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Shown on the Upcoming list. Rep "call time" displays 1 hour before open.</div>
+  <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">Call time = 1 hour before open. Different each day is fine.</div>
   <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
-  <div class="g2" style="gap:8px">
-    <div class="fg"><label class="fl">Hours per show day</label><input class="fi" type="number" id="ec_hours" step="0.5" min="0" value="${(sh.hoursPerDay!=null&&sh.hoursPerDay!=='')?sh.hoursPerDay:''}" placeholder="8"></div>
-    <div class="fg"><label class="fl">My hours (you, this show)</label><input class="fi" type="number" id="ec_myhours" step="0.5" min="0" value="${(sh.myHours!=null&&sh.myHours!=='')?sh.myHours:''}" placeholder="0"></div>
+  <div class="fg"><label class="fl">👥 Crew — hours worked &amp; what you paid</label>
+    ${(()=>{
+      const ids=[...(sh.repIds||[])]; const owner=(S.reps||[]).find(r=>r.isSelf);
+      if(owner&&!sh.repOnlyShow&&!ids.includes(owner.id))ids.unshift(owner.id);
+      (sh.repPayout?Object.keys(sh.repPayout):[]).forEach(k=>{if(!ids.includes(k))ids.push(k);});
+      if(!ids.length)return '<div style="font-size:12px;color:var(--muted)">No reps assigned yet — assign reps on the show first, then set hours here.</div>';
+      return ids.map(rid=>{ const r=(S.reps||[]).find(x=>x.id===rid); if(!r)return '';
+        const hrs=(sh.repHours&&sh.repHours[rid]!=null)?sh.repHours[rid]:(r.isSelf&&sh.myHours!=null?sh.myHours:'');
+        const paid=(sh.repPayout&&sh.repPayout[rid]!=null)?sh.repPayout[rid]:'';
+        const autoC=repShowCalcComm(sh,rid);
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="min-width:74px;font-size:12px;font-weight:700">${r.name}${r.isSelf?' 👑':''}</div>
+          <input class="fi" type="number" step="0.5" min="0" id="ec_hrs_${rid}" value="${hrs}" placeholder="hrs" style="flex:1">
+          ${r.isSelf?'<div style="flex:1;font-size:11px;color:var(--muted);text-align:center">earns profit</div>':`<input class="fi" type="number" step="0.01" min="0" id="ec_paid_${rid}" value="${paid}" placeholder="paid ${autoC?fmt(autoC):'0'}" style="flex:1">`}</div>`;
+      }).join('');
+    })()}
   </div>
+  <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">"Paid" replaces the auto commission for that rep this show (blank = use auto). The show detail then shows each person's $/hour.</div>
   <div class="fg"><label class="fl">Show notes</label><textarea class="fi" id="ec_notes" placeholder="Anything to remember about this show…">${(sh.notes||'').replace(/</g,'&lt;')}</textarea></div>
   <button class="btn btn-gold btn-full" onclick="saveEditCosts('${id}')">Save Costs</button>`);
   setTimeout(ecUpdateTravelPreview,40);
@@ -1080,10 +1102,16 @@ function saveEditCosts(id){
   const mpgv=v('ec_mpg'); sh.mpg = mpgv===''?null:(parseFloat(mpgv)||0);
   const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
   sh.lodging=parseFloat(v('ec_lodging'))||0;
-  sh.openTime=v('ec_open')||null; sh.closeTime=v('ec_close')||null;
+  for(let i=0; $$('ec_open_'+i); i++){ const o=v('ec_open_'+i), c=v('ec_close_'+i); if(sh.days&&sh.days[i]){ sh.days[i].openTime=o||null; sh.days[i].closeTime=c||null; } }
+  if(sh.days&&sh.days[0]){ sh.openTime=sh.days[0].openTime||null; sh.closeTime=sh.days[0].closeTime||null; }
   const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
-  const hrs=v('ec_hours'); sh.hoursPerDay = hrs===''?null:(parseFloat(hrs)||0);
-  const mh=v('ec_myhours'); sh.myHours = mh===''?null:(parseFloat(mh)||0);
+  if(!sh.repHours)sh.repHours={};
+  const _crew=[...new Set([...((S.reps||[]).filter(r=>r.isSelf).map(r=>r.id)), ...(sh.repIds||[]), ...Object.keys(sh.repPayout||{})])];
+  _crew.forEach(rid=>{
+    const hEl=$$('ec_hrs_'+rid); if(hEl){ const hv=(hEl.value||'').trim(); if(hv==='')delete sh.repHours[rid]; else sh.repHours[rid]=parseFloat(hv)||0; }
+    const pEl=$$('ec_paid_'+rid); if(pEl){ const pv=(pEl.value||'').trim(); if(!sh.repPayout)sh.repPayout={}; if(pv==='')delete sh.repPayout[rid]; else sh.repPayout[rid]=parseFloat(pv)||0; }
+  });
+  const _own=(S.reps||[]).find(r=>r.isSelf); if(_own&&sh.repHours[_own.id]!=null)sh.myHours=sh.repHours[_own.id];
   sh.notes=v('ec_notes');
   saveS();mClose();toast('Show saved!');renderCur();
 }
@@ -1138,12 +1166,11 @@ function showCard(sh){
       <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Break Even</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(be)}</div></div>
     </div>
     ${(()=>{
-      const ct=showCallClose(sh);
       const dlabels=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
-      const sched=dlabels.map(dl=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">${dl}</span><span style="font-weight:700">${ct.call} – ${ct.close}</span></div>`).join('');
+      const sched=dlabels.map((dl,i)=>{const ct=dayCallClose(sh,i);return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">${dl}</span><span style="font-weight:700">${ct.call} – ${ct.close}</span></div>`;}).join('');
       const repNames=(sh.repIds||[]).map(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r?r.name+(r.isSelf?' 👑':''):null;}).filter(Boolean);
       return `<div style="margin-top:6px;padding:8px;background:rgba(120,130,160,0.08);border-radius:6px">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">⏰ Schedule · call = 1 hr before open (${ct.open})</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">⏰ Schedule · call = 1 hr before open</div>
         ${sched}
         <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:6px 0 3px">👥 Reps scheduled</div>
         <div style="font-size:12px;font-weight:700">${repNames.length?repNames.join(', '):'<span style="color:var(--muted);font-weight:400">None yet — tap the show to assign</span>'}</div>
@@ -1468,6 +1495,21 @@ function repShowCalcComm(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSale
 function repShowComm(sh,repId){ const ov=sh.repPayout&&sh.repPayout[repId]; if(ov!=null&&ov!=='')return parseFloat(ov)||0; return repShowCalcComm(sh,repId); }
 function showRepIds(sh){ const ids=new Set(); (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId)ids.add(rs.repId); })); if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids.add(k)); return [...ids]; }
 function calcShowComm(sh){ return showRepIds(sh).reduce((t,repId)=>t+repShowComm(sh,repId),0); }
+function repShowSales(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=PMTS.reduce((a,p)=>a+(parseFloat(rs[p.key])||0),0); })); return t; }
+function repDayCalcComm(d,repId){ let t=0; (d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=calcRepSalesComm(rs); }); return t; }
+function dayCommEffective(sh,di){
+  const d=(sh.days||[])[di]; if(!d)return 0; let total=0;
+  showRepIds(sh).forEach(repId=>{
+    const eff=repShowComm(sh,repId); if(!eff)return;
+    const calcTot=repShowCalcComm(sh,repId);
+    if(calcTot>0){ total+=eff*(repDayCalcComm(d,repId)/calcTot); return; }
+    const days=(sh.days||[]);
+    const selling=days.filter(x=>(x.repSales||[]).some(rs=>rs.repId===repId&&PMTS.some(p=>(parseFloat(rs[p.key])||0)>0)));
+    const pool=selling.length?selling:days;
+    if(pool.indexOf(d)>=0)total+=eff/pool.length;
+  });
+  return total;
+}
 function repEarned(repId,shId){ let total=0; (S.shows||[]).forEach(sh=>{ if(shId&&sh.id!==shId)return; total+=repShowComm(sh,repId); }); return total; }
 function repPaid(repId,shId){ const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return 0; return (rep.payments||[]).filter(p=>!shId||p.showId===shId).reduce((t,p)=>t+(parseFloat(p.amount)||0),0); }
 function repOwed(repId,shId){ return Math.max(0,repEarned(repId,shId)-repPaid(repId,shId)); }
@@ -1775,10 +1817,10 @@ function rShow(){
     return`<div class="card" style="margin-top:10px;border-color:rgba(79,195,247,0.3)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700">👥 Reps This Show</div>
-        <div style="display:flex;gap:6px;align-items:center">${sh.repOnlyShow?'<span style="font-size:10px;color:var(--gold);font-weight:700">REP-ONLY SHOW</span>':''}<button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAssignReps('${sh.id}')">✏️ Assign</button></div>
+        <div style="display:flex;gap:6px;align-items:center">${sh.repOnlyShow?'<span style="font-size:10px;color:var(--gold);font-weight:700">REP-ONLY SHOW</span>':''}<button class="btn btn-xs btn-ghost" title="Log hours worked & what you paid" onclick="showEditCosts('${sh.id}')">⏱ Hours</button><button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAssignReps('${sh.id}')">✏️ Assign</button></div>
       </div>
       ${assigned.length===0?`<div style="font-size:12px;color:var(--muted)">No reps assigned. Tap Assign to add reps working this show. (Add your team in Settings → Team.)</div>`:`
-      ${assigned.map(r=>{const earned=repEarned(r.id,sh.id);const paid=repPaid(r.id,sh.id);const owed=Math.max(0,earned-paid);const auto=repShowCalcComm(sh,r.id);const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</span><div style="text-align:right;display:flex;align-items:center;gap:8px"><div>${earned>0?`<div style="color:var(--red)">${hasOv?'Payout':'Earned'}: ${fmt(earned)}</div>${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}${hasOv?`<div style="font-size:9px;color:var(--muted)">auto ${fmt(auto)}</div>`:''}`:(hasOv?`<div style="color:var(--gold);font-weight:800">Payout: ${fmt(earned)}</div>`:'<div style="color:var(--muted)">No sales yet</div>')}</div>${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Edit what you actually paid this rep for this show" onclick="openEditPayout('${sh.id}','${r.id}')">✏️ Payout</button>`:''}</div></div>`;}).join('')}
+      ${assigned.map(r=>{const earned=repEarned(r.id,sh.id);const paid=repPaid(r.id,sh.id);const owed=Math.max(0,earned-paid);const auto=repShowCalcComm(sh,r.id);const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';const _hrs=(sh.repHours&&sh.repHours[r.id]!=null)?(parseFloat(sh.repHours[r.id])||0):null;const _sales=repShowSales(sh,r.id);const _pay=repShowComm(sh,r.id);const _sub=[];if(_hrs)_sub.push(_hrs+'h');if(_hrs&&_pay)_sub.push(fmt(_pay/_hrs)+'/hr');if(_sales)_sub.push('sold '+fmt(_sales));if(_hrs&&_sales)_sub.push(fmt(_sales/_hrs)+'/hr sold');return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div><div style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</div>${_sub.length?`<div style="font-size:9px;color:var(--muted)">${_sub.join(' · ')}</div>`:''}</div><div style="text-align:right;display:flex;align-items:center;gap:8px"><div>${earned>0?`<div style="color:var(--red)">${hasOv?'Payout':'Earned'}: ${fmt(earned)}</div>${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}${hasOv?`<div style="font-size:9px;color:var(--muted)">auto ${fmt(auto)}</div>`:''}`:(hasOv?`<div style="color:var(--gold);font-weight:800">Payout: ${fmt(earned)}</div>`:'<div style="color:var(--muted)">No sales yet</div>')}</div>${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Edit what you actually paid this rep for this show" onclick="openEditPayout('${sh.id}','${r.id}')">✏️ Payout</button>`:''}</div></div>`;}).join('')}
       ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800"><span>Total Commissions / Payouts</span><span style="color:var(--red)">-${fmt(showComm)}</span></div>`:''}
       ${assigned.filter(r=>!r.isSelf).length?`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">🔒 Commission Detail (manager) — per-rep rates</div>${assigned.filter(r=>!r.isSelf).map(r=>{const rt=repCommRates(r);let cash=0,cardElec=0;(sh.days||[]).forEach(d=>{(d.repSales||[]).forEach(rs=>{if(rs.repId===r.id){PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0;if(CASH_COMM_KEYS.includes(p.key))cash+=v;else cardElec+=v;});}});});const autoC=cash*rt.cash+cardElec*rt.card;const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';if(cash===0&&cardElec===0&&!hasOv)return'';return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(hasOv?(parseFloat(ov)||0):autoC)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×${Math.round(rt.cash*100)}% = ${fmt(cash*rt.cash)} · Card/Elec ${fmt(cardElec)}×${Math.round(rt.card*100)}% = ${fmt(cardElec*rt.card)}${hasOv?` · <b style="color:var(--gold)">manual payout ${fmt(parseFloat(ov)||0)}</b>`:''}</div></div>`;}).join('')}</div>`:''}`}
     </div>`;
@@ -1814,7 +1856,7 @@ function rDay(sh,di){
   const pmtT=calcPmt(d.payments||{});
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
-  const dayComm=calcDayComm(d);
+  const dayComm=dayCommEffective(sh,di); // reflects MANUAL payout overrides (split across days)
   const dayLoss=Math.max(0,rev-pmtT); // potential not collected (discounts/freebies/shortfall)
   const profit=pmtT-cogs-dayExp-bpd-dayComm; // net is REAL CASH: money collected minus this day's costs
   const taxRes=Math.max(0,profit*showTaxRate(sh));
