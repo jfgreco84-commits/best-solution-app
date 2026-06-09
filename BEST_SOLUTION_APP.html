@@ -3529,6 +3529,23 @@ async function cloudSignIn(){
     toast('✅ Cloud sync on');
   }catch(e){toast('Sign in failed');if(btn){btn.disabled=false;btn.textContent='SIGN IN';}}
 }
+async function cloudSignUp(){
+  if(!sb){toast('Cloud sync unavailable - no connection');return;}
+  const email=($$('cl_email').value||'').trim();
+  const pass=$$('cl_pass').value||'';
+  if(!email||!pass){toast('Enter an email and a password (6+ characters)');return;}
+  if(pass.length<6){toast('Password must be at least 6 characters');return;}
+  try{
+    const{data,error}=await sb.auth.signUp({email,password:pass});
+    if(error){toast(error.message||'Sign up failed');return;}
+    if(data&&data.session&&data.user){
+      _cloudUser=data.user; toast('✅ Account created'); setSync('syncing');
+      await cloudHydrate(); rSettings(); toast('✅ Cloud sync on — this device\'s data is now backed up');
+    } else {
+      toast('✅ Account created — check your email to confirm, then tap Sign In');
+    }
+  }catch(e){toast('Sign up failed');}
+}
 async function cloudSignOut(){
   try{if(sb)await sb.auth.signOut();}catch(e){}
   _cloudUser=null;setSync('off');rSettings();
@@ -3543,7 +3560,7 @@ function cloudCardHTML(){
     const email=_cloudUser.email||'signed in';
     return `<div class="card grb"><div style="font-size:10px;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:13px;margin-bottom:4px">Signed in as <strong>${email}</strong></div><div id="cl_status" style="font-size:12px;color:var(--muted);margin-bottom:10px">${syncLabel(_syncState)||'Synced ✓'}</div><div class="g2" style="gap:8px"><button class="btn btn-ghost btn-full" onclick="cloudSyncNow()">🔄 Sync Now</button><button class="btn btn-ghost btn-full" onclick="cloudSignOut()">Sign Out</button></div></div>`;
   }
-  return `<div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">Sign in to back up your data and sync across all your devices. The app still works offline either way.</div><div class="fg"><label class="fl">EMAIL</label><input class="fi" id="cl_email" type="email" placeholder="you@email.com" autocomplete="username"></div><div class="fg"><label class="fl">PASSWORD</label><input class="fi" id="cl_pass" type="password" placeholder="••••••••" autocomplete="current-password"></div><button class="btn btn-gold btn-full" id="cl_btn" onclick="cloudSignIn()">SIGN IN</button><div id="cl_status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px"></div></div>`;
+  return `<div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">Sign in to back up your data and sync across all your devices. The app still works offline either way.</div><div class="fg"><label class="fl">EMAIL</label><input class="fi" id="cl_email" type="email" placeholder="you@email.com" autocomplete="username"></div><div class="fg"><label class="fl">PASSWORD</label><input class="fi" id="cl_pass" type="password" placeholder="••••••••" autocomplete="current-password"></div><button class="btn btn-gold btn-full" id="cl_btn" onclick="cloudSignIn()">SIGN IN</button><button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="cloudSignUp()">✨ Create Account</button><div style="font-size:11px;color:var(--muted);margin-top:8px">First time? <strong>Create Account on the device that HAS your data</strong> (it uploads automatically), then Sign In on your other devices to pull it down.</div><div id="cl_status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px"></div></div>`;
 }
 
 
