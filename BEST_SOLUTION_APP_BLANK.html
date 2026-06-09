@@ -190,6 +190,7 @@
     .cal-cell.confirmed{background:rgba(0,210,106,0.18);border-color:var(--green)}
     .cal-cell.possible{background:rgba(255,215,0,0.16);border-color:var(--gold)}
     .cal-cell.completed{background:rgba(0,210,106,0.30);border-color:var(--green)}
+    .cal-cell.conflict{border-color:var(--red)!important;box-shadow:inset 0 0 0 2px rgba(255,60,60,0.75)}
     .cal-num{font-size:11px;font-weight:800;color:var(--text)}
     .cal-cell.today .cal-num{color:var(--gold)}
     .cal-cell.confirmed .cal-num,.cal-cell.completed .cal-num{color:var(--green)}
@@ -442,10 +443,12 @@ function calcShow(sh){
   });
   exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   exp+=(sh.lodging||0);
-  const commissions=calcShowComm(sh); // 0 when no reps — additive, no change to existing shows
+  const supplyCost=(typeof showSupplyCost==='function')?showSupplyCost(sh):0; // auto bags + manual (0 until costs entered)
+  exp+=supplyCost;
+  const commissions=calcShowComm(sh); // honors per-show payout overrides; 0 when no reps
   exp+=commissions;
   const profit=gross-cogs-exp;
-  return{gross,cogs,expenses:exp,commissions,profit,taxRes:showTaxRes(sh)};
+  return{gross,cogs,expenses:exp,commissions,supplyCost,profit,taxRes:showTaxRes(sh)};
 }
 // ---- Revenue: Potential vs Actual vs Discounts (Change 2) ----
 function showPotentialRev(sh){
@@ -610,6 +613,11 @@ function rHome(){
   const completedDays=done.reduce((t,sh)=>t+(sh.numDays||1),0);
   const plannedHours=[...upcomingShows,...activeShows].reduce((t,sh)=>t+showHours(sh),0);
   const completedHours=done.reduce((t,sh)=>t+showHours(sh),0);
+  const bookedShowsW=(S.shows||[]).filter(sh=>!isMissed(sh));
+  const bookedCount=bookedShowsW.length;
+  const bookedShowDays=bookedShowsW.reduce((t,sh)=>t+(sh.numDays||1),0);
+  const totalStaffedHours=bookedShowsW.reduce((t,sh)=>t+staffedHours(sh),0);
+  const myHoursTotal=(S.shows||[]).reduce((t,sh)=>t+(parseFloat(sh.myHours)||0),0);
   let bestGross=null,bgVal=-Infinity,bestProfit=null,bpVal=-Infinity;
   done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
   const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
@@ -699,11 +707,16 @@ function rHome(){
       <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${plannedCount}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Planned</div></div>
       <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:${missedShows.length?'var(--red)':'var(--muted)'}">${missedShows.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Missed</div></div>
     </div>
-    <div class="sr"><span class="srl">Total planned show days</span><span class="srv">${plannedDays}</span></div>
+    <div class="sr"><span class="srl b">Shows booked</span><span class="srv">${bookedCount}</span></div>
+    <div class="sr"><span class="srl">Booked show-days <span style="color:var(--muted)">(stacks overlaps)</span></span><span class="srv">${bookedShowDays}</span></div>
+    <div class="sr"><span class="srl b">Total staffed hours ⚡</span><span class="srv gold">${fmtN(totalStaffedHours)}h</span></div>
+    <div class="sr"><span class="srl">My hours (you)</span><span class="srv">${fmtN(myHoursTotal)}h</span></div>
+    <div style="height:6px"></div>
+    <div class="sr"><span class="srl">Planned show days</span><span class="srv">${plannedDays}</span></div>
     <div class="sr"><span class="srl">Completed show days</span><span class="srv">${completedDays}</span></div>
     <div class="sr"><span class="srl">Est. planned work hours</span><span class="srv">${fmtN(plannedHours)}h</span></div>
     <div class="sr"><span class="srl">Completed work hours</span><span class="srv">${fmtN(completedHours)}h</span></div>
-    <div style="font-size:10px;color:var(--muted);margin-top:6px">Hours = each show's "hours/day" (default 8) × its days — set per show in Edit Show.</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:6px">⚡ Staffed hours = each show-day's hours × people working it (reps + you), so two shows running at once count double. "My hours" is logged per show in Edit Show.</div>
   </div>`;
 
   // ---- BOOTH COSTS — full season committed ----
@@ -942,9 +955,11 @@ function rShows(){
 }
 // ---- Per-show cost helpers (fall back to old behavior when fields are empty) ----
 function showRoundTrips(sh){ return (sh.roundTrips!=null && sh.roundTrips!=='') ? (parseFloat(sh.roundTrips)||0) : (sh.numDays||1); }
+function showMpg(sh){ return (sh.mpg!=null && sh.mpg!=='') ? (parseFloat(sh.mpg)||0) : (S.settings.mpg||17.5); }
+function showGasPrice(sh){ return (sh.gasPrice!=null && sh.gasPrice!=='') ? (parseFloat(sh.gasPrice)||0) : (S.settings.gasPrice||3.50); }
 function showGas(sh){
   if(sh.gasOverride!=null && sh.gasOverride!=='') return parseFloat(sh.gasOverride)||0;
-  const mpg=S.settings.mpg||17.5, gp=S.settings.gasPrice||3.50;
+  const mpg=showMpg(sh)||17.5, gp=showGasPrice(sh);
   return (sh.miles||0)*2*showRoundTrips(sh)/mpg*gp;
 }
 function showMiles(sh){ return (sh.miles||0)*2*showRoundTrips(sh); }
@@ -957,6 +972,21 @@ function showCardSales(sh){
   return t;
 }
 function showTaxRes(sh){ return Math.max(0, showCardSales(sh)*showTaxRate(sh)); }
+// ---- Per-show supplies cost: auto lacy bags by bottle size (1 per unit sold) + manual usage ----
+function showAutoSupplyUnits(sh){ const sold=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; const out={}; if(!sold)return out;
+  (S.supplies||[]).forEach(sup=>{ if(sup.autoSizes&&sup.autoSizes.length){ let q=0; sup.autoSizes.forEach(k=>q+=(sold[k]||0)); if(q>0)out[sup.name]=(out[sup.name]||0)+q; } }); return out; }
+function showSupplyCost(sh){
+  let cost=0; const auto=showAutoSupplyUnits(sh);
+  (S.supplies||[]).forEach(sup=>{ const q=auto[sup.name]||0; if(q>0)cost+=q*(parseFloat(sup.cost)||0); });
+  (sh.supplyUse||[]).forEach(u=>{ const sup=(S.supplies||[]).find(s=>s.name===u.name); const c=sup?(parseFloat(sup.cost)||0):(parseFloat(u.cost)||0); cost+=(parseFloat(u.qty)||0)*c; });
+  return cost;
+}
+function showStaffCount(sh){ const reps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;}).length; return reps + (sh.repOnlyShow?0:1); }
+function showHoursPerDay(sh){ return (parseFloat(sh.hoursPerDay)||8); }
+function staffedHours(sh){ return showHoursPerDay(sh)*(sh.numDays||1)*showStaffCount(sh); }
+function _hmToMin(t){ if(!t||!/^\d{1,2}:\d{2}$/.test(t))return null; const [h,m]=t.split(':').map(Number); return h*60+m; }
+function _minToHM(mins){ mins=((mins%1440)+1440)%1440; const h=Math.floor(mins/60),m=mins%60; const ap=h<12?'AM':'PM'; let hh=h%12; if(hh===0)hh=12; return hh+(m?(':'+String(m).padStart(2,'0')):'')+' '+ap; }
+function showCallClose(sh){ const open=_hmToMin(sh.openTime)??600, close=_hmToMin(sh.closeTime)??960; return { call:_minToHM(open-60), open:_minToHM(open), close:_minToHM(close) }; }
 function _bsBlankDay(n,dateStr){ return {dayNum:n,date:dateStr||('Day '+n),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'}; }
 function _bsDatesFor(startDate,n){ const out=[]; if(startDate){ const s=new Date(startDate+'T12:00:00'); for(let i=0;i<n;i++){ const d=new Date(s); d.setDate(d.getDate()+i); out.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } } else { for(let i=0;i<n;i++) out.push('Day '+(i+1)); } return out; }
 function resizeShowDays(sh,newND){
@@ -981,21 +1011,52 @@ function showEditCosts(id){
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
   <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
-  <div class="fg"><label class="fl">Travel Type</label>
+  <div class="fg"><label class="fl">Travel Type — tap one</label>
     <div style="display:flex;gap:8px">
-      <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="var d=parseInt(($$('ec_days')||{}).value)||${sh.numDays||1};$$('ec_trips').value=d;">🚗 Round-trip daily</button>
-      <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="$$('ec_trips').value=1;">🏨 Hotel stay</button>
+      <button type="button" id="ec_tt_daily" class="btn ${(sh.roundTrips===1&&(sh.numDays||1)>1)?'btn-ghost':'btn-gold'} btn-sm" style="flex:1" onclick="ecSetTravel('daily')">🚗 Round-trip daily</button>
+      <button type="button" id="ec_tt_hotel" class="btn ${(sh.roundTrips===1&&(sh.numDays||1)>1)?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="ecSetTravel('hotel')">🏨 Hotel stay</button>
     </div>
   </div>
-  <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)"></div>
-  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Round-trip daily = drive home each night (1 trip/day). Hotel stay = drive there once & back once (1 trip total). Gas auto-calcs at ${S.settings.mpg||17.5} mpg × $${(S.settings.gasPrice||3.5).toFixed(2)}/gal (change in Settings); enter Actual Gas below to override.</div>
-  <div class="fg"><label class="fl">Actual Gas $ — optional, overrides estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
+  <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)" oninput="ecUpdateTravelPreview()"></div>
+  <div class="g2" style="gap:8px">
+    <div class="fg"><label class="fl">Gas $/gallon (this show)</label><input class="fi" type="number" id="ec_gasprice" step="0.01" min="0" value="${(sh.gasPrice!=null&&sh.gasPrice!=='')?sh.gasPrice:''}" placeholder="${(S.settings.gasPrice||3.5).toFixed(2)}" oninput="ecUpdateTravelPreview()"></div>
+    <div class="fg"><label class="fl">MPG (this vehicle)</label><input class="fi" type="number" id="ec_mpg" step="0.1" min="0" value="${(sh.mpg!=null&&sh.mpg!=='')?sh.mpg:''}" placeholder="${S.settings.mpg||17.5}" oninput="ecUpdateTravelPreview()"></div>
+  </div>
+  <div id="ec_travel_preview" style="font-size:12px;color:var(--gold);margin:-2px 0 10px;font-weight:700"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
+  <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
   <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
+  <div class="g2" style="gap:8px">
+    <div class="fg"><label class="fl">Open time</label><input class="fi" type="time" id="ec_open" value="${sh.openTime||'10:00'}"></div>
+    <div class="fg"><label class="fl">Close time</label><input class="fi" type="time" id="ec_close" value="${sh.closeTime||'16:00'}"></div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Shown on the Upcoming list. Rep "call time" displays 1 hour before open.</div>
   <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
-  <div class="fg"><label class="fl">Work hours per show day</label><input class="fi" type="number" id="ec_hours" step="0.5" min="0" value="${(sh.hoursPerDay!=null&&sh.hoursPerDay!=='')?sh.hoursPerDay:''}" placeholder="8 (default)"></div>
-  <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Used for the workload stats (planned vs actual hours). Default 8h/day if blank.</div>
+  <div class="g2" style="gap:8px">
+    <div class="fg"><label class="fl">Hours per show day</label><input class="fi" type="number" id="ec_hours" step="0.5" min="0" value="${(sh.hoursPerDay!=null&&sh.hoursPerDay!=='')?sh.hoursPerDay:''}" placeholder="8"></div>
+    <div class="fg"><label class="fl">My hours (you, this show)</label><input class="fi" type="number" id="ec_myhours" step="0.5" min="0" value="${(sh.myHours!=null&&sh.myHours!=='')?sh.myHours:''}" placeholder="0"></div>
+  </div>
+  <div class="fg"><label class="fl">Show notes</label><textarea class="fi" id="ec_notes" placeholder="Anything to remember about this show…">${(sh.notes||'').replace(/</g,'&lt;')}</textarea></div>
   <button class="btn btn-gold btn-full" onclick="saveEditCosts('${id}')">Save Costs</button>`);
+  setTimeout(ecUpdateTravelPreview,40);
+}
+function ecSetTravel(mode){
+  const days=parseInt(($$('ec_days')||{}).value)||1;
+  if($$('ec_trips'))$$('ec_trips').value=(mode==='hotel')?1:days;
+  const b1=$$('ec_tt_daily'),b2=$$('ec_tt_hotel');
+  if(b1){b1.classList.toggle('btn-gold',mode!=='hotel');b1.classList.toggle('btn-ghost',mode==='hotel');}
+  if(b2){b2.classList.toggle('btn-gold',mode==='hotel');b2.classList.toggle('btn-ghost',mode!=='hotel');}
+  ecUpdateTravelPreview();
+}
+function ecUpdateTravelPreview(){
+  const el=$$('ec_travel_preview'); if(!el)return;
+  const miles=parseFloat(($$('ec_miles')||{}).value)||0;
+  const trips=parseFloat(($$('ec_trips')||{}).value)|| (parseInt(($$('ec_days')||{}).value)||1);
+  const mpg=parseFloat(($$('ec_mpg')||{}).value)||(S.settings.mpg||17.5);
+  const gp=parseFloat(($$('ec_gasprice')||{}).value)||(S.settings.gasPrice||3.5);
+  const totMiles=miles*2*trips; const gas=mpg>0?totMiles/mpg*gp:0;
+  el.textContent='Total miles: '+Math.round(totMiles)+' · est. gas: '+fmt(gas);
 }
 function saveEditCosts(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
@@ -1006,18 +1067,31 @@ function saveEditCosts(id){
   sh.boothCost=parseFloat(v('ec_booth'))||0;
   sh.miles=parseFloat(v('ec_miles'))||0;
   const tr=v('ec_trips'); sh.roundTrips = tr===''?null:(parseFloat(tr)||0);
+  const gpr=v('ec_gasprice'); sh.gasPrice = gpr===''?null:(parseFloat(gpr)||0);
+  const mpgv=v('ec_mpg'); sh.mpg = mpgv===''?null:(parseFloat(mpgv)||0);
   const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
   sh.lodging=parseFloat(v('ec_lodging'))||0;
+  sh.openTime=v('ec_open')||null; sh.closeTime=v('ec_close')||null;
   const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
   const hrs=v('ec_hours'); sh.hoursPerDay = hrs===''?null:(parseFloat(hrs)||0);
+  const mh=v('ec_myhours'); sh.myHours = mh===''?null:(parseFloat(mh)||0);
+  sh.notes=v('ec_notes');
   saveS();mClose();toast('Show saved!');renderCur();
 }
 function calcBreakEven(sh){
-  const mpg=S.settings.mpg||17.5;
-  const gp=S.settings.gasPrice||3.50;
   const gas=showGas(sh);
   const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
-  return (sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
+  const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
+  // Need enough SALES that, after product cost (COGS) and rep commission, fixed costs are covered:
+  // BE = fixedCosts / (1 - cogsRate - blendedCommRate)
+  const paidRepList=(sh.repIds||[]).map(id=>(S.reps||[]).find(x=>x.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+  const cogsRate=0.30;
+  if(paidRepList.length){
+    const blendedCommRate=paidRepList.reduce((t,r)=>{const rt=repCommRates(r);return t+(0.60*rt.cash+0.40*rt.card);},0)/paidRepList.length;
+    const variableRate=cogsRate+blendedCommRate;
+    return variableRate>=1?fixedCosts*3:fixedCosts/(1-variableRate);
+  }
+  return fixedCosts/(1-cogsRate);
 }
 const SHOW_EXP_CATS=[
   {key:'fuel',   label:'Fuel',         icon:'⛽'},
@@ -1044,11 +1118,27 @@ function showCard(sh){
     <div class="sc-name">${sh.name}</div>
     <div style="font-size:21px;font-weight:900;color:var(--gold);letter-spacing:.3px;margin:3px 0 4px;line-height:1.15">📅 ${dateBig}${sh.numDays>1?` · ${sh.numDays} days`:''}</div>
     <div class="sc-loc">${sh.location||''}</div>
-    ${sh.status==='planned'?`
+    ${missed?`<div style="margin-top:8px;padding:8px;background:var(--redbg);border:1px solid var(--redbd);border-radius:6px" onclick="event.stopPropagation()">
+      <div style="font-size:9px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:3px">❌ Why missed?</div>
+      <textarea class="fi" style="font-size:12px;min-height:38px" placeholder="e.g. double-booked; weather; booth fell through" onchange="saveMissedReason('${sh.id}',this.value)">${(sh.missedReason||'').replace(/</g,'&lt;')}</textarea>
+    </div>`:''}
+    ${(sh.status==='planned'&&!missed)?`
     <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2)">
       <div style="font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}</div>
       <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Break Even</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(be)}</div></div>
-    </div>`:``}
+    </div>
+    ${(()=>{
+      const ct=showCallClose(sh);
+      const dlabels=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
+      const sched=dlabels.map(dl=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">${dl}</span><span style="font-weight:700">${ct.call} – ${ct.close}</span></div>`).join('');
+      const repNames=(sh.repIds||[]).map(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r?r.name+(r.isSelf?' 👑':''):null;}).filter(Boolean);
+      return `<div style="margin-top:6px;padding:8px;background:rgba(120,130,160,0.08);border-radius:6px">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">⏰ Schedule · call = 1 hr before open (${ct.open})</div>
+        ${sched}
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:6px 0 3px">👥 Reps scheduled</div>
+        <div style="font-size:12px;font-weight:700">${repNames.length?repNames.join(', '):'<span style="color:var(--muted);font-weight:400">None yet — tap the show to assign</span>'}</div>
+      </div>`;
+    })()}`:``}
     ${sh.status==='active'?`
     <div class="sc-stats">
       <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
@@ -1092,6 +1182,11 @@ function saveLodging(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
   sh.lodging=parseFloat($$('lod_amt').value)||0;
   saveS();mClose();toast('Lodging saved!');rShows();
+}
+function saveMissedReason(id,val){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  sh.missedReason=(val||'').trim();
+  saveS();
 }
 
 // ===================================================
@@ -1347,16 +1442,23 @@ function delTransfer(id){
 // Cash = 35%; card + all electronic = 30%. Owner (isSelf) earns nothing.
 // ===================================================
 function _emptyRS(repId){ const o={repId}; PMTS.forEach(p=>o[p.key]=0); return o; }
+function repCommRates(rep){ return {
+  cash:(rep&&rep.commCash!=null&&rep.commCash!=='')?(parseFloat(rep.commCash)||0):COMM_CASH,
+  card:(rep&&rep.commCard!=null&&rep.commCard!=='')?(parseFloat(rep.commCard)||0):COMM_CARD }; }
 function calcRepSalesComm(rs){
   const rep=(S.reps||[]).find(r=>r.id===rs.repId);
   if(!rep||rep.isSelf)return 0;
+  const rt=repCommRates(rep);
   let cashAmt=0,cardElecAmt=0;
   PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0; if(CASH_COMM_KEYS.includes(p.key))cashAmt+=v; else cardElecAmt+=v;});
-  return cashAmt*COMM_CASH+cardElecAmt*COMM_CARD;
+  return cashAmt*rt.cash+cardElecAmt*rt.card;
 }
 function calcDayComm(day){ return (day.repSales||[]).reduce((t,rs)=>t+calcRepSalesComm(rs),0); }
-function calcShowComm(sh){ return (sh.days||[]).reduce((t,d)=>t+calcDayComm(d),0); }
-function repEarned(repId,shId){ let total=0; (S.shows||[]).forEach(sh=>{ if(shId&&sh.id!==shId)return; (sh.days||[]).forEach(day=>{ (day.repSales||[]).forEach(rs=>{ if(rs.repId===repId)total+=calcRepSalesComm(rs); }); }); }); return total; }
+function repShowCalcComm(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=calcRepSalesComm(rs); })); return t; }
+function repShowComm(sh,repId){ const ov=sh.repPayout&&sh.repPayout[repId]; if(ov!=null&&ov!=='')return parseFloat(ov)||0; return repShowCalcComm(sh,repId); }
+function showRepIds(sh){ const ids=new Set(); (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId)ids.add(rs.repId); })); if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids.add(k)); return [...ids]; }
+function calcShowComm(sh){ return showRepIds(sh).reduce((t,repId)=>t+repShowComm(sh,repId),0); }
+function repEarned(repId,shId){ let total=0; (S.shows||[]).forEach(sh=>{ if(shId&&sh.id!==shId)return; total+=repShowComm(sh,repId); }); return total; }
 function repPaid(repId,shId){ const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return 0; return (rep.payments||[]).filter(p=>!shId||p.showId===shId).reduce((t,p)=>t+(parseFloat(p.amount)||0),0); }
 function repOwed(repId,shId){ return Math.max(0,repEarned(repId,shId)-repPaid(repId,shId)); }
 function allRepsOwed(){ return (S.reps||[]).filter(r=>!r.isSelf&&r.active).map(r=>({rep:r,earned:repEarned(r.id),paid:repPaid(r.id),owed:repOwed(r.id)})).filter(x=>x.earned>0||x.owed>0); }
@@ -1381,6 +1483,13 @@ function openEditRep(repId){
   <div class="fg"><label class="fl">Phone</label><input class="fi" id="er_phone" value="${rep.phone||''}"></div>
   <div style="margin-bottom:12px"><label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="er_active" ${rep.active?'checked':''} style="width:18px;height:18px"><span>Active (appears in show rosters)</span></label></div>
   <div style="margin-bottom:12px"><label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="er_self" ${rep.isSelf?'checked':''} style="width:18px;height:18px"><span>This is ME (owner — earns no commission)</span></label></div>
+  ${!rep.isSelf?`<div class="fg"><label class="fl">Commission rates — blank = default (${Math.round(COMM_CASH*100)}% cash / ${Math.round(COMM_CARD*100)}% card/electronic)</label>
+    <div class="g2" style="gap:8px">
+      <div><label class="fl" style="font-size:10px">CASH %</label><input class="fi" type="number" id="er_commcash" step="1" min="0" max="100" value="${(rep.commCash!=null&&rep.commCash!=='')?Math.round(rep.commCash*100):''}" placeholder="${Math.round(COMM_CASH*100)}"></div>
+      <div><label class="fl" style="font-size:10px">CARD/ELECTRONIC %</label><input class="fi" type="number" id="er_commcard" step="1" min="0" max="100" value="${(rep.commCard!=null&&rep.commCard!=='')?Math.round(rep.commCard*100):''}" placeholder="${Math.round(COMM_CARD*100)}"></div>
+    </div>
+  </div>
+  <button type="button" class="btn btn-ghost btn-sm btn-full" style="margin:-4px 0 12px" onclick="var c=prompt('Flat commission % — applies to BOTH cash and card','40');if(c!==null&&c!==''){$$('er_commcash').value=c;$$('er_commcard').value=c;}">⚡ Set one flat rate (e.g. 40% both)</button>`:''}
   ${(()=>{ const earned=repEarned(repId);const paid=repPaid(repId);const owed=Math.max(0,earned-paid); if(!earned)return''; return`<div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px"><div style="font-weight:700;margin-bottom:4px">Season Stats</div><div>Earned: <span style="color:var(--red)">${fmt(earned)}</span> · Paid: <span style="color:var(--green)">${fmt(paid)}</span>${owed>0?` · <span style="color:var(--gold);font-weight:800">Owes ${fmt(owed)}</span>`:' ✓'}</div></div>`; })()}
   <button class="btn btn-gold btn-full" style="margin-bottom:8px" onclick="saveEditRep('${repId}')">Save Changes</button>
   ${!rep.isSelf?`<button class="btn btn-ghost btn-full" onclick="mClose();openLogRepPmt('${repId}')">💰 Log Payment to ${rep.name}</button>`:''}`);
@@ -1391,7 +1500,40 @@ function saveEditRep(repId){
   rep.phone=($$('er_phone').value||'').trim();
   rep.active=$$('er_active').checked;
   if($$('er_self'))rep.isSelf=$$('er_self').checked;
+  if(!rep.isSelf){
+    const cc=($$('er_commcash')||{}).value; rep.commCash=(cc==null||cc==='')?null:((parseFloat(cc)||0)/100);
+    const cd=($$('er_commcard')||{}).value; rep.commCard=(cd==null||cd==='')?null:((parseFloat(cd)||0)/100);
+  }
   mClose();saveS();toast('✅ Saved!');rSettings();
+}
+function openEditPayout(shId,repId){
+  const sh=S.shows.find(s=>s.id===shId);const rep=(S.reps||[]).find(r=>r.id===repId);
+  if(!sh||!rep)return;
+  const auto=repShowCalcComm(sh,repId);
+  const ov=sh.repPayout&&sh.repPayout[repId];
+  const cur=(ov!=null&&ov!=='')?ov:'';
+  mOpen(`<div class="mh"><div class="mt">💵 Payout — ${rep.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name}</div>
+  <div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px">
+    Auto-calculated commission: <strong style="color:var(--gold)">${fmt(auto)}</strong><br>
+    <span style="color:var(--muted)">Enter the actual amount you paid (covers commission + anything extra). It replaces the calculated number for this show.</span>
+  </div>
+  <div class="fg"><label class="fl">Actual payout for this show ($)</label><input class="fi" type="number" id="ep_amt" step="0.01" min="0" value="${cur}" placeholder="${auto.toFixed(2)}"></div>
+  <button class="btn btn-gold btn-full" style="margin-bottom:8px" onclick="saveEditPayout('${shId}','${repId}')">Save Payout</button>
+  ${(ov!=null&&ov!=='')?`<button class="btn btn-ghost btn-full" onclick="clearEditPayout('${shId}','${repId}')">↩︎ Clear override (use auto ${fmt(auto)})</button>`:''}`);
+}
+function saveEditPayout(shId,repId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const raw=($$('ep_amt')||{}).value;
+  if(raw==null||raw===''){ clearEditPayout(shId,repId); return; }
+  if(!sh.repPayout)sh.repPayout={};
+  sh.repPayout[repId]=parseFloat(raw)||0;
+  mClose();saveS();toast('✅ Payout set');renderCur();
+}
+function clearEditPayout(shId,repId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  if(sh.repPayout)delete sh.repPayout[repId];
+  mClose();saveS();toast('Override cleared — using auto');renderCur();
 }
 function openLogRepPmt(repId){
   const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep||rep.isSelf)return;
@@ -1626,11 +1768,23 @@ function rShow(){
         <div style="display:flex;gap:6px;align-items:center">${sh.repOnlyShow?'<span style="font-size:10px;color:var(--gold);font-weight:700">REP-ONLY SHOW</span>':''}<button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAssignReps('${sh.id}')">✏️ Assign</button></div>
       </div>
       ${assigned.length===0?`<div style="font-size:12px;color:var(--muted)">No reps assigned. Tap Assign to add reps working this show. (Add your team in Settings → Team.)</div>`:`
-      ${assigned.map(r=>{const earned=repEarned(r.id,sh.id);const paid=repPaid(r.id,sh.id);const owed=Math.max(0,earned-paid);return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</span><div style="text-align:right">${earned>0?`<div style="color:var(--red)">Earned: ${fmt(earned)}</div>${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}`:'<div style="color:var(--muted)">No sales yet</div>'}</div></div>`;}).join('')}
-      ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800"><span>Total Commissions</span><span style="color:var(--red)">-${fmt(showComm)}</span></div>`:''}
-      ${assigned.filter(r=>!r.isSelf).length?`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">🔒 Commission Detail (manager) — 35% cash · 30% card/electronic</div>${assigned.filter(r=>!r.isSelf).map(r=>{let cash=0,cardElec=0;(sh.days||[]).forEach(d=>{(d.repSales||[]).forEach(rs=>{if(rs.repId===r.id){PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0;if(CASH_COMM_KEYS.includes(p.key))cash+=v;else cardElec+=v;});}});});const comm=cash*COMM_CASH+cardElec*COMM_CARD;if(cash===0&&cardElec===0)return'';return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(comm)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×35% = ${fmt(cash*COMM_CASH)} · Card/Elec ${fmt(cardElec)}×30% = ${fmt(cardElec*COMM_CARD)}</div></div>`;}).join('')}</div>`:''}`}
+      ${assigned.map(r=>{const earned=repEarned(r.id,sh.id);const paid=repPaid(r.id,sh.id);const owed=Math.max(0,earned-paid);const auto=repShowCalcComm(sh,r.id);const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</span><div style="text-align:right;display:flex;align-items:center;gap:8px"><div>${earned>0?`<div style="color:var(--red)">${hasOv?'Payout':'Earned'}: ${fmt(earned)}</div>${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}${hasOv?`<div style="font-size:9px;color:var(--muted)">auto ${fmt(auto)}</div>`:''}`:(hasOv?`<div style="color:var(--gold);font-weight:800">Payout: ${fmt(earned)}</div>`:'<div style="color:var(--muted)">No sales yet</div>')}</div>${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Edit what you actually paid this rep for this show" onclick="openEditPayout('${sh.id}','${r.id}')">✏️ Payout</button>`:''}</div></div>`;}).join('')}
+      ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800"><span>Total Commissions / Payouts</span><span style="color:var(--red)">-${fmt(showComm)}</span></div>`:''}
+      ${assigned.filter(r=>!r.isSelf).length?`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">🔒 Commission Detail (manager) — per-rep rates</div>${assigned.filter(r=>!r.isSelf).map(r=>{const rt=repCommRates(r);let cash=0,cardElec=0;(sh.days||[]).forEach(d=>{(d.repSales||[]).forEach(rs=>{if(rs.repId===r.id){PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0;if(CASH_COMM_KEYS.includes(p.key))cash+=v;else cardElec+=v;});}});});const autoC=cash*rt.cash+cardElec*rt.card;const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';if(cash===0&&cardElec===0&&!hasOv)return'';return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(hasOv?(parseFloat(ov)||0):autoC)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×${Math.round(rt.cash*100)}% = ${fmt(cash*rt.cash)} · Card/Elec ${fmt(cardElec)}×${Math.round(rt.card*100)}% = ${fmt(cardElec*rt.card)}${hasOv?` · <b style="color:var(--gold)">manual payout ${fmt(parseFloat(ov)||0)}</b>`:''}</div></div>`;}).join('')}</div>`:''}`}
     </div>`;
   })()}
+  ${(()=>{
+    const auto=showAutoSupplyUnits(sh); const sc=showSupplyCost(sh);
+    const autoRows=Object.keys(auto).map(name=>{const sup=(S.supplies||[]).find(x=>x.name===name);const c=sup?(parseFloat(sup.cost)||0):0;return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${name} × ${auto[name]}</span><span style="color:var(--muted)">${fmt(auto[name]*c)}</span></div>`;}).join('');
+    const manRows=(sh.supplyUse||[]).map(u=>{const sup=(S.supplies||[]).find(x=>x.name===u.name);const c=sup?(parseFloat(sup.cost)||0):(parseFloat(u.cost)||0);return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${u.name} × ${u.qty}</span><span style="color:var(--muted)">${fmt((parseFloat(u.qty)||0)*c)}</span></div>`;}).join('');
+    return `<div class="card" style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🧴 Supplies Used</div><button class="btn btn-xs btn-ghost" onclick="openSupplyUse('${sh.id}')">✏️ Edit</button></div>
+      ${autoRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Auto give-aways (from sales)</div>${autoRows}`:''}
+      ${manRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Manual</div>${manRows}`:''}
+      ${(!autoRows&&!manRows)?'<div style="font-size:12px;color:var(--muted)">No supply cost yet. Set per-unit costs + give-away sizes on the Supplies page; bags then auto-count from sales. Tap Edit to add paper towels, liners, etc.</div>':`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`}
+    </div>`;
+  })()}
+  ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
   <div style="height:10px"></div>`;
 }
 
@@ -1644,7 +1798,8 @@ function rDay(sh,di){
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
   const dayComm=calcDayComm(d);
-  const profit=rev-cogs-dayExp-bpd-dayComm;
+  const dayLoss=Math.max(0,rev-pmtT); // potential not collected (discounts/freebies/shortfall)
+  const profit=pmtT-cogs-dayExp-bpd-dayComm; // net is REAL CASH: money collected minus this day's costs
   const taxRes=Math.max(0,profit*showTaxRate(sh));
   const soldChips=sold?SKUS.filter(s=>(sold[s.key]||0)>0).map(s=>`<span class="chip gold">${s.short}: <strong>${sold[s.key]}</strong></span>`).join(''):'';
   let moneyCheck='';
@@ -1689,13 +1844,15 @@ function rDay(sh,di){
       <span class="chip">Other: <strong>${fmt(d.expenses?.other||0)}</strong></span>
     </div>`:''}
     ${haM&&haE?`<div class="div"></div>
-    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">DAY SUMMARY</div>
-    <div class="sr"><span class="srl">Gross Revenue</span><span class="srv gold">${fmt(rev)}</span></div>
+    <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">DAY SUMMARY · REAL CASH</div>
+    <div class="sr"><span class="srl">Money Collected</span><span class="srv gold">${fmt(pmtT)}</span></div>
+    ${rev>0?`<div class="sr"><span class="srl" style="color:var(--muted)">Potential (full price)</span><span class="srv" style="color:var(--muted)">${fmt(rev)}</span></div>`:''}
+    ${dayLoss>0.005?`<div class="sr"><span class="srl">Loss (discounts/freebies)</span><span class="srv red">-${fmt(dayLoss)}</span></div>`:''}
     <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv">-${fmt(cogs)}</span></div>
     <div class="sr"><span class="srl">Day Expenses</span><span class="srv">-${fmt(dayExp)}</span></div>
     <div class="sr"><span class="srl">Booth Share</span><span class="srv">-${fmt(bpd)}</span></div>
     ${dayComm>0?`<div class="sr"><span class="srl">Rep Commissions</span><span class="srv red">-${fmt(dayComm)}</span></div>`:''}
-    <div class="sr"><span class="srl b">Net Profit</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
+    <div class="sr"><span class="srl b">Net Profit (cash)</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve (${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?' · show rate':''})</span><span class="srv red">-${fmt(taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
     ${isA?`<div class="div"></div><div class="fg"><label class="fl">Notes / What Worked</label><textarea class="fi" placeholder="Best sellers? Weather? What to restock?" onchange="saveDayNote('${sh.id}',${di},this.value)">${d.notes||''}</textarea></div>`
@@ -2007,9 +2164,12 @@ function rCalendar(){
   h+='<div class="cal-grid">';
   DOW.forEach(d=>h+=`<div class="cal-dow">${d}</div>`);
   for(let i=0;i<startDow;i++)h+='<div class="cal-cell blank"></div>';
+  let conflictDays=0;
   for(let day=1;day<=daysInMonth;day++){
     const ds=`${mKey}-${String(day).padStart(2,'0')}`;
     const shows=dayMap[ds]||[];
+    const conflict=shows.length>1;
+    if(conflict)conflictDays++;
     let cls='cal-cell',onclick='';
     if(ds===todayStr)cls+=' today';
     if(shows.length){
@@ -2017,16 +2177,17 @@ function rCalendar(){
       if(shows.some(s=>s.status==='completed'))st='completed';
       else if(shows.some(s=>s.confirmed||s.status==='active'))st='confirmed';
       cls+=` has-show ${st}`;
+      if(conflict)cls+=' conflict';
       onclick=` onclick="go('show','${shows[0].id}')"`;
     }
-    h+=`<div class="${cls}"${onclick}><div class="cal-num">${day}</div>`;
+    h+=`<div class="${cls}"${onclick}><div class="cal-num">${day}${conflict?' <span style="color:var(--red);font-size:10px">⚠️</span>':''}</div>`;
     shows.slice(0,2).forEach(s=>{h+=`<div class="cal-show-pill">${s.name}</div>`;});
     if(shows.length>2)h+=`<div class="cal-show-pill">+${shows.length-2} more</div>`;
     h+='</div>';
   }
   h+='</div>';
-  h+=`<div class="cal-legend"><span><span class="cal-legend-dot" style="background:var(--green)"></span>Booked</span><span><span class="cal-legend-dot" style="background:var(--gold)"></span>Pending</span><span><span class="cal-legend-dot" style="background:rgba(0,210,106,0.55)"></span>Completed</span></div>`;
-  h+=`<div style="text-align:center;font-size:12px;color:var(--muted);margin-top:10px">${monthDays} show day${monthDays===1?'':'s'} in ${MN[m]}</div>`;
+  h+=`<div class="cal-legend"><span><span class="cal-legend-dot" style="background:var(--green)"></span>Booked</span><span><span class="cal-legend-dot" style="background:var(--gold)"></span>Pending</span><span><span class="cal-legend-dot" style="background:rgba(0,210,106,0.55)"></span>Completed</span><span><span class="cal-legend-dot" style="background:var(--red)"></span>⚠️ Conflict</span></div>`;
+  h+=`<div style="text-align:center;font-size:12px;color:var(--muted);margin-top:10px">${monthDays} show day${monthDays===1?'':'s'} in ${MN[m]}${conflictDays?` · <span style="color:var(--red);font-weight:700">${conflictDays} conflict day${conflictDays>1?'s':''}</span>`:''}</div>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="calToday()">Jump to This Month</button>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="exportCalICS()">Export Shows to Calendar (.ics)</button>`;
   pg('calendar').innerHTML=h;
@@ -2054,16 +2215,19 @@ function rSupplies(){
   } else {
     sup.forEach((s,i)=>{
       const isLow=s.qty<=s.low&&s.low>0;
+      const cost=parseFloat(s.cost)||0;
+      const autoLbl=(s.autoSizes&&s.autoSizes.length)?s.autoSizes.map(k=>{const sk=SKUS.find(x=>x.key===k);return sk?sk.short:k;}).join('/'):'';
       h+=`<div class="cr">
         <div class="cr-i">
           <div class="cr-n" style="${isLow?'color:var(--red)':''}">${s.name}</div>
-          <div class="cr-s">${isLow?'⚠️ LOW · ':''}<span style="color:var(--muted)">min ${s.low} ${s.unit||'ea'}</span></div>
+          <div class="cr-s">${isLow?'⚠️ LOW · ':''}<span style="color:var(--muted)">min ${s.low} ${s.unit||'ea'}${cost>0?' · '+fmt(cost)+'/ea':''}${autoLbl?' · 🎁 '+autoLbl:''}</span></div>
         </div>
         <div class="cr-c">
           <button class="crb" onclick="adjSup(${i},-1)">−</button>
           <input class="cri" type="number" min="0" value="${s.qty}" style="${isLow?'border-color:var(--red);color:var(--red)':''}" onchange="setSup(${i},this.value)">
           <button class="crb" onclick="adjSup(${i},1)">+</button>
-          <button onclick="delSup(${i})" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px;margin-left:2px" title="Delete">🗑</button>
+          <button onclick="openSupEdit(${i})" style="background:none;border:none;color:var(--muted);font-size:15px;cursor:pointer;padding:4px;margin-left:2px" title="Cost & give-away settings">⚙️</button>
+          <button onclick="delSup(${i})" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px" title="Delete">🗑</button>
         </div>
       </div>`;
     });
@@ -2071,15 +2235,62 @@ function rSupplies(){
   h+='</div>';
   h+=`<div class="sec-lbl">ADD ITEM</div>
   <div class="card">
-    <div class="fg"><label class="fl">ITEM NAME</label><input class="fi" id="sup-new-name" placeholder="e.g. Paper Bags"></div>
+    <div class="fg"><label class="fl">ITEM NAME</label><input class="fi" id="sup-new-name" placeholder="e.g. Small lacy bag"></div>
     <div class="g2" style="gap:8px;margin-bottom:11px">
       <div><label class="fl">QUANTITY</label><input class="fi" id="sup-new-qty" type="number" min="0" placeholder="0" style="font-size:16px"></div>
       <div><label class="fl">LOW ALERT AT</label><input class="fi" id="sup-new-low" type="number" min="0" placeholder="2" style="font-size:16px"></div>
     </div>
-    <div class="fg"><label class="fl">UNIT (optional)</label><input class="fi" id="sup-new-unit" placeholder="ea, roll, pk, bag…"></div>
+    <div class="g2" style="gap:8px;margin-bottom:11px">
+      <div><label class="fl">UNIT (optional)</label><input class="fi" id="sup-new-unit" placeholder="ea, roll, bag…"></div>
+      <div><label class="fl">COST $/UNIT</label><input class="fi" id="sup-new-cost" type="number" min="0" step="0.001" placeholder="0.00" style="font-size:16px"></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">After adding, tap ⚙️ to set which bottle sizes give it away (auto-counts per show).</div>
     <button class="btn btn-gold btn-full" onclick="addSupItem()">+ ADD ITEM</button>
   </div>`;
   pg('supplies').innerHTML=h;
+}
+function openSupEdit(i){
+  const s=(S.supplies||[])[i]; if(!s)return;
+  const sizes=s.autoSizes||[];
+  mOpen(`<div class="mh"><div class="mt">⚙️ ${s.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">Name</label><input class="fi" id="se_name" value="${(s.name||'').replace(/"/g,'&quot;')}"></div>
+  <div class="g2" style="gap:8px">
+    <div class="fg"><label class="fl">Cost $/unit</label><input class="fi" id="se_cost" type="number" min="0" step="0.001" value="${(s.cost!=null&&s.cost!=='')?s.cost:''}" placeholder="0.00"></div>
+    <div class="fg"><label class="fl">Unit</label><input class="fi" id="se_unit" value="${s.unit||''}" placeholder="ea"></div>
+  </div>
+  <div class="fg"><label class="fl">Low alert at</label><input class="fi" id="se_low" type="number" min="0" value="${s.low!=null?s.low:''}" placeholder="2"></div>
+  <div class="fg"><label class="fl">🎁 Given away automatically with (1 per unit sold)</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+      ${SKUS.map(sk=>`<label style="display:flex;align-items:center;gap:5px;font-size:12px;background:var(--card2);padding:6px 9px;border-radius:8px;cursor:pointer"><input type="checkbox" class="se_sz" value="${sk.key}" ${sizes.includes(sk.key)?'checked':''}> ${sk.short}</label>`).join('')}
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">e.g. small lacy bag → check 2oz; large lacy → check 16oz & 32oz. Leave all unchecked for supplies you tally manually per show.</div>
+  <button class="btn btn-gold btn-full" onclick="saveSupEdit(${i})">Save</button>`);
+}
+function saveSupEdit(i){
+  const s=(S.supplies||[])[i]; if(!s)return;
+  s.name=($$('se_name').value||s.name).trim();
+  const c=($$('se_cost').value||'').trim(); s.cost=c===''?null:(parseFloat(c)||0);
+  s.unit=($$('se_unit').value||'').trim()||'ea';
+  const lo=($$('se_low').value||'').trim(); s.low=lo===''?0:(parseInt(lo)||0);
+  s.autoSizes=[...document.querySelectorAll('.se_sz:checked')].map(el=>el.value);
+  mClose();saveS();toast('✅ Saved');rSupplies();
+}
+function openSupplyUse(shId){
+  const sh=S.shows.find(s=>s.id===shId); if(!sh)return;
+  const sups=(S.supplies||[]).filter(s=>!(s.autoSizes&&s.autoSizes.length));
+  const useMap={}; (sh.supplyUse||[]).forEach(u=>useMap[u.name]=u.qty);
+  mOpen(`<div class="mh"><div class="mt">🧴 Supplies Used</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — how many of each you used (paper towels, liners, skirts, tables…). Lacy bags auto-count from sales.</div>
+  ${sups.length?sups.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:13px"><div style="font-weight:700">${s.name}</div><div style="font-size:11px;color:var(--muted)">${(parseFloat(s.cost)||0)?fmt(parseFloat(s.cost))+'/'+(s.unit||'ea'):'no cost set'}</div></div><input class="fi su_use" data-name="${(s.name||'').replace(/"/g,'&quot;')}" type="number" min="0" step="1" value="${useMap[s.name]!=null?useMap[s.name]:''}" placeholder="0" style="max-width:90px"></div>`).join(''):'<div style="font-size:12px;color:var(--muted)">No manual supplies yet. Add items on the Supplies page (leave their give-away sizes unchecked) and set a cost.</div>'}
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveSupplyUse('${shId}')">Save</button>`);
+}
+function saveSupplyUse(shId){
+  const sh=S.shows.find(s=>s.id===shId); if(!sh)return;
+  const out=[];
+  [...document.querySelectorAll('.su_use')].forEach(el=>{const q=parseFloat(el.value)||0; if(q>0)out.push({name:el.getAttribute('data-name'),qty:q});});
+  sh.supplyUse=out;
+  mClose();saveS();toast('✅ Supplies saved');renderCur();
 }
 function adjSup(i,delta){
   if(!S.supplies||!S.supplies[i])return;
@@ -2104,8 +2315,9 @@ function addSupItem(){
   const qty=parseInt($$('sup-new-qty').value)||0;
   const low=parseInt($$('sup-new-low').value)||2;
   const unit=($$('sup-new-unit').value||'').trim()||'ea';
+  const costRaw=($$('sup-new-cost')||{}).value; const cost=(costRaw==null||costRaw==='')?null:(parseFloat(costRaw)||0);
   if(!S.supplies)S.supplies=[];
-  S.supplies.push({id:'sup_'+Date.now(),name,qty,low,unit});
+  S.supplies.push({id:'sup_'+Date.now(),name,qty,low,unit,cost,autoSizes:[]});
   saveS();
   toast('✅ '+name+' added');
 }
