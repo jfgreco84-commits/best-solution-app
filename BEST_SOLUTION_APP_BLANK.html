@@ -508,8 +508,8 @@ function calcYTD(){
   SKUS.forEach(s=>units[s.key]=0);
   let pmtTotals={cash:0,square:0,venmo:0,paypal:0,cashapp:0,zelle:0};
   let miles=0,gas=0,taxResSum=0;
-  // Completed shows: gross, cogs, and all show-level expenses (booth + daily gas/food/etc)
-  S.shows.filter(s=>s.status==='completed').forEach(sh=>{
+  // GROSS counts money collected from COMPLETED shows AND completed days of in-progress (active) multi-day shows.
+  S.shows.filter(s=>s.status==='completed'||s.status==='active').forEach(sh=>{
     const t=calcShow(sh);gross+=t.gross;cogs+=t.cogs;expenses+=t.expenses;
     taxResSum+=t.taxRes;
     miles+=showMiles(sh);
@@ -519,8 +519,8 @@ function calcYTD(){
       if(d.payments)PMTS.forEach(p=>pmtTotals[p.key]+=(parseFloat(d.payments[p.key])||0));
     });
   });
-  // Non-completed shows: booth payments + any logged show expenses count as real money out
-  S.shows.filter(s=>s.status!=='completed').forEach(sh=>{
+  // Planned/missed shows (not started): only committed booth deposits + logged expenses count as money out
+  S.shows.filter(s=>s.status!=='completed'&&s.status!=='active').forEach(sh=>{
     expenses+=boothPaid(sh);
     expenses+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
     expenses+=(sh.lodging||0);
@@ -602,11 +602,13 @@ function rHome(){
   const plannedCount=upcomingShows.length+activeShows.length;
   const nextUp=upcomingShows[0]||null;
   const completedNet=done.reduce((t,sh)=>t+calcShow(sh).profit,0);
+  const completedTax=done.reduce((t,sh)=>t+calcShow(sh).taxRes,0);
   const avgShowProfit=done.length?completedNet/done.length:0;
-  const avgShowGross=done.length?ytd.gross/done.length:0;
+  const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
+  const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0;
   const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed').reduce((t,sh)=>t+boothPaid(sh),0);
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
-  const taxRes=ytd.taxRes;
+  const taxRes=completedTax;
   const cleanKeep=Math.max(0,completedNet-taxRes);
   const keepPct=completedNet>0?Math.round((cleanKeep/completedNet)*100):0;
   const taxPct=completedNet>0?Math.round((taxRes/completedNet)*100):0;
@@ -682,8 +684,8 @@ function rHome(){
   // ---- SEASON OVERVIEW (completed-show economics; overhead separate) ----
   html+=`<div class="sec-lbl">2026 SEASON OVERVIEW</div>
   <div class="g2" style="margin-bottom:8px">
-    <div class="sbox gb"><div class="sl">YTD GROSS (collected)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">${done.length} show${done.length!==1?'s':''} · money collected</div></div>
-    <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Gross ÷ completed shows</div></div>
+    <div class="sbox gb"><div class="sl">YTD GROSS (collected)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">money collected · ${sellShows.length} show${sellShows.length!==1?'s':''} w/ sales (incl. in-progress)</div></div>
+    <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Gross ÷ shows w/ sales</div></div>
   </div>
   <div class="g3" style="margin-bottom:8px">
     <div class="sbox ${completedNet>=0?'grb':'rb'}"><div class="sl">COMPLETED SHOWS NET</div><div class="sv sm ${completedNet>=0?'g':'r'}">${fmt(completedNet)}</div><div class="ss">Sum of show profits</div></div>
