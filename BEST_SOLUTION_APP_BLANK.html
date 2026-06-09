@@ -975,10 +975,19 @@ function showTaxRes(sh){ return Math.max(0, showCardSales(sh)*showTaxRate(sh)); 
 // ---- Per-show supplies cost: auto lacy bags by bottle size (1 per unit sold) + manual usage ----
 function showAutoSupplyUnits(sh){ const sold=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; const out={}; if(!sold)return out;
   (S.supplies||[]).forEach(sup=>{ if(sup.autoSizes&&sup.autoSizes.length){ let q=0; sup.autoSizes.forEach(k=>q+=(sold[k]||0)); if(q>0)out[sup.name]=(out[sup.name]||0)+q; } }); return out; }
+// ---- Lace-bag + flat overhead model (bags $0.20; bottle-bundle driven; C5 rides in the polish bag) ----
+function bagUnitCost(){ return (S.settings&&S.settings.bagCost!=null&&S.settings.bagCost!=='')?(parseFloat(S.settings.bagCost)||0):0.20; }
+function candyPerShow(){ return (S.settings&&S.settings.candyPerShow!=null&&S.settings.candyPerShow!=='')?(parseFloat(S.settings.candyPerShow)||0):10; }
+function paperPerShow(){ return (S.settings&&S.settings.paperPerShow!=null&&S.settings.paperPerShow!=='')?(parseFloat(S.settings.paperPerShow)||0):20; }
+function showBagCount(sh){ const u=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; if(!u)return 0;
+  return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0); }
+function showBagCost(sh){ return showBagCount(sh)*bagUnitCost(); }
+function showFlatOverhead(sh){ return (typeof isMissed==='function'&&isMissed(sh))?0:(candyPerShow()+paperPerShow()); }
 function showSupplyCost(sh){
   let cost=0; const auto=showAutoSupplyUnits(sh);
   (S.supplies||[]).forEach(sup=>{ const q=auto[sup.name]||0; if(q>0)cost+=q*(parseFloat(sup.cost)||0); });
   (sh.supplyUse||[]).forEach(u=>{ const sup=(S.supplies||[]).find(s=>s.name===u.name); const c=sup?(parseFloat(sup.cost)||0):(parseFloat(u.cost)||0); cost+=(parseFloat(u.qty)||0)*c; });
+  cost+=showBagCost(sh)+showFlatOverhead(sh);
   return cost;
 }
 function showStaffCount(sh){ const reps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;}).length; return reps + (sh.repOnlyShow?0:1); }
@@ -1081,7 +1090,8 @@ function saveEditCosts(id){
 function calcBreakEven(sh){
   const gas=showGas(sh);
   const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
-  const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp;
+  const flatOverhead=(typeof showFlatOverhead==='function')?showFlatOverhead(sh):0; // candy + paper towels
+  const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp+flatOverhead;
   // Need enough SALES that, after product cost (COGS) and rep commission, fixed costs are covered:
   // BE = fixedCosts / (1 - cogsRate - blendedCommRate)
   const paidRepList=(sh.repIds||[]).map(id=>(S.reps||[]).find(x=>x.id===id)).filter(r=>r&&!r.isSelf&&r.active);
@@ -1777,11 +1787,18 @@ function rShow(){
     const auto=showAutoSupplyUnits(sh); const sc=showSupplyCost(sh);
     const autoRows=Object.keys(auto).map(name=>{const sup=(S.supplies||[]).find(x=>x.name===name);const c=sup?(parseFloat(sup.cost)||0):0;return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${name} × ${auto[name]}</span><span style="color:var(--muted)">${fmt(auto[name]*c)}</span></div>`;}).join('');
     const manRows=(sh.supplyUse||[]).map(u=>{const sup=(S.supplies||[]).find(x=>x.name===u.name);const c=sup?(parseFloat(sup.cost)||0):(parseFloat(u.cost)||0);return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${u.name} × ${u.qty}</span><span style="color:var(--muted)">${fmt((parseFloat(u.qty)||0)*c)}</span></div>`;}).join('');
+    const bagN=showBagCount(sh); const bagC=showBagCost(sh);
+    const flatOn=!(typeof isMissed==='function'&&isMissed(sh));
+    const candyC=flatOn?candyPerShow():0; const paperC=flatOn?paperPerShow():0;
     return `<div class="card" style="margin-top:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🧴 Supplies Used</div><button class="btn btn-xs btn-ghost" onclick="openSupplyUse('${sh.id}')">✏️ Edit</button></div>
-      ${autoRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Auto give-aways (from sales)</div>${autoRows}`:''}
+      ${(bagN||candyC||paperC)?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Bags &amp; overhead</div>
+        ${bagN?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Lace bags × ${bagN} <span style="color:var(--muted)">@ ${fmt(bagUnitCost())}</span></span><span style="color:var(--muted)">${fmt(bagC)}</span></div>`:''}
+        ${candyC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Candy (flat)</span><span style="color:var(--muted)">${fmt(candyC)}</span></div>`:''}
+        ${paperC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Paper towels (flat)</span><span style="color:var(--muted)">${fmt(paperC)}</span></div>`:''}`:''}
+      ${autoRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Auto give-aways (from sales)</div>${autoRows}`:''}
       ${manRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Manual</div>${manRows}`:''}
-      ${(!autoRows&&!manRows)?'<div style="font-size:12px;color:var(--muted)">No supply cost yet. Set per-unit costs + give-away sizes on the Supplies page; bags then auto-count from sales. Tap Edit to add paper towels, liners, etc.</div>':`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`}
+      ${sc>0?`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`:'<div style="font-size:12px;color:var(--muted)">No supply cost yet.</div>'}
     </div>`;
   })()}
   ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
@@ -2339,6 +2356,12 @@ function rSettings(){
   <div class="fg"><label class="fl">Gas Price ($/gallon)</label><input class="fi" type="number" id="st_g" value="${s.gasPrice}" step="0.01" onchange="setSt('gasPrice',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">MPG (default: 17.5)</label><input class="fi" type="number" id="st_m" value="${s.mpg}" step="0.1" onchange="setSt('mpg',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">IRS Mileage Rate ($/mile)</label><input class="fi" type="number" id="st_i" value="${s.irsRate}" step="0.01" onchange="setSt('irsRate',parseFloat(this.value))"></div>
+  </div>
+  <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧴 SHOW SUPPLY COSTS</div>
+  <div class="fg"><label class="fl">Lace bag cost ($ each)</label><input class="fi" type="number" id="st_bag" value="${bagUnitCost()}" step="0.01" min="0" onchange="setSt('bagCost',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Candy per show ($)</label><input class="fi" type="number" id="st_candy" value="${candyPerShow()}" step="1" min="0" onchange="setSt('candyPerShow',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Paper towels per show ($)</label><input class="fi" type="number" id="st_paper" value="${paperPerShow()}" step="1" min="0" onchange="setSt('paperPerShow',parseFloat(this.value))"></div>
+  <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag, 8oz/16oz/32oz = 1 bag each (C5 rides along). Candy + paper towels are flat per show. All auto-added to each show's expenses &amp; break-even.</div>
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
