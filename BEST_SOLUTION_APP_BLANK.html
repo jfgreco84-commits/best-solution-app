@@ -229,6 +229,7 @@
   <div id="pg-home" class="pg on"></div>
   <div id="pg-stock" class="pg"></div>
   <div id="pg-shows" class="pg"></div>
+  <div id="pg-reps" class="pg"></div>
   <div id="pg-show" class="pg"></div>
   <div id="pg-calendar" class="pg"></div>
   <div id="pg-supplies" class="pg"></div>
@@ -241,6 +242,7 @@
   <button class="nb on" id="nb-home" onclick="go('home')"><span class="ni">📊</span>HOME</button>
   <button class="nb" id="nb-stock" onclick="go('stock')"><span class="ni">📦</span>STOCK</button>
   <button class="nb" id="nb-shows" onclick="go('shows')"><span class="ni">🎪</span>SHOWS</button>
+  <button class="nb" id="nb-reps" onclick="go('reps')"><span class="ni">👥</span>REPS</button>
   <button class="nb" id="nb-calendar" onclick="go('calendar')"><span class="ni">📅</span>CAL</button>
   <button class="nb" id="nb-supplies" onclick="go('supplies')"><span class="ni">🧴</span>SUPPLY</button>
   <button class="nb" id="nb-pnl" onclick="go('pnl')"><span class="ni">💰</span>P&amp;L</button>
@@ -401,6 +403,7 @@ function saveS(){S._updatedAt=new Date().toISOString();localStorage.setItem('dd_
 function renderCur(){
   if(curPg==='home')rHome();else if(curPg==='stock')rStock();
   else if(curPg==='shows')rShows();else if(curPg==='show')rShow();
+  else if(curPg==='reps')rReps();
   else if(curPg==='calendar')rCalendar();
   else if(curPg==='supplies')rSupplies();
   else if(curPg==='pnl')rPnL();
@@ -697,6 +700,23 @@ function rHome(){
     <div class="sbox"><div class="sl">AVG / SHOW PROFIT</div><div class="sv sm ${avgShowProfit>=0?'g':'r'}">${fmt(avgShowProfit)}</div><div class="ss">Completed only</div></div>
     <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
   </div>`;
+
+  // ---- COLLECTED vs FULL PRICE (spot discounts/freebies) ----
+  {
+    const _sell=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)).sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
+    if(_sell.length){
+      let tp=0,tc=0;
+      const rows=_sell.map(sh=>{const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col;tp+=pot;tc+=col;
+        return `<div class="sr"><span class="srl">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:9px">●LIVE</span>':''}</span><span class="srv"><span style="color:var(--green)">${fmt(col)}</span> <span style="color:var(--muted)">/ ${fmt(pot)}</span>${gap>0.5?` <span style="color:var(--red)">−${fmt(gap)}</span>`:''}</span></div>`;}).join('');
+      const tg=tp-tc;
+      html+=`<div class="sec-lbl">COLLECTED vs FULL PRICE</div>
+      <div class="card">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Collected (green) / full price · <span style="color:var(--red)">red</span> = discount or freebie given that show</div>
+        ${rows}
+        <div class="sr" style="border-top:1px solid var(--border);margin-top:5px;padding-top:7px"><span class="srl b">Season total</span><span class="srv b"><span style="color:var(--green)">${fmt(tc)}</span> <span style="color:var(--muted)">/ ${fmt(tp)}</span>${tg>0.5?` <span style="color:var(--red)">−${fmt(tg)} given away</span>`:''}</span></div>
+      </div>`;
+    }
+  }
 
   // ---- UNITS SOLD BY PRODUCT ----
   html+=`<div class="sec-lbl">UNITS SOLD — BY PRODUCT</div>
@@ -1510,6 +1530,54 @@ function repPaid(repId,shId){ const rep=(S.reps||[]).find(r=>r.id===repId);if(!r
 function repOwed(repId,shId){ return Math.max(0,repEarned(repId,shId)-repPaid(repId,shId)); }
 function allRepsOwed(){ return (S.reps||[]).filter(r=>!r.isSelf&&r.active).map(r=>({rep:r,earned:repEarned(r.id),paid:repPaid(r.id),owed:repOwed(r.id)})).filter(x=>x.earned>0||x.owed>0); }
 
+// ===================================================
+// REPS PAGE (standalone tab) + per-rep profile
+// ===================================================
+function repWorkedShows(repId){ return (S.shows||[]).filter(sh=>(sh.repIds||[]).includes(repId)||repShowSales(sh,repId)>0||(sh.repPayout&&sh.repPayout[repId]!=null)); }
+function rReps(){
+  const reps=[...(S.reps||[])].filter(r=>r.active).sort((a,b)=>(b.isSelf?1:0)-(a.isSelf?1:0));
+  let h=`<div class="sec-title" style="margin-bottom:4px">👥 Sales Reps</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tap a rep for their full breakdown — shows worked, sales, and what they're owed.</div>`;
+  if(!reps.length){ h+='<div class="empty"><div class="ei">👥</div><div>No reps yet.</div></div>'; }
+  reps.forEach(r=>{
+    const earned=repEarned(r.id),paid=repPaid(r.id),owed=Math.max(0,earned-paid);
+    const worked=repWorkedShows(r.id); let sold=0; worked.forEach(sh=>sold+=repShowSales(sh,r.id));
+    h+=`<div class="card" style="margin-bottom:8px;cursor:pointer" onclick="openRepProfile('${r.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:800;font-size:15px">${r.name}${r.isSelf?' 👑':''}</div>
+        <div style="font-size:11px;color:var(--muted)">${worked.length} show${worked.length!==1?'s':''} ›</div>
+      </div>
+      ${r.isSelf?`<div style="font-size:12px;color:var(--muted);margin-top:4px">Owner — paid by show profit, no commission</div>`:`
+      <div class="g3" style="margin-top:8px">
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--green)">${fmt(sold)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Sold</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(owed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Owed</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900">${fmt(paid)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
+      </div>`}
+    </div>`;
+  });
+  h+=`<button class="btn btn-gold btn-full" style="margin-top:4px" onclick="openAddRep()">+ Add Rep</button>`;
+  pg('reps').innerHTML=h;
+}
+function openRepProfile(repId){
+  const r=(S.reps||[]).find(x=>x.id===repId); if(!r)return;
+  const earned=repEarned(repId),paid=repPaid(repId),owed=Math.max(0,earned-paid);
+  const shows=repWorkedShows(repId);
+  const rows=shows.map(sh=>{const sold=repShowSales(sh,repId),comm=repShowComm(sh,repId);const hrs=(sh.repHours&&sh.repHours[repId]!=null)?(parseFloat(sh.repHours[repId])||0):null;
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${sh.name}</span><span style="color:var(--gold)">${fmt(comm)}</span></div><div style="color:var(--muted);font-size:11px">sold ${fmt(sold)}${hrs?` · ${hrs}h · ${fmt(hrs>0?comm/hrs:0)}/hr`:''}</div></div>`;}).join('');
+  const pays=(r.payments||[]).slice().reverse().map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>${p.date}${p.note?' — '+p.note:''}</span><span style="color:var(--green)">${fmt(p.amount)}</span></div>`).join('');
+  mOpen(`<div class="mh"><div class="mt">${r.name}${r.isSelf?' 👑':''}</div><button class="mx" onclick="mClose()">×</button></div>
+  ${r.isSelf?'<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Owner — your pay is the show profit, not a commission.</div>':`
+  <div class="g3" style="margin-bottom:12px">
+    <div class="sbox"><div class="sl">EARNED</div><div class="sv sm r">${fmt(earned)}</div></div>
+    <div class="sbox"><div class="sl">PAID</div><div class="sv sm g">${fmt(paid)}</div></div>
+    <div class="sbox"><div class="sl">BALANCE OWED</div><div class="sv sm" style="color:var(--gold)">${fmt(owed)}</div></div>
+  </div>`}
+  <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Shows worked (${shows.length})</div>
+  ${rows||'<div style="font-size:12px;color:var(--muted)">No shows yet.</div>'}
+  ${pays?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:10px 0 4px">Payments logged</div>${pays}`:''}
+  ${!r.isSelf?`<button class="btn btn-gold btn-full" style="margin-top:12px" onclick="mClose();openLogRepPmt('${repId}')">💰 Log Payment to ${r.name}</button>`:''}
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose();openEditRep('${repId}')">✏️ Edit Rep &amp; Rates</button>`);
+}
 function openAddRep(){
   mOpen(`<div class="mh"><div class="mt">👤 Add Rep</div><button class="mx" onclick="mClose()">×</button></div>
   <div class="fg"><label class="fl">Name</label><input class="fi" id="ar_name" placeholder="e.g. Batnizzle"></div>
@@ -1815,7 +1883,7 @@ function rShow(){
         <div style="display:flex;gap:6px;align-items:center">${sh.repOnlyShow?'<span style="font-size:10px;color:var(--gold);font-weight:700">REP-ONLY SHOW</span>':''}<button class="btn btn-xs btn-ghost" title="Log hours worked & what you paid" onclick="showEditCosts('${sh.id}')">⏱ Hours</button><button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAssignReps('${sh.id}')">✏️ Assign</button></div>
       </div>
       ${assigned.length===0?`<div style="font-size:12px;color:var(--muted)">No reps assigned. Tap Assign to add reps working this show. (Add your team in Settings → Team.)</div>`:`
-      ${assigned.map(r=>{const earned=repEarned(r.id,sh.id);const paid=repPaid(r.id,sh.id);const owed=Math.max(0,earned-paid);const auto=repShowCalcComm(sh,r.id);const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';const _hrs=(sh.repHours&&sh.repHours[r.id]!=null)?(parseFloat(sh.repHours[r.id])||0):null;const _sales=repShowSales(sh,r.id);const _pay=repShowComm(sh,r.id);const _sub=[];if(_hrs)_sub.push(_hrs+'h');if(_hrs&&_pay)_sub.push(fmt(_pay/_hrs)+'/hr');if(_sales)_sub.push('sold '+fmt(_sales));if(_hrs&&_sales)_sub.push(fmt(_sales/_hrs)+'/hr sold');return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div><div style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</div>${_sub.length?`<div style="font-size:9px;color:var(--muted)">${_sub.join(' · ')}</div>`:''}</div><div style="text-align:right;display:flex;align-items:center;gap:8px"><div>${earned>0?`<div style="color:var(--red)">${hasOv?'Payout':'Earned'}: ${fmt(earned)}</div>${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}${hasOv?`<div style="font-size:9px;color:var(--muted)">auto ${fmt(auto)}</div>`:''}`:(hasOv?`<div style="color:var(--gold);font-weight:800">Payout: ${fmt(earned)}</div>`:'<div style="color:var(--muted)">No sales yet</div>')}</div>${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Edit what you actually paid this rep for this show" onclick="openEditPayout('${sh.id}','${r.id}')">✏️ Payout</button>`:''}</div></div>`;}).join('')}
+      ${assigned.map(r=>{const earned=repEarned(r.id,sh.id);const paid=repPaid(r.id,sh.id);const owed=Math.max(0,earned-paid);const auto=repShowCalcComm(sh,r.id);const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';const _hrs=(sh.repHours&&sh.repHours[r.id]!=null)?(parseFloat(sh.repHours[r.id])||0):null;const _sales=repShowSales(sh,r.id);const _pay=repShowComm(sh,r.id);const _sub=[];if(_hrs)_sub.push(_hrs+'h');if(_hrs&&_pay)_sub.push(fmt(_pay/_hrs)+'/hr');if(_sales)_sub.push('sold '+fmt(_sales));if(_hrs&&_sales)_sub.push(fmt(_sales/_hrs)+'/hr sold');return`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div><div style="font-weight:700">${r.name}${r.isSelf?' 👑':''}</div>${_sub.length?`<div style="font-size:9px;color:var(--muted)">${_sub.join(' · ')}</div>`:''}</div><div style="text-align:right;display:flex;align-items:center;gap:8px"><div>${earned>0?`<div style="color:var(--red)">${hasOv?'Payout':'Earned'}: ${fmt(earned)}</div>${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid</div>`}`:(hasOv?`<div style="color:var(--gold);font-weight:800">Payout: ${fmt(earned)}</div>`:'<div style="color:var(--muted)">No sales yet</div>')}</div>${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Edit what you actually paid this rep for this show" onclick="openEditPayout('${sh.id}','${r.id}')">✏️ Payout</button>`:''}</div></div>`;}).join('')}
       ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800"><span>Total Commissions / Payouts</span><span style="color:var(--red)">-${fmt(showComm)}</span></div>`:''}
       ${assigned.filter(r=>!r.isSelf).length?`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">🔒 Commission Detail (manager) — per-rep rates</div>${assigned.filter(r=>!r.isSelf).map(r=>{const rt=repCommRates(r);let cash=0,cardElec=0;(sh.days||[]).forEach(d=>{(d.repSales||[]).forEach(rs=>{if(rs.repId===r.id){PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0;if(CASH_COMM_KEYS.includes(p.key))cash+=v;else cardElec+=v;});}});});const autoC=cash*rt.cash+cardElec*rt.card;const ov=sh.repPayout&&sh.repPayout[r.id];const hasOv=ov!=null&&ov!=='';if(cash===0&&cardElec===0&&!hasOv)return'';return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(hasOv?(parseFloat(ov)||0):autoC)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×${Math.round(rt.cash*100)}% = ${fmt(cash*rt.cash)} · Card/Elec ${fmt(cardElec)}×${Math.round(rt.card*100)}% = ${fmt(cardElec*rt.card)}${hasOv?` · <b style="color:var(--gold)">manual payout ${fmt(parseFloat(ov)||0)}</b>`:''}</div></div>`;}).join('')}</div>`:''}`}
     </div>`;
@@ -1863,32 +1931,30 @@ function rDay(sh,di){
       <div style="font-size:17px;font-weight:900">${d.date||'Day '+(di+1)}</div>
       <span class="chip ${haM&&haE&&haP?'green':isA?'gold':''}">${haM&&haE&&haP?'✓ COMPLETE':isA?'IN PROGRESS':'—'}</span>
     </div>
-    <!-- MORNING -->
-    <div class="step">
-      <div class="si ${haM?'done':'act'}">${haM?'✓':'🌅'}</div>
-      <div style="flex:1"><div class="sn">Morning Count</div>
-      ${haM?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">${SKUS.map(s=>`<span class="chip">${s.short}: <strong>${d.morningCount[s.key]||0}</strong></span>`).join('')}</div>`:'<div class="ss2">Count everything at your booth</div>'}
-      </div><button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'}" onclick="showCntModal('${sh.id}',${di},'morning')">${haM?'Edit':'Count'}</button>
+    <!-- 3-COLUMN COUNTS: Morning | Evening | Money -->
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haM?'var(--border)':'var(--gold)'}">
+        <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#7EB8F7;margin-bottom:6px">🌅 Morning</div>
+        ${SKUS.map(s=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${s.short}</span><span style="font-weight:800">${haM?(d.morningCount[s.key]||0):'—'}</span></div>`).join('')}
+        <button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'morning')">${haM?'Edit':'Count'}</button>
+      </div>
+      <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haE?'var(--border)':(haM?'var(--gold)':'var(--border)')}">
+        <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#B98AE6;margin-bottom:6px">🌙 Evening</div>
+        ${SKUS.map(s=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${s.short}</span><span style="font-weight:800">${haE?(d.eveningCount[s.key]||0):'—'}</span></div>`).join('')}
+        <button class="btn btn-xs ${haE?'btn-ghost':(haM?'btn-gold':'btn-outline')} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'evening')" ${!haM?'disabled':''}>${haE?'Edit':'Count'}</button>
+      </div>
+      <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haP?'var(--border)':(haE?'var(--gold)':'var(--border)')}">
+        <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#00D26A;margin-bottom:6px">💰 Money</div>
+        ${PMTS.map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${p.label}</span><span style="font-weight:700">${haP?((d.payments[p.key]||0)>0?fmt(d.payments[p.key]):'—'):''}</span></div>`).join('')}
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;color:var(--green);margin-top:4px"><span>Total</span><span>${haP?fmt(pmtT):'—'}</span></div>
+        <button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>
+      </div>
     </div>
-    <!-- EVENING -->
-    <div class="step">
-      <div class="si ${haE?'done':haM?'act':'pend'}">${haE?'✓':'🌙'}</div>
-      <div style="flex:1"><div class="sn">Evening Count</div>
-      ${haE?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">${SKUS.map(s=>`<span class="chip">${s.short}: <strong>${d.eveningCount[s.key]||0}</strong></span>`).join('')}</div>
-      ${soldChips?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:6px 0 3px">Sold today:</div><div style="display:flex;flex-wrap:wrap;gap:5px">${soldChips}</div>`:'<div class="ss2">Nothing sold</div>'}
-      ${rev>0?`<div style="margin-top:6px;font-size:14px;font-weight:900;color:var(--gold)">Revenue: ${fmt(rev)}</div>`:''}
-      `:'<div class="ss2">Count unsold items at close</div>'}
-      </div><button class="btn btn-xs ${haE?'btn-ghost':haM?'btn-gold':'btn-outline'}" onclick="showCntModal('${sh.id}',${di},'evening')" ${!haM?'disabled':''}>${haE?'Edit':'Count'}</button>
-    </div>
-    <!-- MONEY -->
-    <div class="step">
-      <div class="si ${haP?'done':haE?'act':'pend'}">${haP?'✓':'💰'}</div>
-      <div style="flex:1"><div class="sn">Money Count</div>
-      ${haP?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px">${PMTS.filter(p=>(d.payments[p.key]||0)>0).map(p=>`<span class="chip">${p.label}: <strong>${fmt(d.payments[p.key])}</strong></span>`).join('')}</div>
-      <div style="font-size:14px;font-weight:900;color:var(--gold);margin-top:6px">Total: ${fmt(pmtT)}</div>
-      ${moneyCheck}`:'<div class="ss2">Count all cash and payment apps</div>'}
-      </div><button class="btn btn-xs ${haP?'btn-ghost':haE?'btn-gold':'btn-outline'}" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>
-    </div>
+    ${(soldChips||rev>0||moneyCheck)?`<div style="margin-bottom:6px">
+      ${soldChips?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:2px 0 3px">Sold today</div><div style="display:flex;flex-wrap:wrap;gap:5px">${soldChips}</div>`:''}
+      ${rev>0?`<div style="margin-top:4px;font-size:12px;color:var(--muted)">Full-price value: <b style="color:var(--gold)">${fmt(rev)}</b> · collected <b style="color:var(--green)">${fmt(pmtT)}</b></div>`:''}
+      ${moneyCheck}
+    </div>`:''}
     ${isA?`<div class="div"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Day Expenses</div><button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit</button></div>
     <div style="display:flex;flex-wrap:wrap;gap:5px">
@@ -1902,9 +1968,9 @@ function rDay(sh,di){
     <div class="sr"><span class="srl">Money Collected</span><span class="srv gold">${fmt(pmtT)}</span></div>
     ${rev>0?`<div class="sr"><span class="srl" style="color:var(--muted)">Potential (full price)</span><span class="srv" style="color:var(--muted)">${fmt(rev)}</span></div>`:''}
     ${dayLoss>0.005?`<div class="sr"><span class="srl">Loss (discounts/freebies)</span><span class="srv red">-${fmt(dayLoss)}</span></div>`:''}
-    <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv">-${fmt(cogs)}</span></div>
-    <div class="sr"><span class="srl">Day Expenses</span><span class="srv">-${fmt(dayExp)}</span></div>
-    <div class="sr"><span class="srl">Booth Share</span><span class="srv">-${fmt(bpd)}</span></div>
+    <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv red">-${fmt(cogs)}</span></div>
+    <div class="sr"><span class="srl">Day Expenses</span><span class="srv red">-${fmt(dayExp)}</span></div>
+    <div class="sr"><span class="srl">Booth Share</span><span class="srv red">-${fmt(bpd)}</span></div>
     ${dayComm>0?`<div class="sr"><span class="srl">Rep Commissions</span><span class="srv red">-${fmt(dayComm)}</span></div>`:''}
     <div class="sr"><span class="srl b">Net Profit (cash)</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve (${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?' · show rate':''})</span><span class="srv red">-${fmt(taxRes)}</span></div>
