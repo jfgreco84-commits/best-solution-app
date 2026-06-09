@@ -583,7 +583,7 @@ function applyOneTimeUpdates(d){
     d.shows=d.shows||[];
     const addShow=e=>{ if(d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase()))return; const sh=buildPlannedShow(e); sh.confirmed=false; if(e.notes)sh.notes=e.notes; d.shows.push(sh); };
     addShow({name:'Washington County Fair',location:'West Bend, WI',startDate:'2026-07-21',numDays:6,boothCost:580,miles:38,boothPayments:[],notes:'Indoor corner booth ($580). ⚠️ Verify daily hours in Edit Show.'});
-    addShow({name:'Sheboygan County Fair',location:'Plymouth, WI',startDate:'2026-09-03',numDays:5,boothCost:225,miles:62,boothPayments:[],notes:'⚠️ Verify 2026 dates (Labor Day weekend; Sat = Sep 5) in Edit Show.'});
+    addShow({name:'Sheboygan County Fair',location:'Plymouth, WI',startDate:'2026-09-03',numDays:5,boothCost:225,miles:62,boothPayments:[],notes:'Sheboygan County Fair (175th) — Sep 3–7, 2026 (Thu–Mon), Labor Day weekend. ✓ Dates confirmed.'});
     const setHrs=(sh,arr)=>{ (sh.days||[]).forEach((day,i)=>{ const t=arr[i]||arr[arr.length-1]; if(t&&!day.openTime&&!day.closeTime){ day.openTime=t[0]; day.closeTime=t[1]; } }); if(sh.days&&sh.days[0]){ if(!sh.openTime)sh.openTime=sh.days[0].openTime; if(!sh.closeTime)sh.closeTime=sh.days[0].closeTime; } };
     (d.shows||[]).forEach(sh=>{ const n=(sh.name||'').toLowerCase();
       if(/sip\s*&?\s*sleigh|kris kringle|holiday/.test(n)) setHrs(sh,[['16:00','20:00'],['10:00','16:00'],['10:00','15:00']]);
@@ -595,6 +595,12 @@ function applyOneTimeUpdates(d){
       else if(/martins/.test(n)) setHrs(sh,[['17:00','22:00'],['11:00','22:00'],['11:00','21:00']]);
     });
     d._applied['hours_and_shows_v1']=true;
+  }
+
+  // Confirm Sheboygan County Fair dates (Sep 3–7 2026) — only clears the auto "verify" note, never overrides a user edit
+  if(!d._applied['fix_sheboygan_dates_v1']){
+    (d.shows||[]).forEach(sh=>{ if(/sheboygan/i.test(sh.name||'') && /verify/i.test(sh.notes||'')){ sh.notes='Sheboygan County Fair (175th) — Sep 3–7, 2026 (Thu–Mon), Labor Day weekend. ✓ Dates confirmed.'; } });
+    d._applied['fix_sheboygan_dates_v1']=true;
   }
 
   // Rustic Fox Holiday Shows — Sip & Sleigh + Kris Kringle
