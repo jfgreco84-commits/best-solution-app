@@ -436,9 +436,9 @@ function calcPmt(pmts){return PMTS.reduce((t,p)=>t+(parseFloat(pmts[p.key])||0),
 function calcInvCost(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*s.cost,0);}
 function calcInvRetail(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*getP(s.key),0);}
 function calcShow(sh){
-  let gross=0,cogs=0,exp=sh.boothCost||0;
+  let cogs=0,exp=sh.boothCost||0,potential=0;
   (sh.days||[]).forEach(d=>{
-    if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);gross+=calcRev(sold);cogs+=calcCOGS(sold);}
+    if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);potential+=calcRev(sold);cogs+=calcCOGS(sold);}
     if(d.expenses)exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);
   });
   exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
@@ -447,8 +447,10 @@ function calcShow(sh){
   exp+=supplyCost;
   const commissions=calcShowComm(sh); // honors per-show payout overrides; 0 when no reps
   exp+=commissions;
+  const gross=(typeof showActualRev==='function')?showActualRev(sh):0; // GROSS = money actually COLLECTED, never units×price
   const profit=gross-cogs-exp;
-  return{gross,cogs,expenses:exp,commissions,supplyCost,profit,taxRes:showTaxRes(sh)};
+  const taxRes=Math.max(0,profit)*showTaxRate(sh); // tax reserve = % of NET PROFIT
+  return{gross,cogs,expenses:exp,commissions,supplyCost,potential,profit,taxRes};
 }
 // ---- Revenue: Potential vs Actual vs Discounts (Change 2) ----
 function showPotentialRev(sh){
@@ -680,17 +682,18 @@ function rHome(){
   // ---- SEASON OVERVIEW (completed-show economics; overhead separate) ----
   html+=`<div class="sec-lbl">2026 SEASON OVERVIEW</div>
   <div class="g2" style="margin-bottom:8px">
-    <div class="sbox gb"><div class="sl">YTD GROSS (completed)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">${done.length} show${done.length!==1?'s':''} completed</div></div>
-    <div class="sbox ${completedNet>=0?'grb':'rb'}"><div class="sl">COMPLETED SHOWS NET</div><div class="sv ${completedNet>=0?'g':'r'}">${fmt(completedNet)}</div><div class="ss">Sum of each show's profit</div></div>
+    <div class="sbox gb"><div class="sl">YTD GROSS (collected)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">${done.length} show${done.length!==1?'s':''} · money collected</div></div>
+    <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Gross ÷ completed shows</div></div>
   </div>
   <div class="g3" style="margin-bottom:8px">
-    <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
-    <div class="sbox"><div class="sl">AVG / SHOW PROFIT</div><div class="sv sm ${avgShowProfit>=0?'g':'r'}">${fmt(avgShowProfit)}</div><div class="ss">Completed only</div></div>
-    <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Completed only</div></div>
+    <div class="sbox ${completedNet>=0?'grb':'rb'}"><div class="sl">COMPLETED SHOWS NET</div><div class="sv sm ${completedNet>=0?'g':'r'}">${fmt(completedNet)}</div><div class="ss">Sum of show profits</div></div>
+    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of net profit</div></div>
+    <div class="sbox ${cleanKeep>=0?'grb':'rb'}"><div class="sl">CLEAN P</div><div class="sv sm ${cleanKeep>=0?'g':'r'}">${fmt(cleanKeep)}</div><div class="ss">Net − tax reserve</div></div>
   </div>
-  <div class="g2" style="margin-bottom:8px">
-    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of card sales</div></div>
-    <div class="sbox"><div class="sl">BUSINESS OVERHEAD</div><div class="sv sm w">${fmt(overhead)}</div><div class="ss">Supplies + upcoming deposits (separate)</div></div>
+  <div class="g3" style="margin-bottom:8px">
+    <div class="sbox"><div class="sl">BUSINESS OVERHEAD</div><div class="sv sm w">${fmt(overhead)}</div><div class="ss">Supplies + deposits</div></div>
+    <div class="sbox"><div class="sl">AVG / SHOW PROFIT</div><div class="sv sm ${avgShowProfit>=0?'g':'r'}">${fmt(avgShowProfit)}</div><div class="ss">Completed only</div></div>
+    <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
   </div>`;
 
   // ---- UNITS SOLD BY PRODUCT ----
@@ -1176,27 +1179,17 @@ function showCard(sh){
         <div style="font-size:12px;font-weight:700">${repNames.length?repNames.join(', '):'<span style="color:var(--muted);font-weight:400">None yet — tap the show to assign</span>'}</div>
       </div>`;
     })()}`:``}
-    ${sh.status==='active'?`
-    <div class="sc-stats">
-      <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
-      <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
-      <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
+    ${(sh.status==='active'||sh.status==='completed')?`
+    <div class="sc-stats" style="gap:4px">
+      <div class="sc-s"><div class="sv2" style="color:var(--green)">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
+      <div class="sc-s"><div class="sv2" style="color:var(--red)">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
+      <div class="sc-s"><div class="sv2" style="color:var(--red)">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
+      <div class="sc-s"><div class="sv2" style="color:var(--red)">${fmt(t.taxRes)}</div><div class="sl2">Tax</div></div>
       <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
-    </div>
-    <div style="margin-top:6px;padding:5px 8px;background:rgba(255,200,0,0.08);border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
-      <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
-      <span style="color:${t.gross>=be?'var(--green)':'var(--red)'};font-weight:700">${t.gross>=be?'✅ HIT':'⚠️ '+fmt(be-t.gross)+' to go'}</span>
     </div>`:``}
-    ${sh.status==='completed'?`
-    <div class="sc-stats">
-      <div class="sc-s"><div class="sv2">${fmt(t.gross)}</div><div class="sl2">Gross</div></div>
-      <div class="sc-s"><div class="sv2">${fmt(t.cogs)}</div><div class="sl2">COGS</div></div>
-      <div class="sc-s"><div class="sv2">${fmt(t.expenses)}</div><div class="sl2">Exp</div></div>
-      <div class="sc-s"><div class="sv2" style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div class="sl2">Profit</div></div>
-    </div>
-    <div style="margin-top:6px;padding:5px 8px;background:${beHit?'rgba(0,200,100,0.08)':'rgba(255,60,60,0.08)'};border-radius:5px;display:flex;justify-content:space-between;font-size:11px">
-      <span style="color:var(--muted)">Break Even: <b style="color:var(--gold)">${fmt(be)}</b></span>
-      <span style="color:${beHit?'var(--green)':'var(--red)'};font-weight:700">${beHit?'✅ HIT — '+fmt(t.gross-be)+' over':'❌ MISSED by '+fmt(be-t.gross)}</span>
+    ${false?`
+    <div style="display:flex;justify-content:space-between;font-size:11px">
+      <span></span><span>${beHit?'':''}</span>
     </div>`:``}
     <div style="margin-top:8px" onclick="event.stopPropagation()">
       <button style="width:100%;font-size:11px;padding:6px 8px;background:rgba(255,215,0,0.14);border:1px solid var(--goldbd);color:var(--gold);border-radius:6px;cursor:pointer;font-weight:800" onclick="showEditCosts('${sh.id}')">✏️ Edit Show — name · days · costs · tax</button>
