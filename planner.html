@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Best Solution 2026 Event Planner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #fff; color: #222; }
+
+  @media print {
+    .page { page-break-after: always; }
+    .page:last-child { page-break-after: avoid; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+
+  .cover {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100vh; text-align: center;
+    background: #f8f8f8;
+  }
+  .cover h1 { font-size: 48px; font-weight: 900; color: #1F3864; letter-spacing: 6px; margin-bottom: 12px; }
+  .cover h2 { font-size: 22px; color: #2E75B6; font-weight: 400; letter-spacing: 3px; margin-bottom: 30px; }
+  .cover .sub { font-size: 14px; color: #888; letter-spacing: 2px; }
+  .cover .stripe { width: 120px; height: 5px; background: linear-gradient(90deg,#1F3864,#2E75B6,#7FCDCD); margin: 20px auto; border-radius: 3px; }
+
+  .page {
+    width: 100%; padding: 24px 28px;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  .page-title {
+    font-size: 11px; font-weight: 700; color: #aaa; letter-spacing: 3px;
+    text-transform: uppercase; text-align: center; margin-bottom: 16px;
+  }
+
+  .months-row {
+    display: flex; gap: 20px; flex: 1;
+  }
+
+  .month-box {
+    flex: 1; display: flex; flex-direction: column;
+    border-radius: 6px; overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.10);
+  }
+
+  .month-header {
+    padding: 14px 16px 12px;
+    color: #fff;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .month-header .month-name {
+    font-size: 26px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .month-header .month-year {
+    font-size: 13px; font-weight: 600; opacity: 0.85; letter-spacing: 1px;
+  }
+  .month-header .month-tag {
+    margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    background: rgba(255,255,255,0.25); padding: 3px 8px; border-radius: 10px;
+  }
+
+  .month-body {
+    flex: 1; background: #fff; padding: 0;
+    display: flex; flex-direction: column;
+  }
+
+  .show-entry {
+    border-bottom: 1px solid #f0f0f0;
+    padding: 10px 14px;
+    position: relative;
+  }
+  .show-entry:last-child { border-bottom: none; }
+
+  .show-entry .rank-bar {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    border-radius: 0;
+  }
+
+  .show-entry .show-name {
+    font-size: 12px; font-weight: 800; color: #1F3864;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 2px; padding-left: 8px;
+  }
+  .show-entry .stars { color: #F4D03F; font-size: 11px; }
+  .show-entry .detail-row {
+    font-size: 10px; color: #555; padding-left: 8px;
+    line-height: 1.5; margin-bottom: 1px;
+  }
+  .show-entry .detail-row b { color: #333; }
+  .show-entry .apply-row {
+    font-size: 10px; font-weight: 700; padding-left: 8px;
+    margin-top: 3px; padding: 3px 8px;
+    border-radius: 3px; display: inline-block;
+  }
+  .show-entry .note {
+    font-size: 9.5px; color: #888; padding-left: 8px; font-style: italic; margin-top: 1px;
+  }
+
+  .section-label {
+    font-size: 9px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    color: #aaa; padding: 6px 14px 3px; background: #fafafa;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  /* Rating colors */
+  .r5 .rank-bar { background: #1a7a1a; }
+  .r4 .rank-bar { background: #2E75B6; }
+  .r3 .rank-bar { background: #E67E22; }
+  .r2 .rank-bar { background: #aaa; }
+
+  .apply-pill-red    { background: #FCE4D6; color: #C00000; }
+  .apply-pill-green  { background: #E2EFDA; color: #375623; }
+  .apply-pill-orange { background: #FFF2CC; color: #BF8F00; }
+  .apply-pill-blue   { background: #DEEAF1; color: #1F3864; }
+  .apply-pill-purple { background: #EAD9F7; color: #5B2C8B; }
+  .apply-pill-gray   { background: #f0f0f0; color: #555; }
+
+  .deadline { color: #C00000; font-weight: 800; }
+  .confirmed { color: #375623; font-weight: 800; }
+  .open-window { color: #5B2C8B; font-weight: 700; }
+
+  .footer-note {
+    margin-top: 14px; font-size: 9px; color: #bbb; text-align: center; letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="page cover">
+  <h1>BEST SOLUTION</h1>
+  <div class="stripe"></div>
+  <h2>2026 EVENT PLANNER</h2>
+  <p class="sub">DOT DYNASTY LLC &nbsp;|&nbsp; FRANK GRECO &nbsp;|&nbsp; MAY &ndash; DECEMBER 2026</p>
+  <br><br>
+  <p class="sub" style="color:#1F3864;font-weight:700;">SHOWS RANKED BEST TO AVERAGE &bull; APPLY INSTRUCTIONS INCLUDED</p>
+  <br>
+  <p class="sub">jfgreco84@gmail.com &nbsp;|&nbsp; dotdynastyllc@outlook.com</p>
+</div>
+
+<div class="page">
+  <div class="page-title">BEST SOLUTION 2026 &bull; DOT DYNASTY LLC &bull; EVENT PLANNER</div>
+  <div class="months-row">
+    <div class="month-box">
+      <div class="month-header" style="background:#4AAFA0;">
+        <span class="month-name">MAY</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">APPLICATION MONTH</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;WAUKESHA COUNTY FAIR — APPLY BY MON MAY 11</div>
+          <div class="detail-row"><b>📅</b> Jul 15-19, 2026  |  Waukesha, WI  |  28 miles</div>
+          <div class="detail-row">Booth: ~$250-350  |  Attend: 120,000+  |  Suburban / high-income crowd</div>
+          <div class="detail-row">STEP 1: Go to waukeshacountyfair.com  STEP 2: Find 'Commercial Vendor Application'</div>
+          <span class="apply-row apply-pill-red">⚡ DEADLINE: MONDAY MAY 11 — commercial@waukeshacountyfair.com</span>
+          <div class="note">STEP 3: List: Best Solution Jewelry Polish, live demo, need electricity. Submit today.</div>
+        </div>
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;CRANBERRY FEST — CONFIRM RETURN</div>
+          <div class="detail-row"><b>📅</b> Sep 25-27, 2026  |  Warrens, WI  |  ~115 miles  |  NO CONFLICT (Fri-Sun)</div>
+          <div class="detail-row">Booth: ~$200  |  Attend: 100,000+  |  $2,632 net in 2025 — your #1 show</div>
+          <div class="detail-row">STEP 1: Email cranfest@cranfest.com  STEP 2: Say 'returning vendor from 2025, want to confirm my spot'</div>
+          <span class="apply-row apply-pill-green">✅ Email cranfest@cranfest.com — RETURNING VENDOR, use your 2025 history</span>
+          <div class="note">STEP 3: Ask for same booth area. Get payment deadline. Lock this in first.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;KENOSHA COUNTY FAIR — APPLICATION IN HAND</div>
+          <div class="detail-row"><b>📅</b> Aug 19-23, 2026  |  Wilmot, WI  |  ~30 miles</div>
+          <div class="detail-row">Contact: Jenny Hesse  |  262-731-3592  |  fairmanager@kenoshacofair.com</div>
+          <div class="detail-row">STEP 1: Open Gmail Drafts — send reply to Jenny  STEP 2: Jenny's app is attached to her email</div>
+          <span class="apply-row apply-pill-orange">📧 Send Gmail draft to Jenny + fill out and return her attached application</span>
+          <div class="note">STEP 3: Return completed app to fairmanager@kenoshacofair.com. Ask about electricity.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;BURGOO FESTIVAL — APPLICATION LINK READY</div>
+          <div class="detail-row"><b>📅</b> Oct 10-12, 2026  |  Utica, IL  |  ~90 miles</div>
+          <div class="detail-row">Contact: Amanda Carter  |  events@lasallecountyhistoricalsociety.org</div>
+          <div class="detail-row">STEP 1: Open Gmail Drafts — send reply to Amanda  STEP 2: Click JotForm link in her email</div>
+          <span class="apply-row apply-pill-orange">📋 JotForm: jotform.com/253618186444160  |  Send Gmail draft to Amanda</span>
+          <div class="note">STEP 3: Complete and submit JotForm with booth size + product info. Amanda is responsive.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;RUSTIC FOX — CAROL STREAM IL (RECURRING)</div>
+          <div class="detail-row"><b>📅</b> Monthly recurring  |  Carol Stream, IL  |  ~55 miles</div>
+          <div class="detail-row">Home decor boutique — EXACT Best Solution customer. Women shopping for home goods.</div>
+          <div class="detail-row">STEP 1: Email info@therusticfoxhome.com  STEP 2: Ask about demo vendor table days + cost</div>
+          <span class="apply-row apply-pill-purple">📧 Email info@therusticfoxhome.com — ask about demo vendor space (not resale)</span>
+          <div class="note">STEP 3: Say you do live demos, not product resale. Ask: cost per day, how many shoppers.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;SHEBOYGAN COUNTY FAIR — CHECK WEBSITE</div>
+          <div class="detail-row"><b>📅</b> Aug 2026 (TBD dates)  |  Sheboygan, WI  |  ~75 miles</div>
+          <div class="detail-row">Contact replied — go to shebcofair.com  >  General Info  >  Commercial Vendor</div>
+          <div class="detail-row">STEP 1: Go to shebcofair.com  STEP 2: Note dates and booth cost</div>
+          <span class="apply-row apply-pill-blue">🌐 shebcofair.com — if booth under $300 and dates work, apply</span>
+          <div class="note">STEP 3: Apply online. Send Gmail draft to mail@shebcofair.com confirming.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;DODGE COUNTY FAIR — EMAIL PAT NINMANN</div>
+          <div class="detail-row"><b>📅</b> Aug 2026 (TBD)  |  Juneau, WI  |  ~55 miles</div>
+          <div class="detail-row">Contact: Pat Ninmann  |  space@dodgecountyfairgrounds.com</div>
+          <div class="detail-row">STEP 1: Email Pat at space@dodgecountyfairgrounds.com  STEP 2: Ask dates, cost, attendance</div>
+          <span class="apply-row apply-pill-blue">📧 space@dodgecountyfairgrounds.com — ask for 2026 commercial vendor info</span>
+          <div class="note">STEP 3: Gmail draft to admin@dodgecountyfairgrounds.com is saved — send it first.</div>
+        </div>
+      </div>
+    </div>
+    <div class="month-box">
+      <div class="month-header" style="background:#E8905A;">
+        <span class="month-name">JUNE</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">SUMMER KICKOFF</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;CEDARBURG STRAWBERRY FESTIVAL</div>
+          <div class="detail-row"><b>📅</b> Jun 27-28, 2026  |  Cedarburg, WI  |  ~30 miles  |  Sat-Sun</div>
+          <div class="detail-row">Upscale suburban crowd. Cedarburg = affluent shoppers. Strong Best Solution demographic.</div>
+          <div class="detail-row">STEP 1: Application sent to coordinator@cedarburgfestivals.org — awaiting reply</div>
+          <span class="apply-row apply-pill-orange">📧 Follow up: coordinator@cedarburgfestivals.org — 'checking on my vendor application status'</span>
+          <div class="note">STEP 2: If no reply by May 20, call the Cedarburg Festivals office to confirm receipt.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;7 MILE FAIR — ANY SATURDAY</div>
+          <div class="detail-row"><b>📅</b> Weekly year-round  |  Caledonia, WI  |  ~20 miles</div>
+          <div class="detail-row">Outdoor flea/vendor market. 20,000+ weekly visitors. No booth commitment required.</div>
+          <div class="detail-row">STEP 1: Go to 7milefair.com  STEP 2: Sign up for a spot (same-day or advance)</div>
+          <span class="apply-row apply-pill-blue">🌐 7milefair.com — sign up for any open Saturday. Test market = low risk.</span>
+          <div class="note">STEP 3: Bring 32oz ($40), 16oz ($30), 8oz ($20), 2oz ($10). Demo sells.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;MILWAUKEE MAKERS MARKET</div>
+          <div class="detail-row"><b>📅</b> Multiple dates 2026  |  Milwaukee, WI  |  ~30 miles</div>
+          <div class="detail-row">Urban Milwaukee market — artisan/craft buyer demographic. Good Best Solution fit.</div>
+          <div class="detail-row">STEP 1: Go to milwaukeemakersmarket.com  STEP 2: Find 2026 dates and vendor application</div>
+          <span class="apply-row apply-pill-orange">🌐 milwaukeemakersmarket.com — apply online. Gmail draft to MKEMakersMarket@gmail.com saved.</span>
+          <div class="note">STEP 3: Send Gmail draft acknowledging their reply first, then apply at their site.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;POLISH TOWN FAIR & FESTIVAL</div>
+          <div class="detail-row"><b>📅</b> Jun 2026 (TBD)  |  Check PolishTownFair2026@gmail.com reply</div>
+          <div class="detail-row">Application submitted May 7. Awaiting reply from PolishTownFair2026@gmail.com</div>
+          <div class="detail-row">STEP 1: Check Gmail for any reply from PolishTownFair2026@gmail.com</div>
+          <span class="apply-row apply-pill-gray">📬 Check Gmail for reply — application already submitted May 7</span>
+          <div class="note">STEP 2: If no reply by June 1, follow up or move on.</div>
+        </div>
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;★ SEARCH: FIND ADDITIONAL JUNE SHOWS</div>
+          <div class="detail-row"><b>📅</b> Target: late June weekends  |  Within 90 miles of Waterford, WI</div>
+          <div class="detail-row">Oak Brook Artisan Market may have Spring/Summer dates. Check oakbrookartisanmarket.com</div>
+          <div class="detail-row">STEP 1: Search 'Wisconsin craft fair June 2026 vendor'  STEP 2: Search 'Illinois outdoor market June 2026'</div>
+          <span class="apply-row apply-pill-purple">🔍 Search Google + eventeny.com + zapplication.org for June 2026 WI/IL shows</span>
+          <div class="note">STEP 3: Target shows within 90 miles with 5,000+ attendance. Apply to everything promising.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-note">BEST SOLUTION &bull; DOT DYNASTY LLC &bull; Ranked: ★★★★★ Best to ★★★ Good &bull; Green bar = top tier &bull; Blue = solid &bull; Orange = average</div>
+</div>
+
+<div class="page">
+  <div class="page-title">BEST SOLUTION 2026 &bull; DOT DYNASTY LLC &bull; EVENT PLANNER</div>
+  <div class="months-row">
+    <div class="month-box">
+      <div class="month-header" style="background:#2E5F8A;">
+        <span class="month-name">JULY</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">PEAK SEASON STARTS</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;WAUKESHA COUNTY FAIR ★ TOP PRIORITY</div>
+          <div class="detail-row"><b>📅</b> Jul 15-19 (Wed-Sun)  |  Waukesha, WI  |  28 miles  |  5 DAYS</div>
+          <div class="detail-row">120,000+ attendees  |  Suburban Waukesha / Brookfield crowd = high jewelry buyers</div>
+          <div class="detail-row">Set up: Tue Jul 14 evening  |  Breakdown: Sun Jul 19  |  Need electricity for demo</div>
+          <span class="apply-row apply-pill-red">⚡ APPLICATION DUE MAY 11. Go to waukeshacountyfair.com NOW if not submitted.</span>
+          <div class="note">Bring full inventory: 32oz ($40), 16oz ($30), 8oz ($20), C5 kits. Demo every customer.</div>
+        </div>
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;★ OPEN WINDOW: FRI JUL 24 — SUN JUL 26</div>
+          <div class="detail-row"><b>📅</b> Jul 24-26 (Fri-Sun)  |  Partner at Delaware State Fair  |  YOU ARE FREE</div>
+          <div class="detail-row">PRIORITY: Find a show for this weekend. 3 days free. Target: within 90 miles.</div>
+          <div class="detail-row">SEARCH: Lake Geneva area, Walworth County, Kenosha/Racine area weekend shows</div>
+          <span class="apply-row apply-pill-purple">🔍 Search 'Wisconsin outdoor festival July 24 2026' and 'IL summer market late July'</span>
+          <div class="note">Good targets: Lake Geneva Cruise Nights, Walworth County Fair (check dates), local summer fests.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;ROCK COUNTY 4-H FAIR (PARTIAL — FRI-SUN)</div>
+          <div class="detail-row"><b>📅</b> Fair: Jul 28-Aug 2  |  YOUR DAYS: Fri Jul 31, Sat Aug 1, Sun Aug 2  |  Janesville ~30 mi</div>
+          <div class="detail-row">Blocked Mon-Thu (Jul 27-30 = DBW coverage). Can do last 3 days only.</div>
+          <div class="detail-row">STEP 1: Mary Check is responding re: exact dates — await her reply</div>
+          <span class="apply-row apply-pill-orange">📧 info@rockcounty4hfair.com — ask for Fri-Sun only rate. Apply at rockcounty4hfair.com</span>
+          <div class="note">STEP 2: If they allow partial attendance + prorate cost, apply. 3 solid weekend days is still worth it.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;★ OPEN WINDOW: FRI JUL 31 — SAT AUG 1</div>
+          <div class="detail-row"><b>📅</b> Jul 31-Aug 1 (Fri-Sat)  |  Partner still at Delaware  |  YOU ARE FREE</div>
+          <div class="detail-row">Rock County Fair covers this if you're doing that. If not — find another show.</div>
+          <div class="detail-row">SEARCH: Outdoor summer markets in WI/IL starting late July</div>
+          <span class="apply-row apply-pill-purple">🔍 Search if Rock County doesn't work out. Fill this window.</span>
+          <div class="note">7 Mile Fair (Caledonia) = easy fallback any weekend. Go sell.</div>
+        </div>
+      </div>
+    </div>
+    <div class="month-box">
+      <div class="month-header" style="background:#C9A227;">
+        <span class="month-name">AUGUST</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">FAIR SEASON PEAK</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;KENOSHA COUNTY FAIR</div>
+          <div class="detail-row"><b>📅</b> Aug 19-23 (Wed-Sun)  |  30820 111th St, Wilmot WI  |  ~30 miles  |  5 DAYS</div>
+          <div class="detail-row">Contact: Jenny Hesse  |  262-731-3592  |  262-862-6121</div>
+          <div class="detail-row">Good suburban/rural mix. 5-day run. Should outperform Racine County Fair significantly.</div>
+          <span class="apply-row apply-pill-orange">📧 fairmanager@kenoshacofair.com — app from Jenny must be filled and returned</span>
+          <div class="note">Set up: Tue Aug 18 evening. Bring full inventory. 5 days = push hard on 32oz bulk.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;ST. MARTINS FEST ★ NO CONFLICT</div>
+          <div class="detail-row"><b>📅</b> Aug 29-30 (Sat-Sun)  |  Franklin, WI  |  ~25 miles  |  $1,267 NET in 2025</div>
+          <div class="detail-row">Partner at Oregon State Fair but Aug 29-30 are SAT-SUN = YOUR FREE DAYS. No conflict.</div>
+          <div class="detail-row">STEP 1: Find the St. Martins Fest application online  STEP 2: Apply now</div>
+          <span class="apply-row apply-pill-green">🌐 Search 'St. Martins Fest Franklin WI 2026 vendor application' and apply</span>
+          <div class="note">STEP 3: $1,267 net last year on a 2-day show. This is a confirmed strong performer. DO NOT SKIP.</div>
+        </div>
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;★ LABOR DAY WEEKEND — OPEN WINDOW</div>
+          <div class="detail-row"><b>📅</b> Aug 28-30 (Fri-Sun)  |  Partner at Oregon State Fair  |  YOU ARE FREE</div>
+          <div class="detail-row">HIGHEST PRIORITY SEARCH. Labor Day weekend = biggest outdoor show weekend in Midwest.</div>
+          <div class="detail-row">TOP TARGET: Lake Geneva Art Fair — upscale resort town, $100K+ HHI crowd</div>
+          <span class="apply-row apply-pill-purple">🔍 Search: 'Lake Geneva Art Fair Labor Day 2026' and 'WI outdoor festival Aug 29 2026'</span>
+          <div class="note">Also: Naperville festivals, Oak Brook Artisan Market, Milwaukee lakefront events. Apply to all.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;MILWAUKEE IRISH FEST (CHECK DATES)</div>
+          <div class="detail-row"><b>📅</b> Typically mid-August  |  Milwaukee Summerfest Grounds  |  ~35 miles</div>
+          <div class="detail-row">Application submitted May 7 to marketplacevendors@irishfest.com — awaiting reply</div>
+          <div class="detail-row">STEP 1: Check Gmail for reply from marketplacevendors@irishfest.com</div>
+          <span class="apply-row apply-pill-blue">📬 Check Gmail for Irish Fest reply. Large Milwaukee crowd, upscale Irish festival.</span>
+          <div class="note">STEP 2: If approved, 4-day show. Irish festival crowd = jewelry buyers. Strong opportunity.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-note">BEST SOLUTION &bull; DOT DYNASTY LLC &bull; Ranked: ★★★★★ Best to ★★★ Good &bull; Green bar = top tier &bull; Blue = solid &bull; Orange = average</div>
+</div>
+
+<div class="page">
+  <div class="page-title">BEST SOLUTION 2026 &bull; DOT DYNASTY LLC &bull; EVENT PLANNER</div>
+  <div class="months-row">
+    <div class="month-box">
+      <div class="month-header" style="background:#D4620A;">
+        <span class="month-name">SEPTEMBER</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">FALL HARVEST SEASON</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;CRANBERRY FEST ★ YOUR #1 SHOW</div>
+          <div class="detail-row"><b>📅</b> Sep 25-27 (Fri-Sun)  |  Warrens, WI  |  ~115 miles  |  NO CONFLICT</div>
+          <div class="detail-row">$2,632 NET in 2025. 100,000+ attendees. Fri-Sun = your FREE days (Durham blackout is Thu Sep 24 only).</div>
+          <div class="detail-row">CONFIRMED RETURNING VENDOR. Booth: ~$200. Electric included. Set up Fri morning.</div>
+          <span class="apply-row apply-pill-green">✅ CONFIRMED. Email cranfest@cranfest.com in May to lock in return. This is your anchor.</span>
+          <div class="note">Strategy: Push 32oz at $40. Demos every person. Target $5,000+ gross this year.</div>
+        </div>
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;★ OPEN WINDOW: FRI SEP 4 — SUN SEP 6</div>
+          <div class="detail-row"><b>📅</b> Sep 4-6 (Fri-Sun)  |  Partner still at Oregon State Fair  |  YOU ARE FREE</div>
+          <div class="detail-row">Labor Day weekend just ended. Early September outdoor shows still running.</div>
+          <div class="detail-row">SEARCH: Wisconsin Fall Festival Sep 2026, Illinois outdoor markets first weekend of Sept</div>
+          <span class="apply-row apply-pill-purple">🔍 Search 'Wisconsin festival September 5-6 2026' and 'IL craft fair early September'</span>
+          <div class="note">Possible: Cedarburg Wine & Harvest Festival (Sep dates TBD), Waukesha County area fall events.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;CEDARBURG WINE & HARVEST FESTIVAL</div>
+          <div class="detail-row"><b>📅</b> Typically late September  |  Cedarburg, WI  |  ~30 miles  |  Weekend</div>
+          <div class="detail-row">Upscale Cedarburg crowd — wine festival goers = exactly your buyer. High-income weekend event.</div>
+          <div class="detail-row">STEP 1: Application submitted to coordinator@cedarburgfestivals.org — awaiting reply</div>
+          <span class="apply-row apply-pill-orange">📧 Follow up: coordinator@cedarburgfestivals.org — confirm Wine & Harvest dates and application</span>
+          <div class="note">If no reply by June, call their office. This show = strong demographic for Best Solution.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;7 MILE FAIR — BACKUP ANY WEEKEND</div>
+          <div class="detail-row"><b>📅</b> Any Saturday  |  Caledonia, WI  |  ~20 miles  |  Year-round weekly</div>
+          <div class="detail-row">Use any open September Saturday for 7 Mile Fair. Consistent crowd, low commitment.</div>
+          <div class="detail-row">STEP 1: Check 7milefair.com for vendor spots  STEP 2: Show up with inventory and demo</div>
+          <span class="apply-row apply-pill-blue">🌐 7milefair.com — backup for any open weekend. Always have a show option.</span>
+          <div class="note">Good for testing new display setups before Cranberry Fest. Run your demo, track conversion.</div>
+        </div>
+      </div>
+    </div>
+    <div class="month-box">
+      <div class="month-header" style="background:#6B9E6B;">
+        <span class="month-name">OCTOBER</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">FALL FESTIVAL MONTH</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;OAK BROOK ARTISAN MARKET — FALL</div>
+          <div class="detail-row"><b>📅</b> Oct 3-4 (Sat-Sun)  |  Oak Brook, IL  |  ~65 miles  |  2 DAYS</div>
+          <div class="detail-row">Oak Brook = one of the highest income areas in Illinois. Upscale outdoor artisan market.</div>
+          <div class="detail-row">STEP 1: Go to oakbrookartisanmarket.com  STEP 2: Find Fall 2026 vendor application</div>
+          <span class="apply-row apply-pill-red">⚡ APPLY ASAP — oakbrookartisanmarket.com  High-income IL suburb = top demographic</span>
+          <div class="note">STEP 3: Applications may fill early. Apply now. This crowd has money and buys jewelry.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;BURGOO FESTIVAL</div>
+          <div class="detail-row"><b>📅</b> Oct 10-12 (Sat-Mon)  |  Utica, IL  |  ~90 miles  |  3 DAYS</div>
+          <div class="detail-row">LaSalle County historical festival. Amanda Carter confirmed — JotForm application ready.</div>
+          <div class="detail-row">Fall outdoor crowd. Columbus Day weekend. 3-day run in small-town IL.</div>
+          <span class="apply-row apply-pill-green">✅ Apply at jotform.com/253618186444160  |  Gmail draft to Amanda already saved.</span>
+          <div class="note">Strategy: Rural IL crowd on holiday weekend. Pack 16oz and 2oz as lower-price entry points.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;ELKHORN HOLIDAY CRAFT BASH</div>
+          <div class="detail-row"><b>📅</b> November TBD  |  Elkhorn, WI  |  ~25 miles  |  Strong holiday demographic</div>
+          <div class="detail-row">On waitlist. Applied for spot. Holiday craft market = gift shoppers = Best Solution buyers.</div>
+          <div class="detail-row">STEP 1: Gmail draft to elkhornholidaycraftbash@gmail.com saved — send it</div>
+          <span class="apply-row apply-pill-orange">📧 Send Gmail draft + fill out their waitlist application. Check email for spot opening.</span>
+          <div class="note">STEP 2: Holiday shoppers looking for unique gifts = 32oz gift boxes push hard here.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;7 MILE FAIR — FALL SATURDAYS</div>
+          <div class="detail-row"><b>📅</b> Any Saturday  |  Caledonia, WI  |  ~20 miles  |  Weekly year-round</div>
+          <div class="detail-row">Use open October Saturdays for 7 Mile Fair. Fall crowd is active and buying.</div>
+          <div class="detail-row">No advance commitment needed. Show up, set up, sell.</div>
+          <span class="apply-row apply-pill-blue">🌐 7milefair.com — great for weeks without a show. Never have a dark weekend.</span>
+          <div class="note">October = pre-holiday gift buying begins. Push bundle packs and gift messaging.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-note">BEST SOLUTION &bull; DOT DYNASTY LLC &bull; Ranked: ★★★★★ Best to ★★★ Good &bull; Green bar = top tier &bull; Blue = solid &bull; Orange = average</div>
+</div>
+
+<div class="page">
+  <div class="page-title">BEST SOLUTION 2026 &bull; DOT DYNASTY LLC &bull; EVENT PLANNER</div>
+  <div class="months-row">
+    <div class="month-box">
+      <div class="month-header" style="background:#8B6914;">
+        <span class="month-name">NOVEMBER</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">HOLIDAY SEASON</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;ELKHORN HOLIDAY CRAFT BASH</div>
+          <div class="detail-row"><b>📅</b> November TBD (check for date)  |  Elkhorn, WI  |  ~25 miles</div>
+          <div class="detail-row">Holiday gift shopper crowd. If off the waitlist, this is a strong November show.</div>
+          <div class="detail-row">Contact: elkhornholidaycraftbash@gmail.com  |  Gmail draft saved — check for reply</div>
+          <span class="apply-row apply-pill-orange">📬 Check Gmail for waitlist status. If approved, confirm attendance immediately.</span>
+          <div class="note">Strategy: Gift sets, 3-pack bundles. 'Perfect gift for mom/wife' angle kills at holiday markets.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;ZURKO — GREEN BAY HOLIDAY GIFT SHOW</div>
+          <div class="detail-row"><b>📅</b> Nov 28 (Black Friday)  |  Resch Expo, Green Bay WI  |  ~2 hrs</div>
+          <div class="detail-row">Day after Thanksgiving. Black Friday shoppers at major expo center. Could be strong traffic.</div>
+          <div class="detail-row">AWAITING ZURKO REPLY to your questions (booth cost, attendance, electricity)</div>
+          <span class="apply-row apply-pill-orange">📧 Draft sent to office@zurkopromotions.com — awaiting reply. Commit if booth under $300.</span>
+          <div class="note">If booth is $150-300 and attendance is 5,000+, do it. Black Friday gift crowd = buyers.</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;RUSTIC FOX — CAROL STREAM (RECURRING)</div>
+          <div class="detail-row"><b>📅</b> Recurring monthly  |  Carol Stream, IL  |  ~55 miles  |  Home decor boutique</div>
+          <div class="detail-row">Holiday season at a home goods boutique = PEAK time for Best Solution gift sales.</div>
+          <div class="detail-row">STEP 1: Email info@therusticfoxhome.com in October to secure November dates</div>
+          <span class="apply-row apply-pill-purple">📧 info@therusticfoxhome.com — lock in November demo vendor dates NOW (book early)</span>
+          <div class="note">Holiday shoppers at a boutique = exact buyer. Push 32oz gift box hard: 'Makes the perfect gift.'</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;7 MILE FAIR — HOLIDAY SATURDAYS</div>
+          <div class="detail-row"><b>📅</b> Any Saturday  |  Caledonia, WI  |  ~20 miles  |  Week-round</div>
+          <div class="detail-row">Holiday shopping season makes even weekly markets stronger. Gift messaging works.</div>
+          <div class="detail-row">Zero commitment — sign up same day. Fallback for any open Saturday.</div>
+          <span class="apply-row apply-pill-blue">🌐 7milefair.com — fill every open Saturday. Never skip a selling day in November.</span>
+          <div class="note">November = gift buying. 'This makes the perfect gift for her jewelry' closes everyone.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;★ SEARCH: ADDITIONAL HOLIDAY CRAFT SHOWS</div>
+          <div class="detail-row"><b>📅</b> November weekends  |  WI / Northern IL  |  Target within 75 miles</div>
+          <div class="detail-row">Holiday craft shows are everywhere in November. Many accept vendors late.</div>
+          <div class="detail-row">SEARCH: 'Wisconsin holiday craft fair November 2026 vendor' on eventeny.com and zapplication.org</div>
+          <span class="apply-row apply-pill-purple">🔍 Search eventeny.com + zapplication.org for November WI/IL holiday shows</span>
+          <div class="note">Apply to 4-5 November shows. Holiday = highest conversion rate of the year for jewelry products.</div>
+        </div>
+      </div>
+    </div>
+    <div class="month-box">
+      <div class="month-header" style="background:#2B7DB3;">
+        <span class="month-name">DECEMBER</span>
+        <span class="month-year">2026</span>
+        <span class="month-tag">YEAR-END + 2027 PLANNING</span>
+      </div>
+      <div class="month-body">
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;RUSTIC FOX — CAROL STREAM (RECURRING)</div>
+          <div class="detail-row"><b>📅</b> Recurring monthly  |  Carol Stream, IL  |  ~55 miles</div>
+          <div class="detail-row">December at a home decor boutique = Christmas gift rush. Highest conversion potential.</div>
+          <div class="detail-row">STEP 1: Book December dates with Rustic Fox in October. Lock in the holiday slot.</div>
+          <span class="apply-row apply-pill-purple">📧 info@therusticfoxhome.com — confirm December demo vendor dates. Priority booking.</span>
+          <div class="note">Strategy: Gift sets, 3-pack bundles, bow on top. 'Best gift for anyone who wears jewelry.'</div>
+        </div>
+        <div class="show-entry r4">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★</span> &nbsp;★ HOLIDAY CRAFT SHOWS — EARLY DECEMBER</div>
+          <div class="detail-row"><b>📅</b> Dec 5-6 and Dec 12-13 weekends  |  WI / IL  |  Target within 75 miles</div>
+          <div class="detail-row">Christmas craft shows = highest gift-buying season. Best Solution is perfect gift item.</div>
+          <div class="detail-row">SEARCH NOW: 'Wisconsin Christmas craft fair December 2026 vendor' on eventeny.com</div>
+          <span class="apply-row apply-pill-purple">🔍 Search eventeny.com + zapplication.org for December holiday craft shows. Apply to several.</span>
+          <div class="note">Dec 12-13 = last big holiday shopping weekend before Christmas. Highest urgency buyers.</div>
+        </div>
+        <div class="show-entry r3">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★</span> &nbsp;7 MILE FAIR — DECEMBER SATURDAYS</div>
+          <div class="detail-row"><b>📅</b> Any Saturday  |  Caledonia, WI  |  ~20 miles  |  Year-round</div>
+          <div class="detail-row">Holiday shoppers at a weekly outdoor market. Consistent fallback all December.</div>
+          <div class="detail-row">Zero commitment needed. Show up and sell. Christmas gift crowd through Dec 20.</div>
+          <span class="apply-row apply-pill-blue">🌐 7milefair.com — always your backup. Fill every open Saturday through Dec 20.</span>
+          <div class="note">Dec 26+ = post-holiday slump. Last selling day worth doing = Sat Dec 20.</div>
+        </div>
+        <div class="show-entry r5">
+          <div class="rank-bar"></div>
+          <div class="show-name"><span class="stars">★★★★★</span> &nbsp;★ 2027 SHOW PLANNING — START NOW</div>
+          <div class="detail-row"><b>📅</b> December 2026  |  Planning for 2027 season</div>
+          <div class="detail-row">Many top shows open applications in Dec/Jan for the following year. Early = better booth spots.</div>
+          <div class="detail-row">STEP 1: Compile 2026 revenue by show  STEP 2: Re-apply to all top performers for 2027</div>
+          <span class="apply-row apply-pill-green">📋 Build 2027 show list in December. Re-apply to Cranberry Fest + top 2026 shows first.</span>
+          <div class="note">STEP 3: Target new shows: research WI State Fair alternatives, top IL shows, expand reach.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer-note">BEST SOLUTION &bull; DOT DYNASTY LLC &bull; Ranked: ★★★★★ Best to ★★★ Good &bull; Green bar = top tier &bull; Blue = solid &bull; Orange = average</div>
+</div>
+
+</body>
+</html>
