@@ -853,6 +853,21 @@ function applyOneTimeUpdates(d){
     DEFAULT_REPS.forEach(r=>{if(!d.reps.find(x=>x.id===r.id))d.reps.push(r);});
     d._applied['reps_seed_v1']=true;
   }
+  // Anthony commission: 40% cash / 30% card (electronic pays the cash rate). Per Froggy.
+  // Only sets defaults — if he later customizes the rate in Settings, this won't override.
+  if(!d._applied['anthony_comm_4030_v1']){
+    const a=(d.reps||[]).find(r=>r.id==='rep_anthony'||(r.name||'').toLowerCase()==='anthony');
+    if(a){
+      if(a.commCash==null||a.commCash==='')a.commCash=0.40;
+      if(a.commCard==null||a.commCard==='')a.commCard=0.30;
+    }
+    d._applied['anthony_comm_4030_v1']=true;
+  }
+  // Give every product-debt payment a stable id so they can be edited/deleted
+  if(!d._applied['debt_ids_v1']){
+    ((d.productDebt&&d.productDebt.payments)||[]).forEach((p,i)=>{ if(!p.id)p.id='dp_'+i+'_'+((p.date||'').replace(/-/g,'')); });
+    d._applied['debt_ids_v1']=true;
+  }
   // Add repIds + repOnlyShow fields to all shows that don't have them
   if(!d._applied['show_rep_fields_v1']){
     (d.shows||[]).forEach(sh=>{
@@ -1060,7 +1075,7 @@ function showEndKey(sh){ // last day of the show as YYYY-MM-DD (start + numDays-
   const d=new Date(start+'T12:00:00'); d.setDate(d.getDate()+((sh.numDays||1)-1));
   return d.toISOString().split('T')[0];
 }
-function isMissed(sh){ return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
+function isMissed(sh){ if(sh.missedManual===true)return true; return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
 function isUpcoming(sh){ return sh.status!=='completed' && !isMissed(sh); } // includes active + future planned
 function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const sold=calcSold(d.morningCount,d.eveningCount); SKUS.forEach(s=>u[s.key]+=(sold[s.key]||0)); } }); return u; }
 function showPmtTotals(sh){ const p={}; PMTS.forEach(x=>p[x.key]=0); (sh.days||[]).forEach(d=>{ if(d.payments) PMTS.forEach(x=>p[x.key]+=(parseFloat(d.payments[x.key])||0)); }); return p; }
@@ -1427,7 +1442,7 @@ function rHome(){
     </div>
     <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
-    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
+    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted);min-width:74px">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span><span style="color:var(--muted);font-size:10px;flex:1;text-align:right">${p.note||''}</span><button onclick="editDebtPmt('${p.id}')" title="Edit" style="background:none;border:none;color:var(--blue);cursor:pointer;padding:2px 4px;font-size:12px">✏️</button><button onclick="delDebtPmt('${p.id}')" title="Delete" style="background:none;border:none;color:var(--red);cursor:pointer;padding:2px 4px;font-size:12px">🗑</button></div>`).join('')}</div>`:''}
     <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
   </div>`;
 
@@ -1525,7 +1540,7 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${activeShows.map(a=>`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${a.id}')">🔴 Open Active Show: ${a.name}</button>`).join('')}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.2</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.3</div>
   `;
 
   pg('home').innerHTML=html;
@@ -1912,6 +1927,18 @@ function saveEditCosts(id){
   sh.notes=v('ec_notes');
   saveS();mClose();toast('Show saved!');renderCur();
 }
+// Blended COGS rate = actual product cost ÷ sell price. Uses the show's real sales
+// mix if it has any, otherwise the catalog average. Replaces the old flat 30%.
+function blendedCogsRate(sh){
+  if(sh){
+    let g=0,c=0;
+    (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){const sold=calcSold(d.morningCount,d.eveningCount);g+=calcRev(sold);c+=calcCOGS(sold);} });
+    if(g>0)return Math.min(0.95,c/g);
+  }
+  let sum=0,n=0;
+  SKUS.forEach(s=>{const price=getP(s.key);if(price>0){sum+=s.cost/price;n++;}});
+  return n?sum/n:0.30;
+}
 function calcBreakEven(sh){
   const mpg=S.settings.mpg||17.5;
   const gp=S.settings.gasPrice||3.50;
@@ -1919,18 +1946,16 @@ function calcBreakEven(sh){
   const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   const flatOverhead=(typeof showFlatOverhead==='function')?showFlatOverhead(sh):0; // candy + paper towels
   const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp+flatOverhead;
-  // If paid reps assigned, breakeven needs to account for commission variable cost
-  // Use algebraic solution: BE = fixedCosts / (1 - cogsRate - blendedCommRate)
-  // cogsRate ≈ 30% (2025 average), blendedCommRate = 60% cash × 40% + 40% card × 30% = 36%
+  // BE = fixedCosts / (1 - cogsRate - blendedCommRate).
+  // cogsRate now reflects the ACTUAL product cost being sold (see blendedCogsRate).
+  const cogsRate=blendedCogsRate(sh);
   const paidRepList=(sh.repIds||[]).map(id=>(S.reps||[]).find(x=>x.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+  let variableRate=cogsRate;
   if(paidRepList.length){
-    const cogsRate=0.30;
-    // Each assigned rep's blended rate (≈60% cash / 40% card sales mix), averaged across the reps working it.
-    const blendedCommRate=paidRepList.reduce((t,r)=>{const rt=repCommRates(r);return t+(0.60*rt.cash+0.40*rt.card);},0)/paidRepList.length;
-    const variableRate=cogsRate+blendedCommRate;
-    return variableRate>=1?fixedCosts*3:fixedCosts/(1-variableRate);
+    // each assigned rep's blended rate (≈60% cash / 40% card mix), averaged across reps
+    variableRate+=paidRepList.reduce((t,r)=>{const rt=repCommRates(r);return t+(0.60*rt.cash+0.40*rt.card);},0)/paidRepList.length;
   }
-  return fixedCosts/(1-0.30); // no reps: just account for COGS
+  return variableRate>=1?fixedCosts*3:fixedCosts/(1-variableRate);
 }
 const SHOW_EXP_CATS=[
   {key:'fuel',   label:'Fuel',         icon:'⛽'},
@@ -2420,9 +2445,10 @@ function rShow(){
   if(!curShow)return;
   const sh=S.shows.find(s=>s.id===curShow);if(!sh){go('shows');return;}
   const t=calcShow(sh);
-  const bdgTxt=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ COMPLETED':'📅 PLANNED';
+  const bdgTxt=isMissed(sh)?'❌ MISSED / DID NOT DO':sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ COMPLETED':'📅 PLANNED';
   const dateStr=sh.dates?sh.dates.join(' → '):'';
-  const actBtn=sh.status==='planned'?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>`:'';
+  const missBtn=`<button class="btn btn-ghost btn-full" style="margin-bottom:12px;border-color:var(--redbd);color:var(--red)" onclick="toggleMissShow('${sh.id}')">${sh.missedManual?'↩️ Un-mark — Back to Planned':'⏭️ Mark as Missed / Did Not Do'}</button>`;
+  const actBtn=(sh.status==='planned')?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>${missBtn}`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>`:'';
   const dtabs=sh.days.map((d,i)=>{const ok=d.morningCount&&d.eveningCount&&calcPmt(d.payments)>0;return`<button class="dtab ${i===curDay?'on':''} ${ok&&i!==curDay?'done':''}" onclick="go('show','${sh.id}',${i})">${d.date}${ok?'✓':''}</button>`;}).join('');
 
   pg('show').innerHTML=`
@@ -2670,6 +2696,15 @@ function confirmPack(shId){
   sh.status='active';sh.packedInventory={...pk};sh.days[0].morningCount={...pk};
   mClose();saveS();toast('Show started! Inventory packed.');
 }
+function toggleMissShow(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  if(sh.missedManual){
+    sh.missedManual=false; saveS(); toast('Back to planned'); go('show',id,0);
+  } else {
+    if(!confirm('Mark "'+sh.name+'" as MISSED / did not do?\n\nIt stays on your list (shown in the Missed group) and is left out of sales totals. You can un-mark it anytime.'))return;
+    sh.missedManual=true; saveS(); toast('Marked as missed'); go('show',id,0);
+  }
+}
 function showCntModal(shId,di,type){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const d=sh.days[di];
@@ -2679,10 +2714,15 @@ function showCntModal(shId,di,type){
   mOpen(`<div class="mh"><div class="mt">${type==='morning'?'🌅 Morning Count':'🌙 Evening Count'}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${type==='morning'?'Count everything at your booth right now.':'Count all unsold items at end of day.'}</div>
   ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&d.morningCount?`<div class="cr-s">Started: ${d.morningCount[s.key]||0}</div>`:''}</div>
-  <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
+  <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0" oninput="updCntVal()"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
+  <div style="background:var(--card2);border-radius:9px;padding:12px;margin:12px 0;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-weight:900;font-size:12px">EST. RETAIL VALUE</span>
+    <span id="cntVal" style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(SKUS.reduce((t,s)=>t+(def[s.key]||0)*getP(s.key),0))}</span>
+  </div>
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}')">Save ${type==='morning'?'Morning':'Evening'} Count</button>`);
 }
-function cA(id,d){const e=$$(id);e.value=Math.max(0,parseInt(e.value||0)+d);}
+function cA(id,d){const e=$$(id);e.value=Math.max(0,parseInt(e.value||0)+d);if(id.indexOf('c_')===0)updCntVal();}
+function updCntVal(){const el=$$('cntVal');if(!el)return;let v=0;SKUS.forEach(s=>{const i=$$('c_'+s.key);if(i)v+=(parseInt(i.value||0)||0)*getP(s.key);});el.textContent=fmt(v);}
 function saveCount(shId,di,type){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const d=sh.days[di];const c={};SKUS.forEach(s=>c[s.key]=parseInt($$('c_'+s.key).value)||0);
@@ -2757,27 +2797,43 @@ function endShow(shId){
 // ===================================================
 // PRODUCT DEBT (MARK MARTONE)
 // ===================================================
-function openDebtPmt(){
+function openDebtPmt(editId){
   const debt=S.productDebt||{};
   const paid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
   const bal=Math.max(0,(debt.originalBalance||0)-paid);
   const today=new Date().toISOString().split('T')[0];
-  mOpen(`<div class="mh"><div class="mt">💳 Log Payment to ${debt.supplier||'Supplier'}</div><button class="mx" onclick="mClose()">×</button></div>
+  const ep=editId?(debt.payments||[]).find(p=>p.id===editId):null;
+  mOpen(`<div class="mh"><div class="mt">${ep?'✏️ Edit Payment':'💳 Log Payment'} to ${debt.supplier||'Supplier'}</div><button class="mx" onclick="mClose()">×</button></div>
   <div class="wb red" style="margin-bottom:12px">Current balance: <strong>${fmt(bal)}</strong></div>
-  <div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01"></div>
-  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="${today}"></div>
-  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. Venmo, check #1234"></div>
-  <button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ Save Payment</button>
+  <div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01" value="${ep?ep.amount:''}"></div>
+  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="${ep?ep.date:today}"></div>
+  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. Venmo, check #1234" value="${ep?(ep.note||'').replace(/"/g,'&quot;'):''}"></div>
+  <input type="hidden" id="dpt_id" value="${ep?ep.id:''}">
+  <button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ ${ep?'Update':'Save'} Payment</button>
   <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
 }
+function editDebtPmt(id){openDebtPmt(id);}
 function saveDebtPmt(){
   const amt=parseFloat($$('dpt_amt').value);
   if(!amt||amt<=0){toast('Enter a valid amount');return;}
   const date=$$('dpt_date').value||new Date().toISOString().split('T')[0];
   const note=$$('dpt_note').value||'';
+  const editId=$$('dpt_id')?$$('dpt_id').value:'';
   if(!S.productDebt)S.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  S.productDebt.payments.push({amount:amt,date,note});
-  mClose();saveS();toast('✅ Payment logged — '+fmt(amt));
+  if(editId){
+    const p=(S.productDebt.payments||[]).find(x=>x.id===editId);
+    if(p){p.amount=amt;p.date=date;p.note=note;}
+  } else {
+    S.productDebt.payments.push({id:'dp_'+Date.now(),amount:amt,date,note});
+  }
+  mClose();saveS();toast(editId?'✅ Payment updated':'✅ Payment logged — '+fmt(amt));
+}
+function delDebtPmt(id){
+  if(!S.productDebt||!S.productDebt.payments)return;
+  const p=S.productDebt.payments.find(x=>x.id===id);if(!p)return;
+  if(!confirm('Delete this payment?\n\n'+p.date+' — '+fmt(p.amount)+(p.note?'\n'+p.note:'')+'\n\nThis updates the balance owed to Mark.'))return;
+  S.productDebt.payments=S.productDebt.payments.filter(x=>x.id!==id);
+  saveS();toast('Payment deleted');
 }
 
 // ===================================================
@@ -3407,7 +3463,7 @@ function rSettings(){
   <div style="font-size:11px;color:var(--muted)">Tip: open any show and tap Export for a single-show CSV or PDF.</div></div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
-  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.2<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
+  <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · v7.3<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
