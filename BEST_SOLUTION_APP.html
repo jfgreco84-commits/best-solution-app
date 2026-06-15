@@ -1163,6 +1163,22 @@ function invUnresolved(sh){ return invCarryIssues(sh).filter(m=>!((sh.days[m.di]
 function invStatus(sh){ const carry=invCarryIssues(sh),neg=invNegativeSold(sh); if(!carry.length&&!neg.length)return'green'; if(invUnresolved(sh).length||neg.length)return'red'; return'yellow'; }
 function invStatusMeta(st){ return st==='green'?{c:'var(--green)',l:'Reconciled',i:'🟢'}:st==='yellow'?{c:'var(--gold)',l:'Reviewed (override)',i:'🟡'}:{c:'var(--red)',l:'Mismatch — review needed',i:'🔴'}; }
 function invLogPush(sh,entry){ if(!sh.invLog)sh.invLog=[]; sh.invLog.push(entry); if(sh.invLog.length>200)sh.invLog=sh.invLog.slice(-200); }
+// Cash vs inventory: money collected vs full price of product that actually sold that day. A shortfall = discounts OR a cash problem.
+function dayCashCheck(sh,di){
+  const d=(sh.days||[])[di]; if(!d||!d.morningCount||!d.eveningCount)return {state:'na'};
+  const collected=calcPmt(d.payments||{}); if(collected<=0)return {state:'na'};
+  const rev=calcRev(daySold(d)); if(rev<=0)return {state:'na'};
+  const diff=collected-rev;
+  if(Math.abs(diff)<=0.50)return {state:'ok',rev,collected};
+  return diff<0?{state:'short',rev,collected,amt:rev-collected}:{state:'over',rev,collected,amt:collected-rev};
+}
+function dayCashCheckHTML(sh,di,big){
+  const cc=dayCashCheck(sh,di); if(cc.state==='na')return '';
+  const fs=big?'font-size:13px;font-weight:800':'';
+  if(cc.state==='ok')return `<div class="wb green" style="margin-top:8px;${fs}">✓ Cash matches inventory — ${fmt(cc.collected)} collected.</div>`;
+  if(cc.state==='over')return `<div class="wb gold" style="margin-top:8px;${fs}">⚠️ Cash check: collected ${fmt(cc.amt)} MORE than the product that sold (${fmt(cc.rev)}). Re-check your counts.</div>`;
+  return `<div class="wb red" style="margin-top:8px;${fs}">⚠️ Cash short ${fmt(cc.amt)}: collected ${fmt(cc.collected)} vs ${fmt(cc.rev)} of product sold. OK if you gave discounts/freebies — otherwise check for a cash shortfall.</div>`;
+}
 function showPmtTotals(sh){ const p={}; PMTS.forEach(x=>p[x.key]=0); (sh.days||[]).forEach(d=>{ if(d.payments) PMTS.forEach(x=>p[x.key]+=(parseFloat(d.payments[x.key])||0)); }); return p; }
 function showHours(sh){ return (typeof showWorkHoursTotal==='function')?showWorkHoursTotal(sh):((parseFloat(sh.hoursPerDay)||8)*(sh.numDays||1)); }
 function bestShowCardHTML(sh,label){
@@ -2336,6 +2352,18 @@ function rPnL(){
     h+=`<div class="empty"><div class="ei">📊</div><div>Complete some shows to see P&amp;L here.</div></div>`;
   }
 
+  // Show efficiency — profit per hour & per mile (work hours now accurate from the hours audit)
+  if(done.length>0){
+    const rows=done.map(sh=>{const t=calcShow(sh);const hrs=(typeof showWorkHoursTotal==='function')?showWorkHoursTotal(sh):0;const mi=(typeof showMiles==='function')?showMiles(sh):0;return {name:sh.name,profit:t.profit,perHr:hrs>0?t.profit/hrs:null,perMi:mi>0?t.profit/mi:null,hrs,mi};});
+    const byHr=[...rows].sort((a,b)=>((b.perHr==null?-1e12:b.perHr)-(a.perHr==null?-1e12:a.perHr)));
+    h+=`<div class="sec-lbl">SHOW EFFICIENCY — PROFIT / HOUR &amp; / MILE</div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:6px;font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;border-bottom:1px solid var(--border);padding-bottom:4px"><div>Show (best $/hr first)</div><div style="text-align:right">$ / hr</div><div style="text-align:right">$ / mi</div></div>
+      ${byHr.map(r=>`<div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:6px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)"><div style="min-width:0"><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name}</div><div style="font-size:9px;color:var(--muted)">${fmt(r.profit)} net · ${fmtN(r.hrs)}h · ${fmtN(r.mi)}mi</div></div><div style="text-align:right;font-weight:800;color:${(r.perHr||0)>=0?'var(--green)':'var(--red)'}">${r.perHr==null?'—':fmt(r.perHr)}</div><div style="text-align:right;font-weight:800;color:${(r.perMi||0)>=0?'var(--green)':'var(--red)'}">${r.perMi==null?'—':fmt(r.perMi)}</div></div>`).join('')}
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Work hours include the 1-hr setup per day. Miles = round-trip total. Use this to decide which recurring shows are worth the drive.</div>
+    </div>`;
+  }
+
   // Compare to last year
   if(PREV_YEAR&&PREV_YEAR.gross>0){
     h+=`<div class="sec-lbl">VS 2025 (FINAL)</div>
@@ -2779,8 +2807,7 @@ function rDay(sh,di){
   const profit=pmtT-cogs-dayExp-bpd-dayComm; // net is REAL CASH: money collected minus this day's costs
   const taxRes=Math.max(0,profit*showTaxRate(sh));
   const soldChips=sold?SKUS.filter(s=>(sold[s.key]||0)>0).map(s=>`<span class="chip gold">${s.short}: <strong>${sold[s.key]}</strong></span>`).join(''):'';
-  let moneyCheck='';
-  if(haP&&rev>0){const diff=Math.abs(pmtT-rev);moneyCheck=diff>0.50?`<div class="wb ${pmtT>rev?'gold':'red'}" style="margin-top:8px">${pmtT>rev?'⚠️ Collected MORE than inventory shows. Check counts.':'⚠️ Missing '+fmt(rev-pmtT)+'. Collected less than inventory.'}</div>`:`<div class="wb green" style="margin-top:8px">✓ Money matches inventory. Good to go.</div>`;}
+  const moneyCheck=dayCashCheckHTML(sh,di,true);
   return`<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:17px;font-weight:900">${d.date||'Day '+(di+1)}</div>
@@ -2802,13 +2829,15 @@ function rDay(sh,di){
         <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#00D26A;margin-bottom:6px">💰 Money</div>
         ${PMTS.map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${p.label}</span><span style="font-weight:700">${haP?((d.payments[p.key]||0)>0?fmt(d.payments[p.key]):'—'):''}</span></div>`).join('')}
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;color:var(--green);margin-top:4px"><span>Total</span><span>${haP?fmt(pmtT):'—'}</span></div>
+        ${(d.paymentsAuto&&(d.repSales||[]).length)?'<div style="font-size:9px;color:#7EB8F7;text-align:center;margin-top:2px">↑ auto-summed from reps</div>':''}
         <button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>
       </div>
     </div>
-    ${(soldChips||rev>0||moneyCheck)?`<div style="margin-bottom:6px">
+    ${moneyCheck}
+    ${(sh.status==='active'||sh.status==='completed')?`<button class="btn ${d.locked?'btn-ghost':'btn-gold'} btn-full" style="margin:8px 0" onclick="openCloseout('${sh.id}',${di})">${d.locked?'🔒 Day Finalized — view closeout':'🏁 Day Closeout'}</button>`:''}
+    ${(soldChips||rev>0)?`<div style="margin-bottom:6px">
       ${soldChips?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:2px 0 3px">Sold today</div><div style="display:flex;flex-wrap:wrap;gap:5px">${soldChips}</div>`:''}
       ${rev>0?`<div style="margin-top:4px;font-size:12px;color:var(--muted)">Full-price value: <b style="color:var(--gold)">${fmt(rev)}</b> · collected <b style="color:var(--green)">${fmt(pmtT)}</b></div>`:''}
-      ${moneyCheck}
     </div>`:''}
     ${isA?`<div class="div"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Day Expenses</div><button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit</button></div>
@@ -2834,32 +2863,75 @@ function rDay(sh,di){
     :d.notes?`<div class="div"></div><div style="font-size:12px;color:var(--muted)"><strong>Notes:</strong> ${d.notes}</div>`:''}
     ${(()=>{
       const showReps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;});
-      if(!showReps.length)return'';
+      if(!showReps.length)return''; // solo show: day money is entered directly, no per-person breakdown
+      const ownerRep=(S.reps||[]).find(r=>r.isSelf&&r.active);
+      // On a staffed show you attend, YOUR own sales must be captured too, or the auto-summed day total undercounts.
+      // Always show your line unless it's a rep-only show (you're not there).
+      const sellers=(ownerRep&&!sh.repOnlyShow&&!showReps.includes(ownerRep.id))?[ownerRep.id,...showReps]:showReps;
       const dayComm=calcDayComm(d);
-      const repRows=showReps.map(repId=>{
+      const dayTotal=calcPmt(sumRepSalesForDay(d));
+      const repRows=sellers.map(repId=>{
         const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return'';
         const rs=(d.repSales||[]).find(x=>x.repId===repId)||{square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0};
         const repTotal=PMTS.reduce((t,p)=>t+(parseFloat(rs[p.key])||0),0);
         const repComm=calcRepSalesComm({...rs,repId});
-        return`<div style="background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        const ownerZero=rep.isSelf&&repTotal===0; // your line still empty — nudge
+        return`<div style="background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:8px${ownerZero?';border:1px solid var(--gold)':''}">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div style="font-weight:800;font-size:13px">${rep.name}${rep.isSelf?' 👑':''}</div>
+            <div style="font-weight:800;font-size:13px">${rep.isSelf?'You ('+rep.name+')':rep.name}${rep.isSelf?' 👑':''}</div>
             <div style="text-align:right">
               <div style="font-size:13px;font-weight:900;color:var(--gold)">${fmt(repTotal)}</div>
               ${!rep.isSelf&&repComm>0?`<div style="font-size:10px;color:var(--red)">Comm: ${fmt(repComm)}</div>`:''}
             </div>
           </div>
-          <button class="btn btn-xs btn-ghost" style="width:100%" onclick="openRepSalesEntry('${sh.id}',${di},'${repId}')">✏️ Log Sales for ${rep.name}</button>
+          ${ownerZero?`<div style="font-size:10px;color:var(--gold);margin-bottom:6px">← Did you sell today too? Log YOUR sales so the day total is complete.</div>`:''}
+          <button class="btn btn-xs btn-ghost" style="width:100%" onclick="openRepSalesEntry('${sh.id}',${di},'${repId}')">✏️ Log Sales for ${rep.isSelf?'You':rep.name}</button>
         </div>`;
       }).join('');
       return`<div class="div"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Rep Sales & Commissions</div>
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Sales by Person Today</div>
           ${dayComm>0?`<div style="font-size:11px;color:var(--red);font-weight:700">Total Comm: ${fmt(dayComm)}</div>`:''}
         </div>
-        ${repRows}`;
+        ${repRows}
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:800;padding:4px 2px 0"><span>Day total (auto-summed)</span><span style="color:var(--green)">${fmt(dayTotal)}</span></div>`;
     })()}
   </div>`;
+}
+
+// ===================================================
+// DAY CLOSEOUT WIZARD — guided end-of-day checklist
+// ===================================================
+function openCloseout(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
+  const hasM=!!d.morningCount, hasE=!!d.eveningCount, hasP=calcPmt(d.payments)>0;
+  const staffed=(sh.repIds||[]).some(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;});
+  const dayTotal=calcPmt(d.payments);
+  const carry=invCarryIssues(sh).filter(m=>m.di===di), neg=invNegativeSold(sh).filter(m=>m.di===di);
+  const reconBad=(carry.length&&!d.carryReason)||neg.length>0;
+  const reconOK=!carry.length&&!neg.length;
+  const cc=dayCashCheck(sh,di);
+  const cashLine=cc.state==='short'?(' · cash short '+fmt(cc.amt)+' vs product sold (ok if discounts)'):cc.state==='over'?(' · cash '+fmt(cc.amt)+' OVER — recheck counts'):cc.state==='ok'?' · cash matches inventory':'';
+  const payCount=(d.repSales||[]).length+(sh.workers||[]).length;
+  const ic=v=>v===true?'✅':v==='opt'?'◽':'⬜';
+  const step=(n,title,state,detail,btn)=>`<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)"><div style="font-size:17px;line-height:1.3">${ic(state)}</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">${n}. ${title}</div><div style="font-size:11px;color:var(--muted)">${detail}</div>${btn?`<div style="margin-top:6px">${btn}</div>`:''}</div></div>`;
+  const canLock=hasE&&hasP&&!reconBad;
+  const moneyBtn=staffed
+    ? `<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="mClose();go('show','${sh.id}',${di})">${hasP?'Review rep sales':'Enter rep sales'}</button> <button class="btn btn-xs btn-ghost" onclick="showMoneyModal('${sh.id}',${di})">Override total</button>`
+    : `<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="showMoneyModal('${sh.id}',${di})">${hasP?'Edit money':'Count money'}</button>`;
+  mOpen(`<div class="mh"><div class="mt">🏁 Day Closeout</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} · ${d.date||('Day '+(di+1))}. Work top to bottom — reopen anytime to see what's left.</div>
+  ${d.locked?`<div class="wb green" style="margin-bottom:10px">🔒 Finalized & locked. <button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${di});setTimeout(()=>openCloseout('${sh.id}',${di}),50)">Unlock to edit</button></div>`:''}
+  ${step(1,'Evening count',hasE?true:false,hasE?'Counted — unsold product recorded.':'Count all unsold product at end of day.',`<button class="btn btn-xs ${hasE?'btn-ghost':'btn-gold'}" onclick="showCntModal('${sh.id}',${di},'evening')" ${!hasM?'disabled style="opacity:.5"':''}>${hasE?'Edit count':'Count now'}</button>${!hasM?' <span style="font-size:10px;color:var(--muted)">(do morning count first)</span>':''}`)}
+  ${step(2,'Money'+(staffed?' (auto-sums from reps)':''),hasP?true:false,hasP?('Day total '+fmt(dayTotal)+(d.paymentsAuto?' · auto from reps':'')):(staffed?'Enter each rep\'s sales — day total fills in automatically.':'Enter the day\'s money count.'),moneyBtn)}
+  ${step(3,'Day expenses',(d.expenses&&Object.values(d.expenses).some(v=>parseFloat(v)>0))?true:'opt','Gas, food, parking, hotel for the day (optional).',`<button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit expenses</button>`)}
+  ${step(4,'Rep & worker payouts',payCount?true:'opt',payCount?(payCount+' logged. Set what you actually paid on the show page.'):'Set what you paid each person (optional). Open the show to log.',`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to payouts</button>`)}
+  ${step(5,'Reconciliation — inventory + cash',reconBad?false:(reconOK?true:'opt'),(reconBad?'⚠️ Inventory mismatch — fix before locking.':(reconOK?'Counts reconcile.':'Reviewed (override on file).'))+cashLine,reconBad?`<button class="btn btn-xs btn-gold" onclick="mClose();go('show','${sh.id}',${di})">Review mismatch</button>`:'')}
+  ${(cc.state==='short'||cc.state==='over')?dayCashCheckHTML(sh,di,false):''}
+  <div style="margin-top:14px">
+    <button class="btn ${canLock&&!d.locked?'btn-gold':'btn-ghost'} btn-full" ${(!canLock||d.locked)?'disabled style="opacity:.5"':''} onclick="lockDay('${sh.id}',${di});mClose();go('show','${sh.id}',${di})">${d.locked?'🔒 Already finalized':'🔒 Finalize & Lock Day'}</button>
+    ${(!canLock&&!d.locked)?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">${!hasE?'Need evening count. ':''}${!hasP?'Need a money total. ':''}${reconBad?'Resolve the inventory mismatch. ':''}</div>`:''}
+  </div>`);
 }
 
 // ===================================================
@@ -2948,7 +3020,9 @@ function showMoneyModal(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const d=sh.days[di];const pmts=d.payments||{};
   let exp=0;if(d.morningCount&&d.eveningCount){const sold=daySold(d);exp=calcRev(sold);}
+  const repTot=calcPmt(sumRepSalesForDay(d)); const hasRepSales=(d.repSales||[]).length>0&&repTot>0;
   mOpen(`<div class="mh"><div class="mt">💰 Money Count</div><button class="mx" onclick="mClose()">×</button></div>
+  ${hasRepSales?`<div class="wb" style="margin-bottom:12px;background:rgba(79,195,247,0.1);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7;font-size:12px">This day auto-fills from each rep's entered sales (currently <strong>${fmt(repTot)}</strong>). Only edit here to override with a manual count — re-saving any rep's sales will re-sum it.</div>`:''}
   ${exp>0?`<div class="wb gold" style="margin-bottom:12px">Expected from inventory sold: <strong>${fmt(exp)}</strong></div>`:''}
   ${PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${pmts[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('')}
   <div style="background:var(--card2);border-radius:9px;padding:12px;margin:10px 0;display:flex;justify-content:space-between;align-items:center">
@@ -2961,7 +3035,8 @@ function updPmt(){let t=0;PMTS.forEach(p=>t+=parseFloat($$('pm_'+p.key).value)||
 function saveMoney(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const p={};PMTS.forEach(x=>p[x.key]=parseFloat($$('pm_'+x.key).value)||0);
-  sh.days[di].payments=p;mClose();saveS();toast('Money count saved!');
+  sh.days[di].payments=p;sh.days[di].paymentsAuto=false; // manual count = override of the rep auto-sum
+  mClose();saveS();toast('Money count saved!');
 }
 function showExpModal(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
@@ -3362,6 +3437,19 @@ function rReps(){
   const reps=[...(S.reps||[])].filter(r=>r.active).sort((a,b)=>(b.isSelf?1:0)-(a.isSelf?1:0));
   let h=`<div class="sec-title" style="margin-bottom:4px">👥 Sales Reps</div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tap a rep for their full breakdown — shows worked, sales, and what they're owed.</div>`;
+  // ---- Payouts Due board: every commission rep + flat/hourly/manual worker who is still owed money ----
+  (()=>{
+    const repDebts=reps.filter(r=>!r.isSelf).map(r=>({r,owed:Math.max(0,repEarned(r.id)-repPaid(r.id))})).filter(x=>x.owed>0.005);
+    const workerDebts=[]; (S.shows||[]).forEach(sh=>(sh.workers||[]).forEach(w=>{const owed=Math.max(0,workerPayout(w)-(parseFloat(w.paid)||0));if(owed>0.005)workerDebts.push({sh,w,owed});}));
+    const grand=repDebts.reduce((t,x)=>t+x.owed,0)+workerDebts.reduce((t,x)=>t+x.owed,0);
+    if(!repDebts.length&&!workerDebts.length){ if(reps.some(r=>!r.isSelf))h+=`<div class="card" style="margin-bottom:12px;border-color:rgba(0,210,106,0.3)"><div style="font-size:12px;color:var(--green);font-weight:700">✓ Everyone's paid up — no payouts due.</div></div>`; return; }
+    const row=(name,sub,owed,btn)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div style="min-width:0"><div style="font-weight:700;font-size:13px">${name}</div><div style="font-size:10px;color:var(--muted)">${sub}</div></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span style="color:var(--gold);font-weight:800">${fmt(owed)}</span>${btn}</div></div>`;
+    h+=`<div class="card" style="border-color:var(--gold);margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700">💸 Payouts Due</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(grand)}</div></div>
+      ${repDebts.map(x=>row(x.r.name,'commission rep',x.owed,`<button class="btn btn-xs btn-gold" onclick="openLogRepPmt('${x.r.id}')">Pay</button>`)).join('')}
+      ${workerDebts.map(x=>row((x.w.name||'Worker').replace(/</g,'&lt;'),x.sh.name.replace(/</g,'&lt;')+' · '+(((WORKER_TYPES.find(t=>t.k===x.w.type)||{}).l)||'flat'),x.owed,`<button class="btn btn-xs btn-gold" onclick="openEditWorker('${x.sh.id}','${x.w.id}')">Pay</button>`)).join('')}
+    </div>`;
+  })();
   if(!reps.length){ h+='<div class="empty"><div class="ei">👥</div><div>No reps yet.</div></div>'; }
   reps.forEach(r=>{
     const earned=repEarned(r.id),paid=repPaid(r.id),owed=Math.max(0,earned-paid);
@@ -3626,6 +3714,8 @@ function openRepSalesEntry(shId,di,repId){
   </div>`:''}
   <button class="btn btn-gold btn-full" onclick="saveRepSalesEntry('${shId}',${di},'${repId}')">✅ Save Sales</button>`);
 }
+// Sum every rep's entered money for a day, per payment method (the day's money total when reps are used)
+function sumRepSalesForDay(day){ const p={}; PMTS.forEach(x=>p[x.key]=0); (day.repSales||[]).forEach(rs=>PMTS.forEach(x=>{p[x.key]+=parseFloat(rs[x.key])||0;})); return p; }
 function saveRepSalesEntry(shId,di,repId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const day=sh.days[di];if(!day)return;
@@ -3634,9 +3724,13 @@ function saveRepSalesEntry(shId,di,repId){
   if(!rs){rs={repId};day.repSales.push(rs);}
   PMTS.forEach(p=>{rs[p.key]=parseFloat($$('rs_'+p.key).value)||0;});
   const comm=calcRepSalesComm({...rs,repId});
+  // Auto-tally: the day's Money total becomes the SUM of all reps' entered sales (no more double entry).
+  day.payments=sumRepSalesForDay(day);
+  day.paymentsAuto=true; // marks the day total as rep-derived (vs a manual money count)
   mClose();saveS();
   const rep=(S.reps||[]).find(r=>r.id===repId);
-  toast('✅ Sales saved'+(comm>0?` · Comm: ${fmt(comm)}`:''));
+  const dayTot=calcPmt(day.payments);
+  toast('✅ Sales saved'+(comm>0?` · Comm: ${fmt(comm)}`:'')+` · Day total: ${fmt(dayTot)}`);
   go('show',shId,di);
 }
 
@@ -3684,6 +3778,13 @@ function rSettings(){
   <div class="g2" style="gap:8px">
     <button class="btn btn-ghost btn-full" onclick="exportData()">📤 Export Data</button>
     <button class="btn btn-ghost btn-full" onclick="importData()">📥 Import Data</button>
+  </div>
+  <div class="divider" style="margin:14px 0;height:1px;background:var(--border)"></div>
+  <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:6px">💾 BACKUP TO A FILE</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Save your entire app (shows, inventory, reps, expenses, everything) as a file you keep somewhere safe. Restore puts it all back.</div>
+  <div class="g2" style="gap:8px">
+    <button class="btn btn-gold btn-full" onclick="downloadBackup()">💾 Download Backup File</button>
+    <button class="btn btn-ghost btn-full" onclick="restoreBackupFile()">📂 Restore from File</button>
   </div>
   </div>
   <div class="card" id="rep-section" style="border-color:rgba(79,195,247,0.3)">
@@ -3804,16 +3905,41 @@ function importData(){
   <button class="btn btn-red btn-full" style="margin-top:10px" onclick="applyImport()">Import & Replace Data</button>
   <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
 }
+function _applyStateObj(parsed){
+  if(!parsed||!parsed.inventory||!parsed.shows)throw new Error('not a valid backup');
+  parsed.v=INIT.v;S=parsed;
+  localStorage.setItem('dd_bs_v7',JSON.stringify(S));
+  renderCur();
+}
 function applyImport(){
   try{
     const txt=($$('importTxt').value||'').trim();
     if(!txt){toast('Nothing to import!');return;}
-    const parsed=JSON.parse(txt);
-    if(!parsed.inventory||!parsed.shows){toast('Invalid data. Make sure you copied the full export.');return;}
-    parsed.v=INIT.v;S=parsed;
-    localStorage.setItem('dd_bs_v7',JSON.stringify(S));
-    mClose();renderCur();toast('✅ Data imported successfully!');go('home');
+    _applyStateObj(JSON.parse(txt));
+    mClose();toast('✅ Data imported successfully!');go('home');
   }catch(e){toast('Import failed. Invalid format.');}
+}
+// ---- File-based backup (download a .json you keep safe) + restore from that file ----
+function downloadBackup(){
+  try{ dlFile('best-solution-backup-'+_stamp()+'.json', JSON.stringify(S,null,2), 'application/json'); }
+  catch(e){ toast('Backup failed: '+e.message); }
+}
+function restoreBackupFile(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=()=>{
+    const f=inp.files&&inp.files[0]; if(!f)return;
+    const rdr=new FileReader();
+    rdr.onload=()=>{
+      try{
+        const parsed=JSON.parse(rdr.result);
+        const shows=(parsed.shows||[]).length, reps=(parsed.reps||[]).length;
+        if(!confirm('Restore from "'+f.name+'"?\n\nThis REPLACES everything on this device with the backup ('+shows+' shows, '+reps+' reps). Your current data will be overwritten.'))return;
+        _applyStateObj(parsed); toast('✅ Restored from backup'); go('home');
+      }catch(e){ toast('Restore failed — not a valid backup file.'); }
+    };
+    rdr.readAsText(f);
+  };
+  inp.click();
 }
 
 // ===================================================
