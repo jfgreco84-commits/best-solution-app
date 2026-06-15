@@ -229,6 +229,7 @@
 <!-- PAGES -->
 <div id="pages">
   <div id="pg-home" class="pg on"></div>
+  <div id="pg-section" class="pg"></div>
   <div id="pg-stock" class="pg"></div>
   <div id="pg-shows" class="pg"></div>
   <div id="pg-reps" class="pg"></div>
@@ -348,7 +349,7 @@ const INIT={
 // ===================================================
 // STATE
 // ===================================================
-let S,curPg='home',curShow=null,curDay=0,calMonth=null,shows2025Mode=false,showsTab='upcoming';
+let S,curPg='home',curShow=null,curDay=0,calMonth=null,shows2025Mode=false,showsTab='upcoming',curSection=null;
 
 function normalizeShowDates(d){
   // Always fix startDate from dates[] on every load — no flags, always reliable
@@ -1053,7 +1054,7 @@ function buildPlannedShow(e){
 
 function saveS(){S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();cloudQueuePush();}
 function renderCur(){
-  if(curPg==='home')rHome();else if(curPg==='stock')rStock();
+  if(curPg==='home')rHome();else if(curPg==='section')rSection();else if(curPg==='stock')rStock();
   else if(curPg==='shows')rShows();else if(curPg==='show')rShow();
   else if(curPg==='reps')rReps();
   else if(curPg==='calendar')rCalendar();
@@ -1343,6 +1344,7 @@ function go(pg,shId,dayIdx){
   if(dayIdx!==undefined)curDay=dayIdx;
   $$('pg-'+pg).classList.add('on');
   const nb=$$('nb-'+pg);if(nb)nb.classList.add('on');
+  if(pg==='section'){const nbh=$$('nb-home');if(nbh)nbh.classList.add('on');}
   if(pg==='show'){
     $$('hdrR').innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('shows')">← Back</button>`;
     $$('nb-shows').classList.add('on');
@@ -1480,176 +1482,14 @@ function rHome(){
     <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
   </div>`;
 
-  // ---- COLLECTED vs FULL PRICE (spot discounts/freebies) ----
-  {
-    const _sell=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)).sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
-    if(_sell.length){
-      let tp=0,tc=0;
-      const rows=_sell.map(sh=>{const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col;tp+=pot;tc+=col;
-        return `<div class="sr"><span class="srl">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:9px">●LIVE</span>':''}</span><span class="srv"><span style="color:var(--green)">${fmt(col)}</span> <span style="color:var(--muted)">/ ${fmt(pot)}</span>${gap>0.5?` <span style="color:var(--red)">−${fmt(gap)}</span>`:''}</span></div>`;}).join('');
-      const tg=tp-tc;
-      html+=`<div class="sec-lbl">COLLECTED vs FULL PRICE</div>
-      <div class="card">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Collected (green) / full price · <span style="color:var(--red)">red</span> = discount or freebie given that show</div>
-        ${rows}
-        <div class="sr" style="border-top:1px solid var(--border);margin-top:5px;padding-top:7px"><span class="srl b">Season total</span><span class="srv b"><span style="color:var(--green)">${fmt(tc)}</span> <span style="color:var(--muted)">/ ${fmt(tp)}</span>${tg>0.5?` <span style="color:var(--red)">−${fmt(tg)} given away</span>`:''}</span></div>
-      </div>`;
-    }
-  }
+  // ---- DASHBOARD SECTIONS (each data section now opens its own detail view) ----
+  html+=dashSectionGrid();
 
-  // ---- UNITS SOLD BY PRODUCT ----
-  html+=`<div class="sec-lbl">UNITS SOLD — BY PRODUCT</div>
-  <div class="card">
-    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units (completed)</span><span class="srv lg" style="color:var(--gold)">${fmtN(ytd.totalUnits)}</span></div>
-    ${SKUS.map(s=>{const u=ytd.units[s.key]||0;const rev=u*getP(s.key);return`<div class="sr"><span class="srl">${s.emoji} ${s.name}</span><span class="srv">${u} units · <span style="color:var(--gold)">${fmt(rev)}</span></span></div>`;}).join('')}
-  </div>`;
+  // (Booth Costs, Other Expenses, Product Debt, Money Split, Payment Breakdown
+  //  now open from the Dashboard Sections grid above — see rSection / sec* helpers.)
 
-  // ---- WORKLOAD ----
-  html+=`<div class="sec-lbl">WORKLOAD</div>
-  <div class="card">
-    <div class="g3" style="margin-bottom:8px">
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${done.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Done</div></div>
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${plannedCount}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Planned</div></div>
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:${missedShows.length?'var(--red)':'var(--muted)'}">${missedShows.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Missed</div></div>
-    </div>
-    <div class="sr"><span class="srl b">Shows booked</span><span class="srv">${bookedCount}</span></div>
-    <div class="sr"><span class="srl">Booked show-days <span style="color:var(--muted)">(stacks overlaps)</span></span><span class="srv">${bookedShowDays}</span></div>
-    <div class="sr"><span class="srl b">Total staffed hours ⚡</span><span class="srv gold">${fmtN(totalStaffedHours)}h</span></div>
-    <div class="sr"><span class="srl">My hours (you)</span><span class="srv">${fmtN(myHoursTotal)}h</span></div>
-    <div style="height:6px"></div>
-    <div class="sr"><span class="srl">Planned show days</span><span class="srv">${plannedDays}</span></div>
-    <div class="sr"><span class="srl">Completed show days</span><span class="srv">${completedDays}</span></div>
-    <div class="sr"><span class="srl">Est. planned work hours</span><span class="srv">${fmtN(plannedHours)}h</span></div>
-    <div class="sr"><span class="srl">Completed work hours</span><span class="srv">${fmtN(completedHours)}h</span></div>
-    <div style="font-size:10px;color:var(--muted);margin-top:6px">⚡ Staffed hours = each show-day's hours × people working it (reps + you), so two shows running at once count double. "My hours" is logged per show in Edit Show.</div>
-  </div>`;
-
-  // ---- BOOTH COSTS — full season committed ----
-  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
-  const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
-  const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
-  const unpaidList=allUpcoming.filter(sh=>boothBalance(sh)>0.01);
-  html+=`<div class="sec-lbl">BOOTH COSTS — 2026 SEASON</div>
-  <div class="card">
-    <div class="g3" style="margin-bottom:${unpaidList.length?10:0}px">
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Committed</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
-    </div>
-    ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
-  </div>`;
-
-  // ---- OTHER EXPENSES (button + YTD total only; full itemized list lives in openManageExpenses) ----
-  html+=`<div class="sec-lbl">OTHER EXPENSES</div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
-        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(ytd.otherSpend)}</div>
-      </div>
-      <button class="btn btn-gold btn-sm" onclick="openManageExpenses()">Other Expenses →</button>
-    </div>
-  </div>`;
-
-  // ---- MARK MARTONE PRODUCT DEBT ----
-  const debt=S.productDebt||{supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
-  const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
-  html+=`<div class="sec-lbl">PRODUCT DEBT — ${debt.supplier||'SUPPLIER'}</div>
-  <div class="card rb">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div><div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(debtBal)}</div></div>
-      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Total Paid</div><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(debtPaid)}</div></div>
-    </div>
-    <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
-    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
-    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
-  </div>`;
-
-  // ---- MONEY SPLIT (from COMPLETED shows; overhead shown separately) ----
-  html+=`<div class="sec-lbl">MONEY SPLIT — COMPLETED SHOWS</div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-      <div>
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Clean Keep (after ${taxPct}% tax)</div>
-        <div style="font-size:28px;font-weight:900;color:var(--green)">${fmt(cleanKeep)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Set Aside for Tax</div>
-        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(taxRes)}</div>
-      </div>
-    </div>
-    <div style="display:flex;gap:4px;height:12px;border-radius:6px;overflow:hidden">
-      <div style="background:var(--green);flex:${keepPct};border-radius:6px 0 0 6px;min-width:4px"></div>
-      <div style="background:var(--red);flex:${100-keepPct};border-radius:0 6px 6px 0;min-width:${taxPct>0?4:0}px"></div>
-    </div>
-    <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:var(--muted)">
-      <span>Keep: ${keepPct}%</span>
-      <span>Tax: ${taxPct}%</span>
-    </div>
-    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px">Completed-show net <strong>${fmt(completedNet)}</strong> − tax <strong>${fmt(taxRes)}</strong> = clean keep. Business overhead <strong>${fmt(overhead)}</strong> (supplies + upcoming deposits) is tracked separately.</div>
-  </div>`;
-
-  // ---- PAYMENT BREAKDOWN ----
-  if(pmtGrand>0){
-    const pmtHasData=PMTS.filter(p=>(ytd.pmtTotals[p.key]||0)>0);
-    html+=`<div class="sec-lbl">PAYMENT BREAKDOWN (YTD)</div>
-    <div class="card">
-      <div class="hbar" style="height:14px;border-radius:7px">
-        ${pmtHasData.map(p=>{const pct=(ytd.pmtTotals[p.key]/pmtGrand)*100;return`<div class="hbar-seg" style="background:${p.color};flex:${pct};min-width:${pct>1?2:0}px"></div>`;}).join('')}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">
-        ${PMTS.map(p=>{const v=ytd.pmtTotals[p.key]||0;if(!v)return'';const pct=Math.round((v/pmtGrand)*100);return`<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span><span style="font-size:12px;font-weight:700">${p.label}: ${fmt(v)} <span style="color:var(--muted)">(${pct}%)</span></span></div>`;}).join('')}
-      </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
-        <span style="font-size:12px;color:var(--muted)">💵 Cash</span>
-        <span style="font-size:15px;font-weight:900;color:var(--green)">${fmt(ytd.pmtTotals.cash||0)} (${pmtGrand>0?Math.round(((ytd.pmtTotals.cash||0)/pmtGrand)*100):0}% of total)</span>
-      </div>
-    </div>`;
-  }
-
-  // ---- INVENTORY SNAPSHOT ----
-  html+=`<div class="sec-row"><div class="sec-lbl" style="margin:0">MASTER INVENTORY</div><button class="btn btn-ghost btn-xs" onclick="go('stock')">Manage →</button></div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;margin-bottom:12px">
-      <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Total Units</div><div style="font-size:24px;font-weight:900;color:var(--gold)">${invUnits}</div></div>
-      <div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:20px;font-weight:900">${fmt(invCost)}</div></div>
-      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(invRetail)}</div></div>
-    </div>
-    <table class="inv-table">
-      <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
-      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:9px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
-      <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${invUnits}</td><td style="font-weight:900">${fmt(invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(invRetail)}</td></tr>
-    </table>
-    ${lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
-    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Potential margin on current stock: <strong style="color:var(--green)">${fmt(invRetail-invCost)}</strong></div>
-  </div>`;
-
-  // (Units-by-product now shown compactly in the Season Overview area above)
-
-  // ---- MILEAGE DEDUCTION ----
-  if(ytd.miles>0){
-    html+=`<div class="sec-lbl">MILEAGE & TAX DEDUCTION</div>
-    <div class="card">
-      <div class="g3">
-        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(ytd.miles)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
-        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(mileDeduct)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
-        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(ytd.gas!=null?ytd.gas:ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
-      </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
-    </div>`;
-  }
-
-  // ---- BEST SHOWS: highest grossing + highest profit (completed) ----
-  if(bestGross||bestProfit){
-    html+=`<div class="sec-lbl">BEST SHOWS THIS SEASON</div>`;
-    if(bestGross)html+=bestShowCardHTML(bestGross,'🥇 Highest Grossing Show');
-    if(bestProfit&&bestProfit!==bestGross)html+=bestShowCardHTML(bestProfit,'💰 Highest Profit Show');
-    else if(bestProfit&&bestProfit===bestGross)html+=`<div style="font-size:11px;color:var(--muted);margin:-2px 0 8px;text-align:center">Same show is both highest grossing and highest profit.</div>`;
-  }
+  // (Master Inventory snapshot, Mileage & Tax Deduction, and Best Shows now open
+  //  from the Dashboard Sections grid above — see rSection / sec* helpers.)
 
   // (2026 vs 2025 comparison removed from home to declutter — lives on Shows/P&L pages)
 
@@ -1663,10 +1503,261 @@ function rHome(){
   </div>
   <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
   ${activeShows.map(a=>`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${a.id}')">🔴 Open Active Show: ${a.name}</button>`).join('')}
-  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.2</div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.3</div>
   `;
 
   pg('home').innerHTML=html;
+}
+
+// ===================================================
+// DASHBOARD SECTION DETAIL VIEWS (layout-only; reuses the same calc functions)
+// ===================================================
+// Shared dashboard context — same computations rHome uses, gathered for the
+// detail views. No business logic changed; these only READ existing functions.
+function homeCtx(){
+  const ytd=calcYTD();
+  const invCost=calcInvCost(S.inventory);
+  const invRetail=calcInvRetail(S.inventory);
+  const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
+  const activeShows=S.shows.filter(s=>s.status==='active');
+  const done=S.shows.filter(s=>s.status==='completed');
+  const upcomingShows=[...S.shows].filter(s=>isUpcoming(s)&&s.status!=='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
+  const missedShows=S.shows.filter(s=>isMissed(s));
+  const plannedCount=upcomingShows.length+activeShows.length;
+  const completedNet=done.reduce((t,sh)=>t+calcShow(sh).profit,0);
+  const completedTax=done.reduce((t,sh)=>t+calcShow(sh).taxRes,0);
+  const avgShowProfit=done.length?completedNet/done.length:0;
+  const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
+  const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0;
+  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed').reduce((t,sh)=>t+boothPaid(sh),0);
+  const overhead=(ytd.otherSpend||0)+upcomingDeposits;
+  const taxRes=completedTax;
+  const cleanKeep=Math.max(0,completedNet-taxRes);
+  const keepPct=completedNet>0?Math.round((cleanKeep/completedNet)*100):0;
+  const taxPct=completedNet>0?Math.round((taxRes/completedNet)*100):0;
+  const mileDeduct=ytd.miles*S.settings.irsRate;
+  const plannedDays=[...upcomingShows,...activeShows].reduce((t,sh)=>t+(sh.numDays||1),0);
+  const completedDays=done.reduce((t,sh)=>t+(sh.numDays||1),0);
+  const plannedHours=[...upcomingShows,...activeShows].reduce((t,sh)=>t+showHours(sh),0);
+  const completedHours=done.reduce((t,sh)=>t+showHours(sh),0);
+  const bookedShowsW=(S.shows||[]).filter(sh=>!isMissed(sh));
+  const bookedCount=bookedShowsW.length;
+  const bookedShowDays=bookedShowsW.reduce((t,sh)=>t+(sh.numDays||1),0);
+  const totalStaffedHours=bookedShowsW.reduce((t,sh)=>t+staffedHours(sh),0);
+  const _ownerId=((S.reps||[]).find(r=>r.isSelf)||{}).id;
+  const myHoursTotal=(S.shows||[]).reduce((t,sh)=>{ const h=(_ownerId&&sh.repHours&&sh.repHours[_ownerId]!=null)?parseFloat(sh.repHours[_ownerId]):parseFloat(sh.myHours); return t+(h||0); },0);
+  let bestGross=null,bgVal=-Infinity,bestProfit=null,bpVal=-Infinity;
+  done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
+  const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
+  const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
+  return {ytd,invCost,invRetail,invUnits,activeShows,done,upcomingShows,missedShows,plannedCount,completedNet,completedTax,avgShowProfit,sellShows,avgShowGross,upcomingDeposits,overhead,taxRes,cleanKeep,keepPct,taxPct,mileDeduct,plannedDays,completedDays,plannedHours,completedHours,bookedCount,bookedShowDays,totalStaffedHours,myHoursTotal,bestGross,bestProfit,pmtGrand,lowStock};
+}
+
+function secCollected(){
+  let h='';
+  const _sell=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)).sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
+  if(_sell.length){
+    let tp=0,tc=0;
+    const rows=_sell.map(sh=>{const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col;tp+=pot;tc+=col;
+      return `<div class="sr"><span class="srl">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:9px">●LIVE</span>':''}</span><span class="srv"><span style="color:var(--green)">${fmt(col)}</span> <span style="color:var(--muted)">/ ${fmt(pot)}</span>${gap>0.5?` <span style="color:var(--red)">−${fmt(gap)}</span>`:''}</span></div>`;}).join('');
+    const tg=tp-tc;
+    h+=`<div class="card">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Collected (green) / full price · <span style="color:var(--red)">red</span> = discount or freebie given that show</div>
+        ${rows}
+        <div class="sr" style="border-top:1px solid var(--border);margin-top:5px;padding-top:7px"><span class="srl b">Season total</span><span class="srv b"><span style="color:var(--green)">${fmt(tc)}</span> <span style="color:var(--muted)">/ ${fmt(tp)}</span>${tg>0.5?` <span style="color:var(--red)">−${fmt(tg)} given away</span>`:''}</span></div>
+      </div>`;
+  }
+  return h;
+}
+function secUnits(C){
+  return `<div class="card">
+    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units (completed)</span><span class="srv lg" style="color:var(--gold)">${fmtN(C.ytd.totalUnits)}</span></div>
+    ${SKUS.map(s=>{const u=C.ytd.units[s.key]||0;const rev=u*getP(s.key);return`<div class="sr"><span class="srl">${s.emoji} ${s.name}</span><span class="srv">${u} units · <span style="color:var(--gold)">${fmt(rev)}</span></span></div>`;}).join('')}
+  </div>`;
+}
+function secWorkload(C){
+  return `<div class="card">
+    <div class="g3" style="margin-bottom:8px">
+      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${C.done.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Done</div></div>
+      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${C.plannedCount}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Shows Planned</div></div>
+      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:${C.missedShows.length?'var(--red)':'var(--muted)'}">${C.missedShows.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Missed</div></div>
+    </div>
+    <div class="sr"><span class="srl b">Shows booked</span><span class="srv">${C.bookedCount}</span></div>
+    <div class="sr"><span class="srl">Booked show-days <span style="color:var(--muted)">(stacks overlaps)</span></span><span class="srv">${C.bookedShowDays}</span></div>
+    <div class="sr"><span class="srl b">Total staffed hours ⚡</span><span class="srv gold">${fmtN(C.totalStaffedHours)}h</span></div>
+    <div class="sr"><span class="srl">My hours (you)</span><span class="srv">${fmtN(C.myHoursTotal)}h</span></div>
+    <div style="height:6px"></div>
+    <div class="sr"><span class="srl">Planned show days</span><span class="srv">${C.plannedDays}</span></div>
+    <div class="sr"><span class="srl">Completed show days</span><span class="srv">${C.completedDays}</span></div>
+    <div class="sr"><span class="srl">Est. planned work hours</span><span class="srv">${fmtN(C.plannedHours)}h</span></div>
+    <div class="sr"><span class="srl">Completed work hours</span><span class="srv">${fmtN(C.completedHours)}h</span></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:6px">⚡ Staffed hours = each show-day's hours × people working it (reps + you), so two shows running at once count double. "My hours" is logged per show in Edit Show.</div>
+  </div>`;
+}
+function secBooth(){
+  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
+  const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
+  const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
+  const unpaidList=allUpcoming.filter(sh=>boothBalance(sh)>0.01);
+  return `<div class="card">
+    <div class="g3" style="margin-bottom:${unpaidList.length?10:0}px">
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Committed</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
+    </div>
+    ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
+  </div>`;
+}
+function secExpenses(C){
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
+        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(C.ytd.otherSpend)}</div>
+      </div>
+      <button class="btn btn-gold btn-sm" onclick="openManageExpenses()">Other Expenses →</button>
+    </div>
+  </div>`;
+}
+function secDebt(){
+  const debt=S.productDebt||{supplier:'Mark Martone',originalBalance:10000,payments:[]};
+  const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
+  const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
+  const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
+  return `<div class="card rb">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div><div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(debtBal)}</div></div>
+      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Total Paid</div><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(debtPaid)}</div></div>
+    </div>
+    <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
+    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
+    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
+  </div>`;
+}
+function secSplit(C){
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div>
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Clean Keep (after ${C.taxPct}% tax)</div>
+        <div style="font-size:28px;font-weight:900;color:var(--green)">${fmt(C.cleanKeep)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Set Aside for Tax</div>
+        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(C.taxRes)}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:4px;height:12px;border-radius:6px;overflow:hidden">
+      <div style="background:var(--green);flex:${C.keepPct};border-radius:6px 0 0 6px;min-width:4px"></div>
+      <div style="background:var(--red);flex:${100-C.keepPct};border-radius:0 6px 6px 0;min-width:${C.taxPct>0?4:0}px"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:var(--muted)">
+      <span>Keep: ${C.keepPct}%</span>
+      <span>Tax: ${C.taxPct}%</span>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px">Completed-show net <strong>${fmt(C.completedNet)}</strong> − tax <strong>${fmt(C.taxRes)}</strong> = clean keep. Business overhead <strong>${fmt(C.overhead)}</strong> (supplies + upcoming deposits) is tracked separately.</div>
+  </div>`;
+}
+function secPayments(C){
+  if(!(C.pmtGrand>0))return '';
+  const pmtHasData=PMTS.filter(p=>(C.ytd.pmtTotals[p.key]||0)>0);
+  return `<div class="card">
+      <div class="hbar" style="height:14px;border-radius:7px">
+        ${pmtHasData.map(p=>{const pct=(C.ytd.pmtTotals[p.key]/C.pmtGrand)*100;return`<div class="hbar-seg" style="background:${p.color};flex:${pct};min-width:${pct>1?2:0}px"></div>`;}).join('')}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">
+        ${PMTS.map(p=>{const v=C.ytd.pmtTotals[p.key]||0;if(!v)return'';const pct=Math.round((v/C.pmtGrand)*100);return`<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span><span style="font-size:12px;font-weight:700">${p.label}: ${fmt(v)} <span style="color:var(--muted)">(${pct}%)</span></span></div>`;}).join('')}
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
+        <span style="font-size:12px;color:var(--muted)">💵 Cash</span>
+        <span style="font-size:15px;font-weight:900;color:var(--green)">${fmt(C.ytd.pmtTotals.cash||0)} (${C.pmtGrand>0?Math.round(((C.ytd.pmtTotals.cash||0)/C.pmtGrand)*100):0}% of total)</span>
+      </div>
+    </div>`;
+}
+function secInventory(C){
+  return `<div class="sec-row"><div class="sec-lbl" style="margin:0">SNAPSHOT</div><button class="btn btn-ghost btn-xs" onclick="go('stock')">Manage →</button></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+      <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Total Units</div><div style="font-size:24px;font-weight:900;color:var(--gold)">${C.invUnits}</div></div>
+      <div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:20px;font-weight:900">${fmt(C.invCost)}</div></div>
+      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</div></div>
+    </div>
+    <table class="inv-table">
+      <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
+      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:9px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
+      <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${C.invUnits}</td><td style="font-weight:900">${fmt(C.invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</td></tr>
+    </table>
+    ${C.lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${C.lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Potential margin on current stock: <strong style="color:var(--green)">${fmt(C.invRetail-C.invCost)}</strong></div>
+  </div>`;
+}
+function secMileage(C){
+  if(!(C.ytd.miles>0))return '';
+  return `<div class="card">
+      <div class="g3">
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(C.ytd.miles)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(C.mileDeduct)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
+    </div>`;
+}
+function secBest(C){
+  let h='';
+  if(C.bestGross||C.bestProfit){
+    if(C.bestGross)h+=bestShowCardHTML(C.bestGross,'🥇 Highest Grossing Show');
+    if(C.bestProfit&&C.bestProfit!==C.bestGross)h+=bestShowCardHTML(C.bestProfit,'💰 Highest Profit Show');
+    else if(C.bestProfit&&C.bestProfit===C.bestGross)h+=`<div style="font-size:11px;color:var(--muted);margin:-2px 0 8px;text-align:center">Same show is both highest grossing and highest profit.</div>`;
+  }
+  return h;
+}
+// Dashboard button grid — the only thing the data sections leave on Home.
+function dashSectionGrid(){
+  const C=homeCtx();
+  const cards=[
+    {k:'collected',icon:'🏷️',label:'Collected vs Full Price',sub:'Discounts &amp; freebies'},
+    {k:'units',icon:'📦',label:'Units Sold by Product',sub:fmtN(C.ytd.totalUnits)+' units sold'},
+    {k:'workload',icon:'⏱️',label:'Workload',sub:C.done.length+' done · '+C.plannedCount+' planned'},
+    {k:'inventory',icon:'🗃️',label:'Master Inventory',sub:C.invUnits+' units · '+fmt(C.invRetail)},
+    {k:'mileage',icon:'🚚',label:'Mileage &amp; Tax Deduction',sub:fmtN(C.ytd.miles)+' mi · '+fmt(C.mileDeduct)},
+    {k:'booth',icon:'🎪',label:'Booth Costs',sub:'2026 season'},
+    {k:'expenses',icon:'💸',label:'Other Expenses',sub:fmt(C.ytd.otherSpend)+' YTD'},
+    {k:'debt',icon:'🧾',label:'Product Debt',sub:'Mark Martone'},
+    {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
+    {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
+    {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'}
+  ];
+  let h=`<div class="sec-lbl">DASHBOARD SECTIONS</div><div class="g2" style="margin-bottom:8px">`;
+  h+=cards.map(c=>`<button class="btn btn-ghost" style="height:auto;padding:13px 11px;flex-direction:column;align-items:flex-start;text-align:left;white-space:normal;gap:0" onclick="openSection('${c.k}')"><span style="font-size:20px;line-height:1;margin-bottom:5px">${c.icon}</span><span style="font-size:13px;font-weight:800;line-height:1.2">${c.label}</span><span style="font-size:10px;color:var(--muted);margin-top:3px;font-weight:600">${c.sub}</span></button>`).join('');
+  h+=`</div>`;
+  return h;
+}
+// Safe DOM write helper (avoids innerHTML; clears then appends).
+function setPG(id,h){const el=pg(id);el.textContent='';el.insertAdjacentHTML('beforeend',h);}
+function openSection(k){curSection=k;go('section');}
+function rSection(){
+  const C=homeCtx();
+  const map={
+    collected:{t:'Collected vs Full Price',f:secCollected},
+    units:{t:'Units Sold by Product',f:secUnits},
+    workload:{t:'Workload',f:secWorkload},
+    inventory:{t:'Master Inventory',f:secInventory},
+    mileage:{t:'Mileage & Tax Deduction',f:secMileage},
+    booth:{t:'Booth Costs — 2026 Season',f:secBooth},
+    expenses:{t:'Other Expenses',f:secExpenses},
+    debt:{t:'Product Debt — Mark Martone',f:secDebt},
+    split:{t:'Money Split — Completed Shows',f:secSplit},
+    payments:{t:'Payment Breakdown (YTD)',f:secPayments},
+    best:{t:'Best Shows This Season',f:secBest}
+  };
+  const m=map[curSection]||map.collected;
+  const body=m.f(C);
+  let h=`<button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="go('home')">← Back to Dashboard</button>`;
+  h+=`<div class="sec-title" style="margin-bottom:12px">${m.t}</div>`;
+  h+=(body&&body.trim())?body:`<div class="card" style="text-align:center;color:var(--muted)">No data for this section yet.</div>`;
+  h+=`<button class="btn btn-ghost btn-full" style="margin:16px 0 8px" onclick="go('home')">← Back to Dashboard</button>`;
+  setPG('section',h);
 }
 
 // ===================================================
