@@ -1405,7 +1405,51 @@ function rHome(){
   done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
   const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
   const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
+  // ---- Headline dashboard figures (reconcile: Sales − COGS − Booth − Other = Profit; Profit − Tax = Net) ----
+  const allBooth=S.shows.filter(s=>s.status==='completed'||s.status==='active').reduce((t,sh)=>t+(sh.boothCost||0),0)
+                +S.shows.filter(s=>s.status!=='completed'&&s.status!=='active').reduce((t,sh)=>t+boothPaid(sh),0);
+  const totalOtherExp=Math.max(0,ytd.expenses-allBooth);
+  const netAfterTax=ytd.profit-ytd.taxRes;
+  const biggestVal=(bgVal>-Infinity)?bgVal:0;
   let html='';
+
+  // ---- MASTER INVENTORY — the single most important button (first, biggest, most prominent) ----
+  html+=`<button class="btn btn-gold btn-full" style="height:auto;padding:20px 16px;margin-bottom:14px;flex-direction:column;gap:5px;border-radius:16px;box-shadow:0 0 0 2px var(--gold),0 10px 30px rgba(255,215,0,0.22)" onclick="go('stock')">
+    <span style="font-size:36px;line-height:1">🗃️</span>
+    <span style="font-size:23px;font-weight:900;letter-spacing:0.5px">MASTER INVENTORY</span>
+    <span style="font-size:12px;font-weight:800;color:rgba(0,0,0,0.68)">${invUnits} units on hand · ${fmt(invRetail)} retail value · tap to manage</span>
+  </button>`;
+
+  // ---- DASHBOARD STATS — front and center, fixed order ----
+  const _stat=(lbl,val,cls,sub,big)=>`<div class="sbox ${cls||''}"><div class="sl">${lbl}</div><div class="sv ${big?'':'sm'} ${cls==='grb'?'g':cls==='rb'?'r':cls==='gb'?'':'w'}">${val}</div>${sub?`<div class="ss">${sub}</div>`:''}</div>`;
+  html+=`<div class="sec-lbl">📊 DASHBOARD · 2026 SEASON</div>
+  <div class="g2" style="margin-bottom:14px;gap:8px">
+    ${_stat('TOTAL SALES VOLUME',fmt(ytd.gross),'gb',sellShows.length+' show'+(sellShows.length!==1?'s':'')+' w/ sales',true)}
+    ${_stat('TOTAL BOOTH RENTS',fmt(allBooth),'','Booth fees committed')}
+    ${_stat('TOTAL OTHER EXPENSES',fmt(totalOtherExp),'rb','Gas, hotel, supplies, comm., misc')}
+    ${_stat('TOTAL TAX RESERVE',fmt(ytd.taxRes),'rb',Math.round(S.settings.tax*100)+'% of net profit')}
+    ${_stat('TOTAL COGS',fmt(ytd.cogs),'','Product cost of goods')}
+    ${_stat('TOTAL PROFIT',fmt(ytd.profit),ytd.profit>=0?'grb':'rb','Sales − COGS − all expenses')}
+    ${_stat('AVG SHOW',fmt(avgShowGross),'','Gross ÷ shows w/ sales')}
+    ${_stat('BIGGEST SHOW',fmt(biggestVal),'gb',bestGross?bestGross.name:'No shows yet')}
+    ${_stat('AVG SHOW PROFIT',fmt(avgShowProfit),avgShowProfit>=0?'grb':'rb','Completed shows only')}
+    ${_stat('NET',fmt(netAfterTax),netAfterTax>=0?'grb':'rb','Profit − tax reserve',true)}
+  </div>`;
+
+  /*CREW_START*/
+  // ---- CREW APPS — quick launcher (PERSONAL APP ONLY; stripped from blank/crew copies) ----
+  html+=`<div class="sec-lbl">🚀 CREW APPS · TEAM TRACKER</div>
+  <div class="card" style="margin-bottom:14px;border-color:var(--goldbd);background:linear-gradient(135deg,rgba(255,215,0,0.07),rgba(79,195,247,0.05))">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Launch a crew member's own Best Solution tracker in a new tab.</div>
+    <div class="g3" style="gap:8px">
+      <a class="btn btn-ghost" style="height:auto;padding:13px 6px;flex-direction:column;gap:5px;text-decoration:none;border-color:var(--border)" href="https://jfgreco84-commits.github.io/best-solution-blank/" target="_blank" rel="noopener"><span style="font-size:24px;line-height:1">🦇</span><span style="font-size:12px;font-weight:800">Batman</span></a>
+      <!-- ISAIAH_URL: replace the href "#" below with Isaiah Wojo's GitHub Pages URL once that repo is live -->
+      <a class="btn btn-ghost" style="height:auto;padding:13px 6px;flex-direction:column;gap:5px;text-decoration:none;border-color:var(--border)" href="https://jfgreco84-commits.github.io/best-solution-isaiah/" target="_blank" rel="noopener"><span style="font-size:24px;line-height:1">🧑‍🔧</span><span style="font-size:12px;font-weight:800">Isaiah</span></a>
+      <!-- ANTHONY_URL: replace the href "#" below with Anthony Wojo's GitHub Pages URL once that repo is live -->
+      <a class="btn btn-ghost" style="height:auto;padding:13px 6px;flex-direction:column;gap:5px;text-decoration:none;border-color:var(--border)" href="https://jfgreco84-commits.github.io/best-solution-anthony/" target="_blank" rel="noopener"><span style="font-size:24px;line-height:1">🧑‍🔧</span><span style="font-size:12px;font-weight:800">Anthony</span></a>
+    </div>
+  </div>`;
+  /*CREW_END*/
 
   // ---- Inventory mismatch alert (any active/completed show whose counts don't reconcile) ----
   const invAlertShows=(S.shows||[]).filter(sh=>!isMissed(sh)&&sh.status!=='planned'&&invStatus(sh)==='red');
@@ -1468,22 +1512,7 @@ function rHome(){
   </div>
   ${missedShows.length?`<button class="btn btn-ghost btn-full" style="margin-bottom:8px;border-color:var(--redbd);color:var(--red)" onclick="showsTab='missed';go('shows')">⚠️ Missed / Did Not Do (${missedShows.length})</button>`:''}`;
 
-  // ---- SEASON OVERVIEW (completed-show economics; overhead shown separately) ----
-  html+=`<div class="sec-lbl">2026 SEASON OVERVIEW</div>
-  <div class="g2" style="margin-bottom:8px">
-    <div class="sbox gb"><div class="sl">YTD GROSS (collected)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">money collected · ${sellShows.length} show${sellShows.length!==1?'s':''} w/ sales (incl. in-progress)</div></div>
-    <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Gross ÷ shows w/ sales</div></div>
-  </div>
-  <div class="g3" style="margin-bottom:8px">
-    <div class="sbox ${completedNet>=0?'grb':'rb'}"><div class="sl">COMPLETED SHOWS NET</div><div class="sv sm ${completedNet>=0?'g':'r'}">${fmt(completedNet)}</div><div class="ss">Sum of show profits</div></div>
-    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of net profit</div></div>
-    <div class="sbox ${cleanKeep>=0?'grb':'rb'}"><div class="sl">CLEAN P</div><div class="sv sm ${cleanKeep>=0?'g':'r'}">${fmt(cleanKeep)}</div><div class="ss">Net − tax reserve</div></div>
-  </div>
-  <div class="g3" style="margin-bottom:8px">
-    <div class="sbox"><div class="sl">BUSINESS OVERHEAD</div><div class="sv sm w">${fmt(overhead)}</div><div class="ss">Supplies + deposits</div></div>
-    <div class="sbox"><div class="sl">AVG / SHOW PROFIT</div><div class="sv sm ${avgShowProfit>=0?'g':'r'}">${fmt(avgShowProfit)}</div><div class="ss">Completed only</div></div>
-    <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
-  </div>`;
+  // (Headline season stats now render at the top of Home — see DASHBOARD STATS above.)
 
   // ---- DASHBOARD SECTIONS (each data section now opens its own detail view) ----
   html+=dashSectionGrid();
@@ -1557,19 +1586,47 @@ function homeCtx(){
 }
 
 function secCollected(){
-  let h='';
   const _sell=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)).sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
-  if(_sell.length){
-    let tp=0,tc=0;
-    const rows=_sell.map(sh=>{const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col;tp+=pot;tc+=col;
-      return `<div class="sr"><span class="srl">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:9px">●LIVE</span>':''}</span><span class="srv"><span style="color:var(--green)">${fmt(col)}</span> <span style="color:var(--muted)">/ ${fmt(pot)}</span>${gap>0.5?` <span style="color:var(--red)">−${fmt(gap)}</span>`:''}</span></div>`;}).join('');
-    const tg=tp-tc;
-    h+=`<div class="card">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Collected (green) / full price · <span style="color:var(--red)">red</span> = discount or freebie given that show</div>
-        ${rows}
-        <div class="sr" style="border-top:1px solid var(--border);margin-top:5px;padding-top:7px"><span class="srl b">Season total</span><span class="srv b"><span style="color:var(--green)">${fmt(tc)}</span> <span style="color:var(--muted)">/ ${fmt(tp)}</span>${tg>0.5?` <span style="color:var(--red)">−${fmt(tg)} given away</span>`:''}</span></div>
-      </div>`;
+  if(!_sell.length){
+    return `<div class="card" style="text-align:center;padding:34px 18px;color:var(--muted)"><div style="font-size:40px;margin-bottom:10px">🏷️</div><div style="font-size:13px">No sales logged yet. Once you ring up a show, you'll see exactly how much you collected versus full price here.</div></div>`;
   }
+  let tp=0,tc=0;
+  _sell.forEach(sh=>{tp+=showPotentialRev(sh);tc+=showActualRev(sh);});
+  const tg=tp-tc, tpct=tp>0?Math.round((tc/tp)*100):0, gpct=tp>0?Math.round((tg/tp)*100):0;
+  // ----- Hero summary: collected vs full price, modern gauge -----
+  let h=`<div class="card" style="background:linear-gradient(150deg,rgba(0,210,106,0.10),rgba(255,215,0,0.04));border-color:var(--greenbd);padding:18px 16px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px">
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:800;margin-bottom:4px">Collected</div>
+        <div style="font-size:34px;font-weight:900;color:var(--green);line-height:1">${fmt(tc)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">of ${fmt(tp)} full price</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:46px;font-weight:900;color:var(--green);line-height:0.9">${tpct}<span style="font-size:20px">%</span></div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700">capture rate</div>
+      </div>
+    </div>
+    <div style="position:relative;height:14px;border-radius:8px;overflow:hidden;background:var(--card3)">
+      <div style="position:absolute;inset:0;width:${tpct}%;background:linear-gradient(90deg,var(--green),#2be88a);border-radius:8px"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px">
+      <span style="color:var(--green);font-weight:800">● Collected ${tpct}%</span>
+      ${tg>0.5?`<span style="color:var(--red);font-weight:800">● Given away ${fmt(tg)} (${gpct}%)</span>`:`<span style="color:var(--muted)">No discounts given</span>`}
+    </div>
+  </div>`;
+  // ----- Per-show breakdown with mini capture bars -----
+  h+=`<div class="sec-lbl" style="margin-top:4px">BY SHOW</div>`;
+  h+=_sell.map(sh=>{
+    const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col,pct=pot>0?Math.round((col/pot)*100):0;
+    return `<div class="card" style="padding:12px 14px;margin-bottom:8px" onclick="go('show','${sh.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:9px;font-weight:900">●LIVE</span>':''}</div>
+        <div style="text-align:right;flex-shrink:0;margin-left:8px"><span style="color:var(--green);font-weight:900;font-size:15px">${fmt(col)}</span> <span style="color:var(--muted);font-size:12px">/ ${fmt(pot)}</span></div>
+      </div>
+      <div style="height:8px;border-radius:5px;overflow:hidden;background:var(--card3)"><div style="height:100%;width:${pct}%;background:${pct>=99?'var(--green)':'linear-gradient(90deg,var(--green),#2be88a)'};border-radius:5px"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px;color:var(--muted)"><span>${pct}% captured</span>${gap>0.5?`<span style="color:var(--red);font-weight:700">−${fmt(gap)} discount / freebie</span>`:'<span style="color:var(--green)">Full price ✓</span>'}</div>
+    </div>`;
+  }).join('');
   return h;
 }
 function secUnits(C){
@@ -1624,7 +1681,7 @@ function secExpenses(C){
   </div>`;
 }
 function secDebt(){
-  const debt=S.productDebt||{supplier:'Mark Martone',originalBalance:10000,payments:[]};
+  const debt=S.productDebt||{supplier:'',originalBalance:0,payments:[]};
   const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
   const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
   const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
@@ -1636,7 +1693,7 @@ function secDebt(){
     <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
     ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
-    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
+    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to ${debt.supplier||'Supplier'}</button>
   </div>`;
 }
 function secSplit(C){
@@ -1758,7 +1815,7 @@ function dashSectionGrid(){
     {k:'mileage',icon:'🚚',label:'Mileage &amp; Tax Deduction',sub:fmtN(C.ytd.miles)+' mi · '+fmt(C.mileDeduct)},
     {k:'booth',icon:'🎪',label:'Booth Costs',sub:'2026 season'},
     {k:'expenses',icon:'💸',label:'Other Expenses',sub:fmt(C.ytd.otherSpend)+' YTD'},
-    {k:'debt',icon:'🧾',label:'Product Debt',sub:'Mark Martone'},
+    {k:'debt',icon:'🧾',label:'Product Debt',sub:((S.productDebt&&S.productDebt.supplier)||'Supplier')},
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
     {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
@@ -1782,7 +1839,7 @@ function rSection(){
     mileage:{t:'Mileage & Tax Deduction',f:secMileage},
     booth:{t:'Booth Costs — 2026 Season',f:secBooth},
     expenses:{t:'Other Expenses',f:secExpenses},
-    debt:{t:'Product Debt — Mark Martone',f:secDebt},
+    debt:{t:'Product Debt'+((S.productDebt&&S.productDebt.supplier)?' — '+S.productDebt.supplier:''),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
     payments:{t:'Payment Breakdown (YTD)',f:secPayments},
     best:{t:'Best Shows This Season',f:secBest},
@@ -2765,6 +2822,7 @@ function rShow(){
   ${(()=>{const dl=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
     const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
     return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
+  ${preShowCalcHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
     <div><div class="sl">Profit</div><div class="sv ${t.profit>=0?'g':'r'}">${fmt(t.profit)}</div></div>
@@ -2942,6 +3000,69 @@ function rShow(){
   })()}
   ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
   <div style="height:10px"></div>`;
+}
+
+// ===================================================
+// PRE-SHOW INVENTORY CALCULATOR
+// "What am I bringing?" → potential sales volume + potential commission, before any inventory is logged.
+// ===================================================
+function preShowStockOf(sh){
+  // Use the explicit pre-show plan if set; otherwise fall back to what's packed to the show.
+  if(sh.preShowStock&&Object.values(sh.preShowStock).some(v=>(parseInt(v)||0)>0))return sh.preShowStock;
+  if(sh.packedInventory&&Object.values(sh.packedInventory).some(v=>(parseInt(v)||0)>0))return sh.packedInventory;
+  return sh.preShowStock||{};
+}
+function preShowTotals(sh){
+  const st=preShowStockOf(sh);
+  let units=0,volume=0,cogs=0;
+  SKUS.forEach(s=>{const q=parseInt(st[s.key])||0;units+=q;volume+=q*getP(s.key);cogs+=q*s.cost;});
+  const commission=volume*DEFAULT_COMM_RATE; // potential commission if every unit sold, at the generic rate
+  return {st,units,volume,cogs,commission};
+}
+function preShowCalcHTML(sh){
+  const {st,units,volume,cogs,commission}=preShowTotals(sh);
+  const usingPacked=!(sh.preShowStock&&Object.values(sh.preShowStock).some(v=>(parseInt(v)||0)>0)) && units>0;
+  const rows=SKUS.map(s=>{const q=parseInt(st[s.key])||0;if(!q)return'';return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><span>${s.emoji} ${s.short} × <strong>${q}</strong></span><span style="color:var(--gold)">${fmt(q*getP(s.key))}</span></div>`;}).join('');
+  return `<div class="card gb" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800">🎒 Pre-Show Inventory Calculator</div>
+      <button class="btn btn-gold btn-xs" onclick="openPreShowStock('${sh.id}')">${units>0?'✏️ Edit Stock':'+ Enter Stock'}</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Enter the stock you're bringing to this show to see what it could do — before you log a single count.${usingPacked?' <span style="color:var(--blue)">(showing packed inventory)</span>':''}</div>
+    ${units>0?`
+    <div class="g3" style="margin-bottom:10px">
+      <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmtN(units)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Units Bringing</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--green)">${fmt(volume)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Potential Sales</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--blue)">${fmt(commission)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Potential Comm.</div></div>
+    </div>
+    ${rows}
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
+      <span>Cost of goods on this stock: <strong style="color:var(--text)">${fmt(cogs)}</strong></span>
+      <span>Comm. @ ${Math.round(DEFAULT_COMM_RATE*100)}% of full sell-through</span>
+    </div>`:`<div style="text-align:center;color:var(--muted);font-size:12px;padding:8px 0">No stock entered yet. Tap <strong style="color:var(--gold)">+ Enter Stock</strong> to project this show's potential.</div>`}
+  </div>`;
+}
+function openPreShowStock(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const st=sh.preShowStock||{};
+  mOpen(`<div class="mh"><div class="mt">🎒 Stock You're Bringing</div><button class="mx" onclick="mClose()">×</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Enter how many of each you're packing for <strong>${sh.name}</strong>. We'll project potential sales volume and commission.</div>
+    ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.emoji} ${s.name}</div><div class="cr-s">${fmt(getP(s.key))} each</div></div><div class="cr-c"><input class="cri" type="number" inputmode="numeric" id="pss_${s.key}" value="${parseInt(st[s.key])||''}" placeholder="0" min="0"></div></div>`).join('')}
+    <div id="pssLive" style="font-size:12px;color:var(--muted);text-align:center;margin:12px 0"></div>
+    <button class="btn btn-gold btn-full" onclick="savePreShowStock('${shId}')">Save Pre-Show Stock</button>
+    <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="clearPreShowStock('${shId}')">Clear</button>`);
+  const live=()=>{let u=0,v=0;SKUS.forEach(s=>{const q=parseInt(($$('pss_'+s.key)||{}).value)||0;u+=q;v+=q*getP(s.key);});const el=$$('pssLive');if(el)el.innerHTML=`Bringing <strong style="color:var(--gold)">${u}</strong> units · potential <strong style="color:var(--green)">${fmt(v)}</strong> · comm. <strong style="color:var(--blue)">${fmt(v*DEFAULT_COMM_RATE)}</strong>`;};
+  SKUS.forEach(s=>{const el=$$('pss_'+s.key);if(el)el.addEventListener('input',live);});
+  live();
+}
+function savePreShowStock(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const st={};SKUS.forEach(s=>{const v=parseInt(($$('pss_'+s.key)||{}).value)||0;if(v>0)st[s.key]=v;});
+  sh.preShowStock=st;mClose();saveS();toast('Pre-show stock saved');
+}
+function clearPreShowStock(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  sh.preShowStock={};mClose();saveS();toast('Pre-show stock cleared');
 }
 
 function rDay(sh,di){
@@ -3255,7 +3376,7 @@ function saveDebtPmt(){
   if(!amt||amt<=0){toast('Enter a valid amount');return;}
   const date=$$('dpt_date').value||new Date().toISOString().split('T')[0];
   const note=$$('dpt_note').value||'';
-  if(!S.productDebt)S.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
+  if(!S.productDebt)S.productDebt={supplier:'',originalBalance:0,payments:[]};
   S.productDebt.payments.push({amount:amt,date,note});
   mClose();saveS();toast('✅ Payment logged — '+fmt(amt));
 }
