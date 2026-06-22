@@ -78,6 +78,10 @@
     .dhero{display:flex;flex-direction:column;gap:10px;margin-bottom:8px}
     .dhead .dcard-v{font-size:32px}
     .dash-div{height:1px;background:var(--border);margin:2px 0 12px}
+    .pie{width:172px;height:172px;border-radius:50%;margin:6px auto 0;position:relative}
+    .pie-hole{position:absolute;inset:27px;background:var(--card);border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center}
+    .pie-hole b{font-size:18px;font-weight:900;color:var(--text);line-height:1}
+    .pie-hole span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
 
     /* PROGRESS BAR */
     .pbar-wrap{background:var(--card3);border-radius:4px;height:7px;overflow:hidden;margin-top:7px}
@@ -1440,10 +1444,10 @@ function rHome(){
   const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
   // ---- COMPLETED-show performance figures. Completed shows ONLY — active (in-progress) and
   //      future/planned shows are excluded so nothing unfinished moves these numbers. ----
-  let cGross=0,cCogs=0,cShowExp=0,cTaxRes=0,cBooth=0,cShowNet=0,cDays=0,cUnits=0,colPot=0,colAct=0,biggestDay=0,biggestDayLabel='';
+  let cGross=0,cCogs=0,cShowExp=0,cTaxRes=0,cBooth=0,cComm=0,cShowNet=0,cDays=0,cUnits=0,colPot=0,colAct=0,biggestDay=0,biggestDayLabel='';
   done.forEach(sh=>{
     const t=calcShow(sh);
-    cGross+=t.gross;cCogs+=t.cogs;cShowExp+=t.expenses;cTaxRes+=t.taxRes;cBooth+=(sh.boothCost||0);cShowNet+=t.profit;cDays+=(sh.numDays||1);
+    cGross+=t.gross;cCogs+=t.cogs;cShowExp+=t.expenses;cTaxRes+=t.taxRes;cBooth+=(sh.boothCost||0);cComm+=(t.commissions||0);cShowNet+=t.profit;cDays+=(sh.numDays||1);
     colPot+=showPotentialRev(sh);colAct+=showActualRev(sh);
     (sh.days||[]).forEach(d=>{
       if(d.morningCount&&d.eveningCount){const sold=daySold(d);SKUS.forEach(s=>cUnits+=(sold[s.key]||0));}
@@ -1452,7 +1456,7 @@ function rHome(){
   });
   const cOther=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);  // season overhead (supplies/equipment), not tied to any show
   const cExpenses=cShowExp;                      // completed-show costs except COGS (season overhead lives in the Other Expenses tile, not the headline)
-  const cGrossProfit=cGross-cCogs;               // completed: sales minus cost of goods
+  const cGrossProfit=cGross-cCogs-cBooth-cComm;  // completed: sales − COGS − booth − commissions
   const cNet=cGross-cCogs-cExpenses;             // completed net profit (before tax set-aside)
   const cOtherExp=Math.max(0,cExpenses-cBooth);  // non-booth completed expenses, for the costs card
   const avgDay=cDays?cGross/cDays:0;             // revenue per completed show-day
@@ -1462,6 +1466,7 @@ function rHome(){
   const upCount=upcomingShows.length;
   const upBooth=upcomingShows.reduce((t,sh)=>t+(sh.boothCost||0),0);
   const upDays=upcomingShows.reduce((t,sh)=>t+(sh.numDays||1),0);
+  const upCommitted=upcomingShows.reduce((t,sh)=>t+(sh.boothCost||0)+(sh.lodging||0)+((sh.showExpenses||[]).reduce((a,e)=>a+(parseFloat(e.amount)||0),0)),0);
   let html='';
 
   // ---- DASHBOARD — completed-show performance (headline Sales Volume + Gross Profit, Net Profit at bottom), then a separate Upcoming/Future block ----
@@ -1482,7 +1487,7 @@ function rHome(){
     <div class="dcard lg dhead" style="border-color:${gpColor===G?GB:RB};background:${gpColor===G?'var(--goldbg)':'var(--redbg)'}">
       <div class="dcard-l">Gross Profit</div>
       <div class="dcard-v" style="color:${gpColor}">${fmt(cGrossProfit)}</div>
-      <div class="dcard-s">Completed sales minus cost of goods</div>
+      <div class="dcard-s">Sales − COGS − booth − commissions</div>
     </div>
   </div>
   <div class="dash-div"></div>
@@ -1504,6 +1509,7 @@ function rHome(){
       ${dcard('Total Tax Reserve',fmt(cTaxRes),{color:AMBER,border:'rgba(255,179,0,0.3)',sub:pctF(S.settings.tax*100)+' set aside from profit'})}
       ${dcard('Units Sold by Product',fmtN(cUnits),{onclick:"openSection('units')",sub:'completed · tap for breakdown'})}
       ${dcard('Master Inventory',invUnits+' units',{onclick:"go('stock')",sub:fmt(invRetail)+' retail · tap to manage'})}
+      ${dcard('Upcoming Show Costs',fmt(upCommitted),{color:BLUE,border:BLUEBD,sub:'Committed ahead · lowers final net'})}
     </div>
   </div>
   <div class="dcard lg dnet" style="border-color:${netColorD===G?GB:RB};background:${cNet>=0?'var(--greenbg)':'var(--redbg)'};margin-top:4px">
@@ -1521,6 +1527,12 @@ function rHome(){
       ${dcard('Booked Show-Days',fmtN(upDays),{color:BLUE,border:BLUEBD,sub:'Days scheduled ahead'})}
       ${missedShows.length?dcard('Missed / Not Done',fmtN(missedShows.length),{color:R,border:RB,onclick:"showsTab='missed';go('shows')",sub:'did not attend'}):''}
     </div>
+  </div>
+  <div class="sec-lbl" style="margin-top:16px">🧮 BOTTOM LINE</div>
+  <div class="dcard lg dnet" style="border-color:${(cNet-upCommitted)>=0?GB:RB};background:${(cNet-upCommitted)>=0?'var(--greenbg)':'var(--redbg)'}">
+    <div class="dcard-l">Net Profit · after upcoming costs</div>
+    <div class="dcard-v" style="color:${(cNet-upCommitted)>=0?G:R};font-size:30px">${fmt(cNet-upCommitted)}</div>
+    <div class="dcard-s">Completed net ${fmt(cNet)} − upcoming committed ${fmt(upCommitted)}</div>
   </div>`;
 
   // ---- Inventory mismatch alert (any active/completed show whose counts don't reconcile) ----
@@ -1626,7 +1638,7 @@ function rHome(){
   </div>`;
   /*CREW_END*/
 
-  html+=`<div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.6</div>`;
+  html+=`<div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.7</div>`;
 
   pg('home').innerHTML=html;
 }
@@ -1745,29 +1757,35 @@ function secWorkload(C){
   </div>`;
 }
 function secBooth(){
-  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
-  const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
-  const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
-  const unpaidList=allUpcoming.filter(sh=>boothBalance(sh)>0.01);
+  const list=[...S.shows].filter(sh=>(sh.boothCost||0)>0).sort((a,b)=>{const ao=boothBalance(a)>0.01?0:1,bo=boothBalance(b)>0.01?0:1;if(ao!==bo)return ao-bo;return showSortKey(a)<showSortKey(b)?-1:1;});
+  const committed=list.reduce((t,sh)=>t+(sh.boothCost||0),0);
+  const paid=list.reduce((t,sh)=>t+Math.min(sh.boothCost||0,boothPaid(sh)),0);
+  const owed=Math.max(0,committed-paid);
+  const dlabel=sh=>sh.dates&&sh.dates.length?sh.dates[0]:'';
   return `<div class="card">
-    <div class="g3" style="margin-bottom:${unpaidList.length?10:0}px">
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Committed</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
+    <div class="g3" style="margin-bottom:10px">
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(committed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Committed</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(paid)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${owed>0?'var(--red)':'var(--green)'}">${fmt(owed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
     </div>
-    ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
+    ${list.length?list.map(sh=>{const bal=boothBalance(sh);const paidUp=bal<=0.01;return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;margin-bottom:6px;border-radius:9px;border:1px solid ${paidUp?'var(--greenbd)':'var(--redbd)'};background:${paidUp?'var(--greenbg)':'var(--redbg)'}">
+      <div style="min-width:0"><div style="font-weight:800;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(sh.name)}</div><div style="font-size:10px;color:var(--muted)">${dlabel(sh)} · booth ${fmt(sh.boothCost||0)}</div></div>
+      <div style="display:flex;align-items:center;gap:7px;flex:none">${paidUp?`<span style="color:var(--green);font-weight:900;font-size:12px">✓ Paid</span>`:`<span style="color:var(--red);font-weight:900;font-size:12px">${fmt(bal)} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button>`}</div>
+    </div>`;}).join(''):'<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px">No booth costs entered yet.</div>'}
   </div>`;
 }
 function secExpenses(C){
+  const list=[...(S.otherExpenses||[])].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const total=list.reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   return `<div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
-        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(C.ytd.otherSpend)}</div>
-      </div>
-      <button class="btn btn-gold btn-sm" onclick="openManageExpenses()">Other Expenses →</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">YTD Spent · ${list.length} item${list.length!==1?'s':''}</div><div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(total)}</div></div>
+      <button class="btn btn-gold btn-sm" onclick="openOtherExpense()">+ Add</button>
     </div>
+    ${list.length?list.map(e=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--border)">
+      <div style="min-width:0"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(e.note||e.category||'Expense')}</div><div style="font-size:10px;color:var(--muted)">${_esc(e.category||'')}${e.date?' · '+e.date:''}</div></div>
+      <div style="display:flex;align-items:center;gap:6px;flex:none"><span style="color:var(--red);font-weight:900;font-size:13px">${fmt(e.amount)}</span><button class="btn btn-ghost btn-xs" onclick="openOtherExpense('','${e.id}')">✏️</button><button class="btn btn-ghost btn-xs" onclick="delOtherExpense('${e.id}')">🗑️</button></div>
+    </div>`).join(''):'<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">Nothing logged yet. Tap + Add to start.</div>'}
   </div>`;
 }
 function secDebt(){
@@ -1810,20 +1828,25 @@ function secSplit(C){
   </div>`;
 }
 function secPayments(C){
-  if(!(C.pmtGrand>0))return '';
-  const pmtHasData=PMTS.filter(p=>(C.ytd.pmtTotals[p.key]||0)>0);
+  if(!(C.pmtGrand>0))return '<div class="card"><div style="font-size:12px;color:var(--muted);text-align:center;padding:10px">No payments logged yet.</div></div>';
+  const segs=PMTS.map(p=>({p,v:C.ytd.pmtTotals[p.key]||0})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+  let acc=0;const parts=[];
+  segs.forEach(x=>{const start=acc/C.pmtGrand*100;acc+=x.v;const end=acc/C.pmtGrand*100;parts.push(`${x.p.color} ${start.toFixed(2)}%`,`${x.p.color} ${end.toFixed(2)}%`);});
+  const stops=parts.join(',');
+  const cash=C.ytd.pmtTotals.cash||0;
+  const card=(C.ytd.pmtTotals.square||0)+(C.ytd.pmtTotals.debit||0);
+  const top=segs[0];
   return `<div class="card">
-      <div class="hbar" style="height:14px;border-radius:7px">
-        ${pmtHasData.map(p=>{const pct=(C.ytd.pmtTotals[p.key]/C.pmtGrand)*100;return`<div class="hbar-seg" style="background:${p.color};flex:${pct};min-width:${pct>1?2:0}px"></div>`;}).join('')}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">
-        ${PMTS.map(p=>{const v=C.ytd.pmtTotals[p.key]||0;if(!v)return'';const pct=Math.round((v/C.pmtGrand)*100);return`<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span><span style="font-size:12px;font-weight:700">${p.label}: ${fmt(v)} <span style="color:var(--muted)">(${pct}%)</span></span></div>`;}).join('')}
-      </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
-        <span style="font-size:12px;color:var(--muted)">💵 Cash</span>
-        <span style="font-size:15px;font-weight:900;color:var(--green)">${fmt(C.ytd.pmtTotals.cash||0)} (${C.pmtGrand>0?Math.round(((C.ytd.pmtTotals.cash||0)/C.pmtGrand)*100):0}% of total)</span>
-      </div>
-    </div>`;
+    <div class="pie" style="background:conic-gradient(${stops})"><div class="pie-hole"><b>${fmt(C.pmtGrand)}</b><span>collected</span></div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:14px;justify-content:center">
+      ${segs.map(x=>{const pct=Math.round(x.v/C.pmtGrand*100);return`<div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${x.p.color}"></span><span style="font-size:12px;font-weight:700">${x.p.label} <span style="color:var(--muted)">${fmt(x.v)} · ${pct}%</span></span></div>`;}).join('')}
+    </div>
+    <div class="g3" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="text-align:center"><div style="font-size:16px;font-weight:900;color:var(--green)">${Math.round(cash/C.pmtGrand*100)}%</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Cash</div></div>
+      <div style="text-align:center"><div style="font-size:16px;font-weight:900;color:var(--blue)">${Math.round(card/C.pmtGrand*100)}%</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Card</div></div>
+      <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--gold)">${top?top.p.label:'—'}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Top Method</div></div>
+    </div>
+  </div>`;
 }
 function secInventory(C){
   return `<div class="sec-row"><div class="sec-lbl" style="margin:0">SNAPSHOT</div><button class="btn btn-ghost btn-xs" onclick="go('stock')">Manage →</button></div>
@@ -1843,15 +1866,46 @@ function secInventory(C){
   </div>`;
 }
 function secMileage(C){
-  if(!(C.ytd.miles>0))return '';
+  const driven=[...S.shows].filter(sh=>(sh.status==='completed'||sh.status==='active')).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
+  const dlabel=sh=>sh.dates&&sh.dates.length?sh.dates[0]:'';
+  const tripNote=sh=>{const rt=showRoundTrips(sh),nd=sh.numDays||1;return (rt>=nd&&nd>1)?'Back &amp; forth daily':(rt<=1?'Stayed overnight':rt+' round trips');};
   return `<div class="card">
       <div class="g3">
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(C.ytd.miles)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(C.mileDeduct)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">Per-show mileage · tap Edit</div>
+        ${driven.length?driven.map(sh=>{const ow=sh.miles||0;const tot=showMiles(sh);return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+          <div style="min-width:0"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(sh.name)}</div><div style="font-size:10px;color:var(--muted)">${dlabel(sh)} · ${ow?ow+' mi each way · '+tripNote(sh):'no miles set'}</div></div>
+          <div style="display:flex;align-items:center;gap:7px;flex:none"><span style="font-weight:900;font-size:13px;color:var(--gold)">${fmtN(tot)} mi</span><button class="btn btn-ghost btn-xs" onclick="openEditMiles('${sh.id}')">Edit</button></div>
+        </div>`;}).join(''):'<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px">No completed shows yet.</div>'}
+      </div>
     </div>`;
+}
+function openEditMiles(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const nd=sh.numDays||1;const rt=showRoundTrips(sh);const daily=(rt>=nd&&nd>1);
+  mOpen(`<div class="mh"><div class="mt">🚗 Miles · ${_esc(sh.name)}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">ONE-WAY MILES (home → show)</label><input class="fi" type="number" id="em_miles" placeholder="0" step="1" min="0" value="${sh.miles||''}"></div>
+  <div class="fg"><label class="fl">TRIPS — ${nd} day${nd>1?'s':''} at this show</label>
+    <div class="g2" style="gap:8px">
+      <button class="btn ${daily?'btn-gold':'btn-ghost'}" id="em_daily" onclick="emTrip(1)">Back &amp; forth each day</button>
+      <button class="btn ${daily?'btn-ghost':'btn-gold'}" id="em_stay" onclick="emTrip(0)">Stayed overnight</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Daily = ${nd} round trip${nd>1?'s':''} · overnight = 1 round trip. Total = one-way × 2 × trips.</div>
+  </div>
+  <input type="hidden" id="em_mode" value="${daily?'daily':'stay'}">
+  <button class="btn btn-gold btn-full" style="margin-top:6px" onclick="saveEditMiles('${sh.id}')">✅ Save Miles</button>`);
+}
+function emTrip(isDaily){$$('em_mode').value=isDaily?'daily':'stay';$$('em_daily').className='btn '+(isDaily?'btn-gold':'btn-ghost');$$('em_stay').className='btn '+(isDaily?'btn-ghost':'btn-gold');}
+function saveEditMiles(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const m=parseFloat($$('em_miles').value);sh.miles=isNaN(m)?0:Math.max(0,m);
+  sh.roundTrips=($$('em_mode').value==='daily')?(sh.numDays||1):1;
+  mClose();saveS();toast('✅ Miles updated');
 }
 function secBest(C){
   let h='';
@@ -3529,7 +3583,7 @@ function saveOtherExpense(editId){
   if(editId){
     const ex=S.otherExpenses.find(e=>e.id===editId);
     if(ex){ex.amount=amt;ex.note=note;ex.category=category;ex.date=date;}
-    saveS();openManageExpenses();toast('✅ Expense updated');
+    mClose();saveS();toast('✅ Expense updated');
   }else{
     S.otherExpenses.push({id:'oe_'+Date.now(),amount:amt,note,category,date});
     mClose();saveS();toast('✅ Expense logged — '+fmt(amt));
@@ -3539,7 +3593,7 @@ function delOtherExpense(id){
   const ex=(S.otherExpenses||[]).find(e=>e.id===id);if(!ex)return;
   if(!confirm('Delete this expense?\n\n'+(ex.note||ex.category||'Expense')+' — '+fmt(ex.amount)))return;
   S.otherExpenses=(S.otherExpenses||[]).filter(e=>e.id!==id);
-  saveS();openManageExpenses();toast('🗑️ Expense deleted');
+  mClose();saveS();toast('🗑️ Expense deleted');
 }
 function openManageExpenses(){
   const list=[...(S.otherExpenses||[])].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
