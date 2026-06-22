@@ -75,6 +75,9 @@
     .dcard-v{font-weight:900;line-height:1;font-size:19px}
     .dcard.lg .dcard-v{font-size:25px}
     .dcard-s{font-size:9px;color:var(--muted);margin-top:5px;line-height:1.25}
+    .dhero{display:flex;flex-direction:column;gap:10px;margin-bottom:8px}
+    .dhead .dcard-v{font-size:32px}
+    .dash-div{height:1px;background:var(--border);margin:2px 0 12px}
 
     /* PROGRESS BAR */
     .pbar-wrap{background:var(--card3);border-radius:4px;height:7px;overflow:hidden;margin-top:7px}
@@ -1435,53 +1438,75 @@ function rHome(){
   done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
   const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
   const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
-  // ---- Headline dashboard figures (reconcile: Sales − COGS − Booth − Other = Profit; Profit − Tax = Net) ----
-  const allBooth=S.shows.filter(s=>s.status==='completed'||s.status==='active').reduce((t,sh)=>t+(sh.boothCost||0),0)
-                +S.shows.filter(s=>s.status!=='completed'&&s.status!=='active').reduce((t,sh)=>t+boothPaid(sh),0);
-  const totalOtherExp=Math.max(0,ytd.expenses-allBooth);
-  const netAfterTax=ytd.profit-ytd.taxRes;
+  // ---- Dashboard money figures — COMPLETED + ACTIVE shows only. Future/planned shows are
+  //      excluded from every money stat (they appear only as upcoming counts). ----
+  const _caShows=S.shows.filter(s=>s.status==='completed'||s.status==='active');
+  let dGross=0,dCogs=0,dShowExp=0,dTaxRes=0,dBooth=0;
+  _caShows.forEach(sh=>{const t=calcShow(sh);dGross+=t.gross;dCogs+=t.cogs;dShowExp+=t.expenses;dTaxRes+=t.taxRes;dBooth+=(sh.boothCost||0);});
+  const dOther=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const dExpenses=dShowExp+dOther;               // all costs except COGS (future shows excluded)
+  const dGrossProfit=dGross-dCogs;               // Total sales minus cost of goods
+  const dNet=dGross-dCogs-dExpenses;             // Net profit: after expenses, before tax set-aside
+  const dOtherExp=Math.max(0,dExpenses-dBooth);  // non-booth expenses, for the costs card
   const biggestVal=(bgVal>-Infinity)?bgVal:0;
-  // ---- Day-based figures (a 3-day show = 3 days worked) ----
-  const daysWorked=S.shows.filter(s=>s.status==='completed'||s.status==='active').reduce((t,sh)=>t+(sh.numDays||1),0);
-  const avgDay=daysWorked?ytd.gross/daysWorked:0;            // Total revenue ÷ days worked
-  const avgDailyProfit=daysWorked?ytd.profit/daysWorked:0;   // Total net profit ÷ days worked
+  // ---- Averages — COMPLETED shows only, so scheduled-but-not-done shows never drag them down ----
+  let cGross=0,cNet=0,cDays=0;
+  done.forEach(sh=>{const t=calcShow(sh);cGross+=t.gross;cNet+=t.profit;cDays+=(sh.numDays||1);});
+  const avgDay=cDays?cGross/cDays:0;             // avg revenue per completed show-day
+  const avgDailyProfit=cDays?cNet/cDays:0;       // avg profit per completed show-day
   // Biggest single revenue day across every logged show day (money collected that day)
   let biggestDay=0,biggestDayLabel='';
   (S.shows||[]).forEach(sh=>{(sh.days||[]).forEach(d=>{const v=calcPmt(d.payments||{});if(v>biggestDay){biggestDay=v;biggestDayLabel=sh.name+(d.date?' · '+d.date:'');}});});
-  // Collected vs full price (season totals) for the informational card
+  // Collected vs full price (completed + active) for the informational card
   let colPot=0,colAct=0;
-  (S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').forEach(sh=>{colPot+=showPotentialRev(sh);colAct+=showActualRev(sh);});
+  _caShows.forEach(sh=>{colPot+=showPotentialRev(sh);colAct+=showActualRev(sh);});
   let html='';
 
-  // ---- DASHBOARD — two-column financial summary (left = money IN, right = money OUT) ----
+  // ---- DASHBOARD — headline (Sales Volume + Gross Profit) on top, supporting stats below the line, Net Profit at the bottom ----
   const G='var(--green)',R='var(--red)',AMBER='#FFB300',GB='var(--greenbd)',RB='var(--redbd)';
   const dcard=(label,val,o={})=>`<div class="dcard${o.big?' lg':''}${o.onclick?' click':''}"${o.border?` style="border-color:${o.border}"`:''}${o.onclick?` onclick="${o.onclick}"`:''}>
       <div class="dcard-l">${label}</div>
       <div class="dcard-v" style="color:${o.color||'var(--text)'}">${val}</div>
       ${o.sub?`<div class="dcard-s">${o.sub}</div>`:''}
     </div>`;
-  const profitColor=ytd.profit>=0?G:R, adpColor=avgDailyProfit>=0?G:R;
+  const gpColor=dGrossProfit>=0?G:R, netColorD=dNet>=0?G:R, adpColor=avgDailyProfit>=0?G:R;
   html+=`<div class="sec-lbl">📊 DASHBOARD · 2026 SEASON</div>
+  <div class="dhero">
+    <div class="dcard lg dhead" style="border-color:${GB};background:var(--goldbg)">
+      <div class="dcard-l">Total Sales Volume</div>
+      <div class="dcard-v" style="color:${G}">${fmt(dGross)}</div>
+      <div class="dcard-s">${done.length} completed${activeShows.length?' · '+activeShows.length+' active':''} · money collected</div>
+    </div>
+    <div class="dcard lg dhead" style="border-color:${gpColor===G?GB:RB};background:${gpColor===G?'var(--goldbg)':'var(--redbg)'}">
+      <div class="dcard-l">Gross Profit</div>
+      <div class="dcard-v" style="color:${gpColor}">${fmt(dGrossProfit)}</div>
+      <div class="dcard-s">Total sales minus cost of goods</div>
+    </div>
+  </div>
+  <div class="dash-div"></div>
   <div class="dash2">
     <div class="dcol">
-      <div class="col-hdr" style="color:${G};border-color:${GB}">💰 Sales &amp; Profit</div>
-      ${dcard('Total Sales Volume',fmt(ytd.gross),{color:G,big:true,border:GB,sub:sellShows.length+' show'+(sellShows.length!==1?'s':'')+' w/ sales'})}
-      ${dcard('Total Profit / Net',fmt(ytd.profit),{color:profitColor,big:true,border:profitColor===G?GB:RB,sub:'Sales − COGS − booth − expenses'})}
-      ${dcard('Average Day',fmt(avgDay),{color:G,sub:fmtN(daysWorked)+' show-day'+(daysWorked!==1?'s':'')+' worked'})}
-      ${dcard('Average Daily Profit',fmt(avgDailyProfit),{color:adpColor,sub:'Profit ÷ days worked'})}
+      <div class="col-hdr" style="color:${G};border-color:${GB}">💰 Performance</div>
+      ${dcard('Average Day',fmt(avgDay),{color:G,sub:fmtN(cDays)+' completed show-day'+(cDays!==1?'s':'')})}
+      ${dcard('Average Daily Profit',fmt(avgDailyProfit),{color:adpColor,sub:'Completed shows only'})}
       ${dcard('Biggest Show',fmt(biggestVal),{color:G,sub:bestGross?bestGross.name:'No shows yet'})}
       ${dcard('Biggest Day',fmt(biggestDay),{color:G,sub:biggestDayLabel||'No sales logged'})}
+      ${dcard('Collected vs Full Price',colPot>0?pctF((colAct/colPot)*100)+' captured':'—',{onclick:"openSection('collected')",sub:fmt(colAct)+' of '+fmt(colPot)})}
     </div>
     <div class="dcol">
       <div class="col-hdr" style="color:${R};border-color:${RB}">💸 Costs &amp; Inventory</div>
-      ${dcard('Total Booth Rent',fmt(allBooth),{color:R,border:RB,sub:'Booth fees committed'})}
-      ${dcard('Total Expenses',fmt(totalOtherExp),{color:R,border:RB,sub:'Gas, hotel, supplies, comm.'})}
-      ${dcard('Total Cost of Goods',fmt(ytd.cogs),{color:R,border:RB,sub:'Product COGS'})}
-      ${dcard('Total Tax Reserve',fmt(ytd.taxRes),{color:AMBER,border:'rgba(255,179,0,0.3)',sub:pctF(S.settings.tax*100)+' set aside from profit'})}
+      ${dcard('Total Cost of Goods',fmt(dCogs),{color:R,border:RB,sub:'Product COGS'})}
+      ${dcard('Total Booth Rent',fmt(dBooth),{color:R,border:RB,sub:'Completed / active shows'})}
+      ${dcard('Total Expenses',fmt(dOtherExp),{color:R,border:RB,sub:'Gas, hotel, supplies, comm.'})}
+      ${dcard('Total Tax Reserve',fmt(dTaxRes),{color:AMBER,border:'rgba(255,179,0,0.3)',sub:pctF(S.settings.tax*100)+' set aside from profit'})}
       ${dcard('Master Inventory',invUnits+' units',{onclick:"go('stock')",sub:fmt(invRetail)+' retail · tap to manage'})}
-      ${dcard('Collected vs Full Price',colPot>0?pctF((colAct/colPot)*100)+' captured':'—',{onclick:"openSection('collected')",sub:fmt(colAct)+' of '+fmt(colPot)})}
       ${dcard('Units Sold by Product',fmtN(ytd.totalUnits),{onclick:"openSection('units')",sub:'units sold · tap for breakdown'})}
     </div>
+  </div>
+  <div class="dcard lg dnet" style="border-color:${netColorD===G?GB:RB};background:${dNet>=0?'var(--greenbg)':'var(--redbg)'};margin-top:4px">
+    <div class="dcard-l">Net Profit · bottom line</div>
+    <div class="dcard-v" style="color:${netColorD};font-size:30px">${fmt(dNet)}</div>
+    <div class="dcard-s">Sales minus cost of goods minus all expenses (before tax set-aside)</div>
   </div>`;
 
   // ---- Inventory mismatch alert (any active/completed show whose counts don't reconcile) ----
@@ -1587,7 +1612,7 @@ function rHome(){
   </div>`;
   /*CREW_END*/
 
-  html+=`<div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.4</div>`;
+  html+=`<div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.5</div>`;
 
   pg('home').innerHTML=html;
 }
