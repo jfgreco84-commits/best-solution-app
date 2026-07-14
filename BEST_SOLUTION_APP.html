@@ -1924,7 +1924,7 @@ function bmRetail(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*ge
 function secBatman(){
   const b=bmInv(); const units=bmBottles(), cost=bmCost(), retail=bmRetail();
   let h=`<div class="card bb">
-    <div style="font-size:12px;color:var(--blue);line-height:1.5">🦇 Bottles borrowed from <strong>Batman (Adam West)</strong>, returned <strong>bottle for bottle</strong> once your pallet comes in. This list is 100% separate: it does NOT affect your master inventory, shows, COGS, or any P&L number.</div>
+    <div style="font-size:12px;color:var(--blue);line-height:1.5">🦇 Bottles borrowed from <strong>Batman (Adam West)</strong>, returned <strong>bottle for bottle</strong> once your pallet comes in. Borrowing here ADDS those bottles to your sellable stock, they are yours to sell now. This tally is what you still OWE him. Selling does not lower the debt, only <strong>Returned to Him</strong> does.</div>
   </div>
   <div class="card gb">
     <div class="g3">
@@ -2062,21 +2062,21 @@ function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);
 // ---- Borrowed-from-Batman editors (write ONLY to S.batmanBorrow; never touch master inventory) ----
 function showAddBatman(){
   mOpen(`<div class="mh"><div class="mt">🦇 Borrowed More from Batman</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you just borrow? This ADDS to what you owe him.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you just borrow? This ADDS them to your sellable stock AND to what you owe Batman.</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bma_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applyAddBatman()">Add to What I Owe</button>`);
 }
-function applyAddBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' borrowed from Batman');}
+function applyAddBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' borrowed (added to stock)');}
 function showReturnBatman(){
   mOpen(`<div class="mh"><div class="mt">− Returned to Batman</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe, bottle for bottle.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe AND removes them from your sellable stock, bottle for bottle.</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bmr_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applyReturnBatman()">Subtract Returned</button>`);
 }
-function applyReturnBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;n+=dec;}});mClose();saveS();toast('Returned '+n+' to Batman');}
+function applyReturnBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-dec);n+=dec;}});mClose();saveS();toast('Returned '+n+' (removed from stock)');}
 function showSetBatman(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Bottles Owed</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT number of each you currently owe Batman.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT number of each you currently owe Batman. This only fixes the debt tally, it does NOT change your sellable stock.</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name}</label><input class="fi" type="number" id="bms_${s.key}" value="${bmInv()[s.key]||0}" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applySetBatman()">Save Counts</button>`);
 }
