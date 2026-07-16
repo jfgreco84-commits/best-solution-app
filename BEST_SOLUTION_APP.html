@@ -1053,6 +1053,15 @@ function applyOneTimeUpdates(d){
     });
     d._applied['commission_matrix_v1']=true;
   }
+
+  // Jul 2026 — add Les as a sales rep, paid 40% commission on EVERYTHING (direct + card).
+  if(!d._applied['add_rep_les_v1']){
+    if(!d.reps)d.reps=[];
+    if(!d.reps.find(r=>r.id==='rep_les')){
+      d.reps.push({id:'rep_les',name:'Les',isSelf:false,active:true,payments:[],commCash:0.40,commCard:0.40});
+    }
+    d._applied['add_rep_les_v1']=true;
+  }
 }
 
 function buildPlannedShow(e){
