@@ -1464,7 +1464,8 @@ function mainButtonsHTML(C){
   const debt=S.productDebt||{}; const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0); const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
   const _mb=(icon,label,sub,action,cls)=>`<button class="btn ${cls||'btn-ghost'}" style="height:auto;padding:16px 10px;flex-direction:column;gap:3px;border-radius:14px;text-align:center" onclick="${action}"><span style="font-size:28px;line-height:1">${icon}</span><span style="font-size:14px;font-weight:900;letter-spacing:0.3px">${label}</span><span style="font-size:10px;font-weight:700;opacity:0.8">${sub}</span></button>`;
   let mb=`<div class="sec-lbl">⭐ QUICK ACCESS</div><div class="g2" style="margin-bottom:14px;gap:8px">`;
-  mb+=_mb('📦','STOCK',C.invUnits+' units · '+fmt(C.invRetail),"go('stock')","btn-gold");
+  const _atS=(typeof atShowsInv==='function')?atShowsInv():{}; const _aU=SKUS.reduce((t,s)=>t+(_atS[s.key]||0),0); const _mU=(C.invUnits||0)+_aU;
+  mb+=_mb('📦','STOCK',_mU+' units all-in'+(_aU>0?' · '+_aU+' at shows':''),"go('stock')","btn-gold");
   mb+=_mb('🎪','SHOWS',C.plannedCount+' upcoming · '+C.done.length+' done',"showsTab='upcoming';go('shows')");
   /*BATMAN_BTN_START*/
   mb+=_mb('🦇','FROM BATMAN',bmBottles()+' bottles · '+fmt(bmRetail())+' owed',"openSection('batman')","btn-outline");
@@ -1695,7 +1696,7 @@ function rHome(){
         ${dcard('Freight & Shipping',fmt(freightTotal()),{color:R,border:RB,onclick:"openSection('freight')",sub:'Inbound + outbound · tap to log'})}
         ${dcard('Total Tax Reserve',fmt(cTaxRes),{color:AMBER,border:'rgba(255,179,0,0.3)',sub:pctF(S.settings.tax*100)+' set aside from profit'})}
         ${dcard('Units Sold by Product',fmtN(cUnits),{onclick:"openSection('units')",sub:'completed · tap for breakdown'})}
-        ${dcard('Master Inventory',invUnits+' units',{onclick:"go('stock')",sub:fmt(invRetail)+' retail · tap to manage'})}
+        ${dcard('Master Inventory',masterUnits()+' units',{onclick:"go('stock')",sub:invUnits+' garage'+((masterUnits()-invUnits)>0?' · '+(masterUnits()-invUnits)+' at shows':'')+' · tap to manage'})}
       </div>
     </div>
     <div class="dcard lg dnet" style="border-color:${netColorD===G?GB:RB};background:${cNet>=0?'var(--greenbg)':'var(--redbg)'};margin-top:4px">
@@ -2127,37 +2128,91 @@ function rSection(){
 // ===================================================
 // STOCK
 // ===================================================
+// ---- LIVE STOCK LOCATION MODEL ----
+// Garage = S.inventory (physically at home). When a show STARTS, the packed stock is
+// removed from the garage and now lives at the show; the most recent day count is the
+// live on-hand at that show; when the show closes the leftover returns to the garage.
+// So: Master (everywhere) = Garage + on-hand at every ACTIVE show. It drops live as
+// each day's evening count is logged, without touching the garage number.
+function showOnHand(sh){
+  const r={}; SKUS.forEach(s=>r[s.key]=0);
+  if(!sh||sh.status!=='active')return r;            // only active shows hold stock out of the garage
+  const days=sh.days||[];
+  for(let i=days.length-1;i>=0;i--){ if(days[i]&&days[i].eveningCount){ SKUS.forEach(s=>r[s.key]=parseInt(days[i].eveningCount[s.key])||0); return r; } }
+  for(let i=days.length-1;i>=0;i--){ if(days[i]&&days[i].morningCount){ SKUS.forEach(s=>r[s.key]=parseInt(days[i].morningCount[s.key])||0); return r; } }
+  if(sh.packedInventory)SKUS.forEach(s=>r[s.key]=parseInt(sh.packedInventory[s.key])||0);
+  return r;
+}
+function activeStockShows(){ return (S.shows||[]).filter(s=>s.status==='active'); }
+function atShowsInv(){ const r={}; SKUS.forEach(s=>r[s.key]=0); activeStockShows().forEach(sh=>{ const o=showOnHand(sh); SKUS.forEach(s=>r[s.key]+=(o[s.key]||0)); }); return r; }
+function masterInv(){ const g=S.inventory||{}, a=atShowsInv(), r={}; SKUS.forEach(s=>r[s.key]=(parseInt(g[s.key])||0)+(a[s.key]||0)); return r; }
+function masterUnits(){ const m=masterInv(); return SKUS.reduce((t,s)=>t+(m[s.key]||0),0); }
+function masterRetail(){ const m=masterInv(); return SKUS.reduce((t,s)=>t+(m[s.key]||0)*getP(s.key),0); }
+
 function rStock(){
-  const cost=calcInvCost(S.inventory);const retail=calcInvRetail(S.inventory);
-  pg('stock').innerHTML=`
-  <div class="sec-row"><div class="sec-title">📦 Master Inventory</div><button class="btn btn-gold btn-sm" onclick="showRestock()">+ Restock</button></div>
-  <div class="card g2" style="margin-bottom:12px">
-    <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:22px;font-weight:900">${fmt(cost)}</div></div>
-    <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(retail)}</div></div>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:12px">
+  const garage=S.inventory||{};
+  const atShows=atShowsInv();
+  const master=masterInv();
+  const gUnits=SKUS.reduce((t,s)=>t+(parseInt(garage[s.key])||0),0);
+  const aUnits=SKUS.reduce((t,s)=>t+(atShows[s.key]||0),0);
+  const mUnits=gUnits+aUnits;
+  const mCost=SKUS.reduce((t,s)=>t+(master[s.key]||0)*getCost(s.key),0);
+  const mRetail=SKUS.reduce((t,s)=>t+(master[s.key]||0)*getP(s.key),0);
+  const activeShows=activeStockShows();
+  let h=`<div class="sec-row"><div class="sec-title">📦 Stock</div><button class="btn btn-gold btn-sm" onclick="showRestock()">+ Restock Garage</button></div>`;
+
+  // ---- MASTER STOCK — everywhere (garage + at shows), live ----
+  h+=`<div class="card gb" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div><div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800">🗃️ Master Stock · everywhere</div>
+      <div style="font-size:30px;font-weight:900;color:var(--gold);line-height:1.05">${mUnits} <span style="font-size:13px;color:var(--muted)">units all-in</span></div></div>
+      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail value</div><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(mRetail)}</div><div style="font-size:10px;color:var(--muted)">cost ${fmt(mCost)}</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div style="flex:1;text-align:center;background:var(--card2);border-radius:8px;padding:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">🏠 In Garage</div><div style="font-size:20px;font-weight:900">${gUnits}</div></div>
+      <div style="flex:1;text-align:center;background:var(--card2);border-radius:8px;padding:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">🎪 At Shows</div><div style="font-size:20px;font-weight:900;color:${aUnits>0?'var(--blue)':'var(--muted)'}">${aUnits}</div></div>
+    </div>
+    <table class="inv-table">
+      <tr><th>Product</th><th>Garage</th><th>At Shows</th><th>Total</th></tr>
+      ${SKUS.map(s=>{const g=parseInt(garage[s.key])||0,a=atShows[s.key]||0,tot=g+a,low=tot<5;return`<tr><td><span style="font-size:13px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:8px;padding:0 5px">LOW</span>`:''}</td><td>${g}</td><td style="color:${a>0?'var(--blue)':'var(--muted)'}">${a||'—'}</td><td style="font-weight:900;color:var(--gold)">${tot}</td></tr>`;}).join('')}
+      <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900">${gUnits}</td><td style="font-weight:900;color:${aUnits>0?'var(--blue)':'var(--muted)'}">${aUnits||'—'}</td><td style="font-weight:900;color:var(--gold)">${mUnits}</td></tr>
+    </table>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px">Updates live as you log each day's count at a show. Stock leaves the garage when you start a show and returns when you close it.</div>
+  </div>`;
+
+  // ---- AT SHOWS RIGHT NOW — quick per-show summary ----
+  if(activeShows.length){
+    h+=`<div class="sec-lbl">🎪 AT SHOWS RIGHT NOW (${activeShows.length})</div>`;
+    activeShows.forEach(sh=>{
+      const o=showOnHand(sh); const u=SKUS.reduce((t,s)=>t+(o[s.key]||0),0);
+      const lastCount=(()=>{const days=sh.days||[];for(let i=days.length-1;i>=0;i--){if(days[i]&&days[i].eveningCount)return (days[i].date||('Day '+(i+1)))+' evening';if(days[i]&&days[i].morningCount)return (days[i].date||('Day '+(i+1)))+' morning';}return 'as packed';})();
+      const chips=SKUS.filter(s=>(o[s.key]||0)>0).map(s=>`<span class="chip" style="font-size:10px">${s.short}: ${o[s.key]}</span>`).join('')||'<span style="color:var(--muted);font-size:11px">Sold out / no count yet</span>';
+      h+=`<div class="card" style="margin-bottom:8px;cursor:pointer" onclick="go('show','${sh.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="min-width:0"><div style="font-weight:800;font-size:14px">🔴 ${sh.name}</div><div style="font-size:10px;color:var(--muted)">as of ${lastCount} · tap to update counts</div></div><div style="font-weight:900;color:var(--gold);white-space:nowrap">${u} units</div></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${chips}</div>
+      </div>`;
+    });
+  } else {
+    h+=`<div class="card" style="margin-bottom:12px;text-align:center;color:var(--muted);font-size:12px">No active shows right now — all stock is in the garage.</div>`;
+  }
+
+  // ---- IN GARAGE — editable ----
+  h+=`<div class="sec-lbl">🏠 IN GARAGE · tap to adjust</div>`;
+  h+=`<div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock Between Shows</button>
-  </div>
-  ${(()=>{
-    const packed=transferableShows().filter(s=>s.packedInventory&&Object.values(s.packedInventory).some(v=>(v||0)!==0));
-    if(!packed.length)return'';
-    return `<div class="card" style="margin-bottom:12px;border-color:rgba(79,195,247,0.3)">
-      <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 Packed To Shows — On-Hand At Booths</div>
-      ${packed.map(s=>`<div class="sr"><span class="srl">${s.name}${s.status==='active'?' 🔴':''}</span><span class="srv" style="font-size:11px;font-weight:600">${SKUS.filter(k=>(s.packedInventory[k.key]||0)!==0).map(k=>k.short+': '+(s.packedInventory[k.key]||0)).join(' · ')||'—'}</span></div>`).join('')}
-    </div>`;
-  })()}
-  ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
+  </div>`;
+  h+=`${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
     ${[...(S.transfers||[])].slice().reverse().slice(0,12).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}<span style="color:var(--muted)"> · ${tr.date||''}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
-  </div>`:''}
-  ${SKUS.map(s=>{
+  </div>`:''}`;
+  h+=SKUS.map(s=>{
     const q=S.inventory[s.key]||0;const cst=getCost(s.key);const val=q*cst;const margin=Math.round(((getP(s.key)-cst)/getP(s.key))*100);const low=q<5;
     return`<div class="card ${low?'rb':''}">
       <div style="display:flex;align-items:center;gap:12px">
         <span style="font-size:30px">${s.emoji}</span>
         <div style="flex:1">
-          <div style="font-weight:900;font-size:15px">${s.name} ${low?'<span class="chip red" style="font-size:9px">LOW STOCK</span>':''}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(cst)} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} on hand</div>
+          <div style="font-weight:900;font-size:15px">${s.name} ${low?'<span class="chip red" style="font-size:9px">LOW IN GARAGE</span>':''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(cst)} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} in garage${(atShows[s.key]||0)>0?` · <span style="color:var(--blue)">${atShows[s.key]} at shows</span>`:''}</div>
           <div style="margin-top:5px"><button class="btn btn-xs btn-outline" style="font-size:10px;padding:4px 8px" onclick="openEditCost('${s.key}')">✏️ Adjust cost of goods</button></div>
           <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
             <button class="crb" onclick="adjInv('${s.key}',-1)">−</button>
@@ -2165,12 +2220,13 @@ function rStock(){
             <button class="crb" onclick="adjInv('${s.key}',1)">+</button>
           </div>
         </div>
-        <div style="text-align:right"><div style="font-size:28px;font-weight:900;color:var(--gold)">${q}</div><div style="font-size:10px;color:var(--muted)">units</div></div>
+        <div style="text-align:right"><div style="font-size:28px;font-weight:900;color:var(--gold)">${q}</div><div style="font-size:10px;color:var(--muted)">in garage</div></div>
       </div>
     </div>`;
-  }).join('')}
-  <div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>
+  }).join('');
+  h+=`<div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Garage Counts at Once</button></div>
   <div style="height:10px"></div>`;
+  pg('stock').innerHTML=h;
 }
 function adjInv(k,d){S.inventory[k]=Math.max(0,(S.inventory[k]||0)+d);saveS();toast(k+': '+(S.inventory[k])+' units');}
 function setInv(k,v){S.inventory[k]=Math.max(0,parseInt(v)||0);saveS();}
