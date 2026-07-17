@@ -362,8 +362,12 @@ const INIT={
   supplies:JSON.parse(JSON.stringify(DEFAULT_SUPPLIES)),
   productDebt:{supplier:'Mark Martone',originalBalance:10000,payments:[]},
   otherExpenses:[],
+  // Freight & shipping ledger — inbound product freight, outbound shipping, postage.
+  freight:[],
   reps:[],  // global rep roster — reused across all shows
   prices:{'32oz':22.50,'16oz':15.00,'8oz':10.00,'2oz':5.00,'c5s':10.00,'c5l':20.00},
+  // Editable cost of goods per SKU. Falls back to each SKU's built-in default when unset.
+  costs:{'32oz':6.00,'16oz':4.50,'8oz':4.00,'2oz':2.25,'c5s':3.00,'c5l':6.00},
   settings:{tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},
   _applied:{}
 };
@@ -372,6 +376,10 @@ const INIT={
 // STATE
 // ===================================================
 let S,curPg='home',curShow=null,curDay=0,calMonth=null,shows2025Mode=false,showsTab='upcoming',curSection=null;
+// Dashboard UI toggles (not persisted): completed-stats drawer + notification center
+let homeStatsOpen=false,notifOpen=false;
+function toggleStats(){homeStatsOpen=!homeStatsOpen;rHome();}
+function toggleNotif(){notifOpen=!notifOpen;rHome();}
 
 function normalizeShowDates(d){
   // Always fix startDate from dates[] on every load — no flags, always reliable
@@ -714,6 +722,9 @@ function applyOneTimeUpdates(d){
   d.settings=Object.assign({tax:0.28,sqFee:0.03,gasPrice:3.50,mpg:17.5,irsRate:0.70},d.settings);
   // Safety: ensure otherExpenses always present
   if(!d.otherExpenses)d.otherExpenses=[];
+  // Safety: freight/shipping ledger + editable COGS map
+  if(!Array.isArray(d.freight))d.freight=[];
+  if(!d.costs||typeof d.costs!=='object')d.costs={};
 
   // Pewaukee Beach Party 2026 — Jun 26-27, $425 booth, cleanup Jun 28 by 6am
   if(!d._applied['pewaukee_beach_20260626']){
@@ -1116,9 +1127,13 @@ function fmt(n){if(n===null||n===undefined)return'$0.00';const a=Math.abs(n);con
 function fmtN(n){return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');}
 function pctF(n){return (Number(n)||0).toFixed(1)+'%';} // percentages display with one decimal + %
 function getP(k){return(S.prices&&S.prices[k])||SKUS.find(s=>s.key===k).defP;}
+// Editable cost of goods. Reads S.costs[k]; falls back to the SKU's built-in default cost.
+function getCost(k){const c=S&&S.costs&&S.costs[k];return(c!=null&&c!=='')?(parseFloat(c)||0):SKUS.find(s=>s.key===k).cost;}
+// Freight & shipping ledger total (inbound product freight + outbound shipping/postage).
+function freightTotal(){return (S.freight||[]).reduce((t,f)=>t+(parseFloat(f.amount)||0),0);}
 function eSku(){const r={};SKUS.forEach(s=>r[s.key]=0);return r;}
 function calcRev(sold){return SKUS.reduce((t,s)=>t+(sold[s.key]||0)*getP(s.key),0);}
-function calcCOGS(sold){return SKUS.reduce((t,s)=>t+(sold[s.key]||0)*s.cost,0);}
+function calcCOGS(sold){return SKUS.reduce((t,s)=>t+(sold[s.key]||0)*getCost(s.key),0);}
 function calcSold(m,e){const r={};SKUS.forEach(s=>r[s.key]=Math.max(0,(m[s.key]||0)-(e[s.key]||0)));return r;}
 // ---- Day-aware inventory movement with optional restock + damaged/lost/given ----
 // Units that physically left the booth = opening + restock - ending. Of those, some sold and some were lost/damaged/given.
@@ -1130,7 +1145,7 @@ function daySold(d){ const left=dayUnitsLeft(d),lost=dayLostMap(d),r={}; SKUS.fo
 function dayCogsUnits(d){ return dayUnitsLeft(d); }
 function dayHasAdjust(d){ return !!((d.restock&&SKUS.some(s=>(d.restock[s.key]||0)>0))||(d.lost&&SKUS.some(s=>(d.lost[s.key]||0)>0))); }
 function calcPmt(pmts){return PMTS.reduce((t,p)=>t+(parseFloat(pmts[p.key])||0),0);}
-function calcInvCost(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*s.cost,0);}
+function calcInvCost(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*getCost(s.key),0);}
 function calcInvRetail(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*getP(s.key),0);}
 function calcShow(sh){
   let cogs=0,exp=sh.boothCost||0,potential=0;
@@ -1263,6 +1278,9 @@ function calcYTD(){
   // Other expenses: supplies, equipment, misc — logged separately
   const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   expenses+=otherSpend;
+  // Freight & shipping — inbound product freight + outbound shipping, a real cost against the bottom line
+  const freight=freightTotal();
+  expenses+=freight;
   // Total rep commissions earned across all shows
   const totalCommissions=(S.shows||[]).reduce((t,sh)=>t+calcShowComm(sh),0);
   // (commissions already included in expenses via calcShow/boothPaid paths above)
@@ -1270,7 +1288,7 @@ function calcYTD(){
   const taxRes=taxResSum;
   const keep=Math.max(0,profit-taxRes);
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
-  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalCommissions};
+  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,freight,totalCommissions};
 }
 function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
 function boothPaid(sh){return(sh.boothPayments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);}
@@ -1392,6 +1410,92 @@ function go(pg,shId,dayIdx){
 // ===================================================
 // HOME - FULL COMMAND CENTER
 // ===================================================
+// ===================================================
+// CONSTANT AUDIT — always-on safety net.
+// Scans everything on every dashboard render and surfaces anything wrong or
+// worth a look. Red = fix now, Gold = review. Never changes data, only reports.
+// ===================================================
+function daysUntil(dstr){ if(!/^\d{4}-\d{2}-\d{2}$/.test(String(dstr)))return 9999; const t=new Date(_todayKey()+'T12:00:00'),d=new Date(dstr+'T12:00:00'); return Math.round((d-t)/86400000); }
+function runAudit(){
+  const out=[]; const push=(level,icon,title,detail,action)=>out.push({level,icon,title,detail,action});
+  const shows=S.shows||[];
+  shows.filter(sh=>!isMissed(sh)&&sh.status!=='planned'&&invStatus(sh)==='red').forEach(sh=>{
+    push('red','🔴','Inventory mismatch — '+sh.name,"Opening/ending counts don't reconcile. Fix before you trust the numbers.","go('show','"+sh.id+"')"); });
+  shows.forEach(sh=>{ if(isMissed(sh))return; const neg=invNegativeSold(sh); if(neg.length)push('red','🔴','Impossible count — '+sh.name, neg.length+' day/size where ending beat available stock. Fix the count or log a restock.',"go('show','"+sh.id+"')"); });
+  const badInv=SKUS.filter(s=>{const q=S.inventory[s.key];return q<0||(q!=null&&isNaN(q));});
+  if(badInv.length)push('red','🛠️','Stock data problem', badInv.map(s=>s.short).join(', ')+' has a bad value. Open Stock and re-enter.',"go('stock')");
+  shows.filter(sh=>sh.status!=='completed'&&!isMissed(sh)).forEach(sh=>{ const bal=(typeof boothBalance==='function')?boothBalance(sh):0; if(bal>0.01){ const dl=daysUntil(showSortKey(sh)); if(dl<=14)push(dl<=5?'red':'warn',dl<=5?'⏰':'🎪','Booth unpaid — '+sh.name, fmt(bal)+' still owed'+(dl>=0?' · '+dl+' day'+(dl===1?'':'s')+' out':'')+'.',"openSection('booth')"); } });
+  const low=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
+  if(low.length)push('warn','📦','Low stock', low.map(s=>s.short+' ('+(S.inventory[s.key]||0)+')').join(', ')+' — restock before the next show.',"go('stock')");
+  const dayMap={}; shows.filter(sh=>!isMissed(sh)).forEach(sh=>getShowDates(sh).forEach(ds=>{(dayMap[ds]=dayMap[ds]||[]).push(sh);}));
+  const conflictDays=Object.keys(dayMap).filter(ds=>dayMap[ds].length>1&&ds>=_todayKey());
+  if(conflictDays.length){ const names=[...new Set(conflictDays.flatMap(ds=>dayMap[ds].map(s=>s.name)))].slice(0,4).join(', '); push('warn','⚠️','Double-booked ('+conflictDays.length+' day'+(conflictDays.length>1?'s':'')+')', names+' overlap. Make sure each is staffed.',"go('calendar')"); }
+  shows.filter(sh=>sh.status!=='completed'&&!isMissed(sh)&&sh.status!=='active'&&!sh.confirmed).forEach(sh=>{ const dl=daysUntil(showSortKey(sh)); if(dl>=0&&dl<=21)push('warn','❓','Not confirmed — '+sh.name, dl+' day'+(dl===1?'':'s')+' out and still pending.',"go('show','"+sh.id+"')"); });
+  const owed=(typeof allRepsOwed==='function')?allRepsOwed():[]; const owedTot=owed.reduce((t,x)=>t+(x.owed||0),0);
+  if(owedTot>0.5)push('warn','👥','Reps owed '+fmt(owedTot), owed.map(x=>x.name+' '+fmt(x.owed)).join(', ')+'.',"go('settings')");
+  const missed=shows.filter(sh=>isMissed(sh));
+  if(missed.length)push('warn','🗓️','Missed shows ('+missed.length+')', missed.map(s=>s.name).slice(0,4).join(', ')+' passed without being completed. Mark done or remove.',"showsTab='missed';go('shows')");
+  out.sort((a,b)=>(a.level==='red'?0:1)-(b.level==='red'?0:1));
+  return out;
+}
+function auditBarHTML(){
+  const a=runAudit(); const reds=a.filter(x=>x.level==='red');
+  if(!a.length){
+    return `<div class="card grb" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;cursor:pointer" onclick="toggleNotif()"><span style="font-size:22px">🔔</span><div style="flex:1"><div style="font-weight:900;color:var(--green);font-size:14px">All clear</div><div style="font-size:11px;color:var(--muted)">The audit found nothing to fix. You're good.</div></div><span style="font-size:20px">✅</span></div>`;
+  }
+  const isRed=reds.length>0, c=isRed?'var(--red)':'var(--gold)', bg=isRed?'var(--redbg)':'var(--goldbg)', bd=isRed?'var(--redbd)':'var(--goldbd)';
+  const warns=a.length-reds.length;
+  const label=(reds.length?reds.length+' urgent':'')+(reds.length&&warns?' · ':'')+(warns?warns+' to review':'');
+  let h=`<div class="card" style="border:1px solid ${bd};background:${bg};margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;cursor:pointer" onclick="toggleNotif()">
+      <span style="font-size:22px">${isRed?'🚨':'🔔'}</span>
+      <div style="flex:1"><div style="font-weight:900;color:${c};font-size:14px">${a.length} thing${a.length>1?'s':''} need attention</div><div style="font-size:11px;color:var(--muted)">${label} · tap to ${notifOpen?'hide':'open'}</div></div>
+      <span style="font-size:16px;color:${c}">${notifOpen?'▲':'▼'}</span>
+    </div>`;
+  if(notifOpen){
+    h+=`<div style="margin-top:10px;border-top:1px solid ${bd};padding-top:4px">`;
+    a.forEach(x=>{ const xc=x.level==='red'?'var(--red)':'var(--gold)';
+      h+=`<div style="display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="${x.action}"><span style="font-size:16px;line-height:1.3">${x.icon}</span><div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13px;color:${xc}">${x.title}</div><div style="font-size:11px;color:var(--muted)">${x.detail}</div></div><span style="color:var(--muted);font-size:16px">›</span></div>`; });
+    h+=`</div>`;
+  }
+  return h+`</div>`;
+}
+function mainButtonsHTML(C){
+  const debt=S.productDebt||{}; const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0); const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
+  const _mb=(icon,label,sub,action,cls)=>`<button class="btn ${cls||'btn-ghost'}" style="height:auto;padding:16px 10px;flex-direction:column;gap:3px;border-radius:14px;text-align:center" onclick="${action}"><span style="font-size:28px;line-height:1">${icon}</span><span style="font-size:14px;font-weight:900;letter-spacing:0.3px">${label}</span><span style="font-size:10px;font-weight:700;opacity:0.8">${sub}</span></button>`;
+  let mb=`<div class="sec-lbl">⭐ QUICK ACCESS</div><div class="g2" style="margin-bottom:14px;gap:8px">`;
+  mb+=_mb('📦','STOCK',C.invUnits+' units · '+fmt(C.invRetail),"go('stock')","btn-gold");
+  mb+=_mb('🎪','SHOWS',C.plannedCount+' upcoming · '+C.done.length+' done',"showsTab='upcoming';go('shows')");
+  /*BATMAN_BTN_START*/
+  mb+=_mb('🦇','FROM BATMAN',bmBottles()+' bottles · '+fmt(bmRetail())+' owed',"openSection('batman')","btn-outline");
+  /*BATMAN_BTN_END*/
+  mb+=_mb('🧾','PRODUCT DEBT',(debtBal>0?fmt(debtBal)+' owed':'paid off')+((debt.supplier)?' · '+debt.supplier:''),"openSection('debt')","btn-outline");
+  mb+=`</div>`;
+  return mb;
+}
+function miniCalHTML(){
+  const n=new Date(); const y=n.getFullYear(),m=n.getMonth();
+  const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DOW=['S','M','T','W','T','F','S'];
+  const startDow=new Date(y,m,1).getDay(), daysInMonth=new Date(y,m+1,0).getDate();
+  const todayStr=_todayKey(), mKey=y+'-'+String(m+1).padStart(2,'0');
+  const dayMap={}; (S.shows||[]).forEach(sh=>getShowDates(sh).forEach(ds=>{(dayMap[ds]=dayMap[ds]||[]).push(sh);}));
+  let showDays=0,conflictDays=0; Object.keys(dayMap).forEach(ds=>{ if(ds.substring(0,7)===mKey){showDays++; if(dayMap[ds].length>1)conflictDays++;} });
+  let h=`<div class="sec-row"><div class="sec-lbl" style="margin:0">📅 THIS MONTH</div><button class="btn btn-ghost btn-xs" onclick="go('calendar')">Full calendar →</button></div>`;
+  h+=`<div class="card" style="padding:11px;cursor:pointer;margin-bottom:14px" onclick="go('calendar')"><div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:7px">${MN[m]} ${y}</div><div class="cal-grid" style="gap:2px">`;
+  DOW.forEach(d=>h+=`<div class="cal-dow" style="padding:2px 0">${d}</div>`);
+  for(let i=0;i<startDow;i++)h+='<div class="cal-cell blank"></div>';
+  for(let day=1;day<=daysInMonth;day++){
+    const ds=`${mKey}-${String(day).padStart(2,'0')}`, shs=dayMap[ds]||[], conflict=shs.length>1;
+    let cls='cal-cell'; if(ds===todayStr)cls+=' today';
+    if(shs.length){ let st='possible'; if(shs.some(s=>s.status==='completed'))st='completed'; else if(shs.some(s=>s.confirmed||s.status==='active'))st='confirmed'; cls+=' has-show '+st; if(conflict)cls+=' conflict'; }
+    h+=`<div class="${cls}" style="min-height:30px;padding:2px;aspect-ratio:auto"><div class="cal-num" style="font-size:10px">${day}${conflict?'⚠️':''}</div>`;
+    if(shs.length)h+=`<div style="font-size:7px;font-weight:800;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.1">${shs[0].name}</div>`;
+    h+='</div>';
+  }
+  h+=`</div><div style="text-align:center;font-size:11px;color:var(--muted);margin-top:8px">${showDays} show day${showDays===1?'':'s'} this month${conflictDays?` · <span style="color:var(--red);font-weight:700">${conflictDays} double-booked</span>`:''} · tap for full calendar</div></div>`;
+  return h;
+}
 function nextShowCountdownHTML(activeShows,nextUp){
   if(activeShows&&activeShows.length){
     return `<div class="card gb" style="text-align:center;margin-bottom:12px"><div style="font-size:15px;font-weight:900;color:var(--gold)">🔴 Show Live Now — ${activeShows[0].name}</div></div>`;
@@ -1478,84 +1582,16 @@ function rHome(){
   const upCommitted=upcomingShows.reduce((t,sh)=>t+(sh.boothCost||0)+(sh.lodging||0)+((sh.showExpenses||[]).reduce((a,e)=>a+(parseFloat(e.amount)||0),0)),0);
   let html='';
 
-  // ---- DASHBOARD — completed-show performance (headline Sales Volume + Gross Profit, Net Profit at bottom), then a separate Upcoming/Future block ----
-  const G='var(--green)',R='var(--red)',AMBER='#FFB300',BLUE='var(--blue)',BLUEBD='rgba(79,195,247,0.32)',GB='var(--greenbd)',RB='var(--redbd)';
-  const dcard=(label,val,o={})=>`<div class="dcard${o.big?' lg':''}${o.onclick?' click':''}"${o.border?` style="border-color:${o.border}"`:''}${o.onclick?` onclick="${o.onclick}"`:''}>
-      <div class="dcard-l">${label}</div>
-      <div class="dcard-v" style="color:${o.color||'var(--text)'}">${val}</div>
-      ${o.sub?`<div class="dcard-s">${o.sub}</div>`:''}
-    </div>`;
-  const gpColor=cGrossProfit>=0?G:R, netColorD=cNet>=0?G:R, adpColor=avgDailyProfit>=0?G:R;
-  html+=`<div class="sec-lbl">📊 COMPLETED PERFORMANCE · 2026 SEASON</div>
-  <div class="dhero">
-    <div class="dcard lg dhead" style="border-color:${GB};background:var(--goldbg)">
-      <div class="dcard-l">Total Sales Volume</div>
-      <div class="dcard-v" style="color:${G}">${fmt(cGross)}</div>
-      <div class="dcard-s">${done.length} completed show${done.length!==1?'s':''} · money collected</div>
-    </div>
-    <div class="dcard lg dhead" style="border-color:${gpColor===G?GB:RB};background:${gpColor===G?'var(--goldbg)':'var(--redbg)'}">
-      <div class="dcard-l">Gross Profit</div>
-      <div class="dcard-v" style="color:${gpColor}">${fmt(cGrossProfit)}</div>
-      <div class="dcard-s">Sales − COGS − booth − commissions</div>
-    </div>
-  </div>
-  <div class="dash-div"></div>
-  <div class="dash2">
-    <div class="dcol">
-      <div class="col-hdr" style="color:${G};border-color:${GB}">💰 Performance</div>
-      ${dcard('Completed Shows',fmtN(done.length),{color:G,onclick:"showsTab='completed';go('shows')",sub:fmtN(cDays)+' show-day'+(cDays!==1?'s':'')+' worked'})}
-      ${dcard('Average Day',fmt(avgDay),{color:G,sub:'Revenue ÷ completed days'})}
-      ${dcard('Average Daily Profit',fmt(avgDailyProfit),{color:adpColor,sub:'Completed shows only'})}
-      ${dcard('Biggest Show',fmt(biggestVal),{color:G,sub:bestGross?bestGross.name:'No shows yet'})}
-      ${dcard('Biggest Day',fmt(biggestDay),{color:G,sub:biggestDayLabel||'No sales logged'})}
-      ${dcard('Collected vs Full Price',colPot>0?pctF((colAct/colPot)*100)+' captured':'—',{onclick:"openSection('collected')",sub:fmt(colAct)+' of '+fmt(colPot)})}
-    </div>
-    <div class="dcol">
-      <div class="col-hdr" style="color:${R};border-color:${RB}">💸 Costs &amp; Inventory</div>
-      ${dcard('Total Cost of Goods',fmt(cCogs),{color:R,border:RB,sub:'Product COGS (completed)'})}
-      ${dcard('Total Booth Rent',fmt(cBooth),{color:R,border:RB,sub:'Completed shows'})}
-      ${dcard('Total Expenses',fmt(cOtherExp),{color:R,border:RB,sub:'Gas, hotel, supplies, comm.'})}
-      ${dcard('Total Tax Reserve',fmt(cTaxRes),{color:AMBER,border:'rgba(255,179,0,0.3)',sub:pctF(S.settings.tax*100)+' set aside from profit'})}
-      ${dcard('Units Sold by Product',fmtN(cUnits),{onclick:"openSection('units')",sub:'completed · tap for breakdown'})}
-      ${dcard('Master Inventory',invUnits+' units',{onclick:"go('stock')",sub:fmt(invRetail)+' retail · tap to manage'})}
-      ${dcard('Upcoming Show Costs',fmt(upCommitted),{color:BLUE,border:BLUEBD,sub:'Committed ahead · lowers final net'})}
-    </div>
-  </div>
-  <div class="dcard lg dnet" style="border-color:${netColorD===G?GB:RB};background:${cNet>=0?'var(--greenbg)':'var(--redbg)'};margin-top:4px">
-    <div class="dcard-l">Net Profit · completed shows</div>
-    <div class="dcard-v" style="color:${netColorD};font-size:30px">${fmt(cNet)}</div>
-    <div class="dcard-s">Completed sales minus cost of goods minus show expenses (before tax set-aside)</div>
-  </div>
-  <div class="sec-lbl" style="margin-top:16px;color:${BLUE}">🔮 UPCOMING / FUTURE · not counted in the numbers above</div>
-  <div class="dash2">
-    <div class="dcol">
-      ${dcard('Upcoming Shows',fmtN(upCount),{color:BLUE,border:BLUEBD,onclick:"showsTab='upcoming';go('shows')",sub:'booked, not yet done · tap to view'})}
-      ${dcard('Future Booth Fees',fmt(upBooth),{color:BLUE,border:BLUEBD,sub:'Committed for upcoming shows'})}
-    </div>
-    <div class="dcol">
-      ${dcard('Booked Show-Days',fmtN(upDays),{color:BLUE,border:BLUEBD,sub:'Days scheduled ahead'})}
-      ${missedShows.length?dcard('Missed / Not Done',fmtN(missedShows.length),{color:R,border:RB,onclick:"showsTab='missed';go('shows')",sub:'did not attend'}):''}
-    </div>
-  </div>
-  <div class="sec-lbl" style="margin-top:16px">🧮 BOTTOM LINE</div>
-  <div class="dcard lg dnet" style="border-color:${(cNet-upCommitted)>=0?GB:RB};background:${(cNet-upCommitted)>=0?'var(--greenbg)':'var(--redbg)'}">
-    <div class="dcard-l">Net Profit · after upcoming costs</div>
-    <div class="dcard-v" style="color:${(cNet-upCommitted)>=0?G:R};font-size:30px">${fmt(cNet-upCommitted)}</div>
-    <div class="dcard-s">Completed net ${fmt(cNet)} − upcoming committed ${fmt(upCommitted)}</div>
-  </div>`;
+  // ---- 1) NOTIFICATIONS / CONSTANT AUDIT (top, most important) ----
+  html+=auditBarHTML();
 
-  // ---- Inventory mismatch alert (any active/completed show whose counts don't reconcile) ----
-  const invAlertShows=(S.shows||[]).filter(sh=>!isMissed(sh)&&sh.status!=='planned'&&invStatus(sh)==='red');
-  if(invAlertShows.length){
-    html+=`<div class="card" style="border:1px solid var(--redbd);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="go('show','${invAlertShows[0].id}')">
-      <div style="font-weight:800;color:#ffb3b3;font-size:13px">🔴 Inventory mismatch needs review</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:2px">${invAlertShows.map(s=>s.name).join(', ')} — opening/ending counts don't reconcile. Tap to fix.</div>
-    </div>`;
-  }
+  // ---- 2) QUICK ACCESS — the most-used buttons: Stock, Shows, Batman, Product Debt ----
+  html+=mainButtonsHTML({invUnits,invRetail,plannedCount,done});
 
-  // ---- ACTIVE SHOW BANNERS (one card per active show — no cap) ----
+  // ---- 3) SHOWS ON TOP — happening now (all active shows, no cap; overlaps all shown) ----
   if(activeShows.length){
-    html+=`<div class="sec-lbl">🔴 ${activeShows.length>1?`ACTIVE SHOWS (${activeShows.length})`:'ACTIVE SHOW'}</div>`;
+    html+=`<div class="sec-lbl">🔴 ${activeShows.length>1?`HAPPENING NOW (${activeShows.length} SHOWS)`:'HAPPENING NOW'}</div>`;
+    if(activeShows.length>1)html+=`<div class="wb red" style="margin-bottom:8px">⚠️ ${activeShows.length} shows running at the same time — make sure each one is staffed.</div>`;
     activeShows.forEach(a=>{
       const t=calcShow(a);
       const dateStr=a.dates?(a.dates.length>1?a.dates[0]+' - '+a.dates[a.dates.length-1]:a.dates[0]):'';
@@ -1585,52 +1621,103 @@ function rHome(){
     });
   }
 
-  // ---- NEXT UP + SHOWS BUTTONS ----
-  html+=`<div class="sec-lbl">NEXT UP</div>`;
-  if(nextUp){
-    const nuDate=nextUp.dates?(nextUp.dates.length>1?nextUp.dates[0]+' - '+nextUp.dates[nextUp.dates.length-1]:nextUp.dates[0]):'';
-    const nuGas=showGas(nextUp);
-    html+=`<div class="card" style="cursor:pointer;margin-bottom:8px" onclick="go('show','${nextUp.id}')">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:17px;font-weight:900">📅 ${nextUp.name}</div><div style="font-size:11px;color:var(--muted)">${nextUp.location?nextUp.location+' · ':''}${nuDate} · ${nextUp.numDays} day${nextUp.numDays>1?'s':''}</div></div>
-        <div style="text-align:right"><div style="font-size:13px;font-weight:700">${fmt(nextUp.boothCost||0)} booth</div><div style="font-size:11px;color:var(--muted)">${nextUp.miles?nextUp.miles+' mi · ~'+fmt(nuGas)+' gas':''}</div></div>
-      </div>
-    </div>`;
+  // ---- 4) NEXT SHOW countdown ----
+  html+=`<div class="sec-lbl">⏳ NEXT SHOW</div>`+nextShowCountdownHTML(activeShows,nextUp);
+
+  // ---- 5) ON DECK — the next few upcoming shows (all overlaps shown) ----
+  const deck=upcomingShows.slice(0,3);
+  html+=`<div class="sec-lbl">🎪 ON DECK</div>`;
+  if(deck.length){
+    deck.forEach((sh,i)=>{
+      const dStr=sh.dates?(sh.dates.length>1?sh.dates[0]+' - '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+      const dl=daysUntil(showSortKey(sh)); const gas=showGas(sh);
+      const when=dl===0?'TODAY':dl===1?'TOMORROW':(dl>1&&dl<9999?'in '+dl+' days':'');
+      const bal=(typeof boothBalance==='function')?boothBalance(sh):0;
+      html+=`<div class="card" style="cursor:pointer;margin-bottom:8px;${i===0?'border-color:var(--goldbd)':''}" onclick="go('show','${sh.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="min-width:0"><div style="font-size:16px;font-weight:900">${i===0?'📅 ':''}${sh.name}${when?` <span class="chip gold" style="font-size:9px;padding:1px 7px">${when}</span>`:''}</div>
+          <div style="font-size:11px;color:var(--muted)">${sh.location?sh.location+' · ':''}${dStr} · ${sh.numDays} day${sh.numDays>1?'s':''}${sh.confirmed?'':' · <span style="color:var(--gold)">pending</span>'}</div></div>
+          <div style="text-align:right;flex-shrink:0;margin-left:8px"><div style="font-size:13px;font-weight:700">${fmt(sh.boothCost||0)} booth</div><div style="font-size:11px;color:${bal>0.01?'var(--red)':'var(--muted)'}">${bal>0.01?fmt(bal)+' owed':(sh.miles?sh.miles+' mi · ~'+fmt(gas)+' gas':'')}</div></div>
+        </div>
+      </div>`;
+    });
   } else if(!activeShows.length){
-    html+=`<div class="card" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:8px">No upcoming shows. Tap + New Show to add one.</div>`;
+    html+=`<div class="card" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:8px">No upcoming shows. Tap 🎪 New Show below to add one.</div>`;
   }
   html+=`<div class="g2" style="margin-bottom:8px;gap:8px">
-    <button class="btn btn-ghost" onclick="showsTab='upcoming';go('shows')">📅 Upcoming Shows (${plannedCount})</button>
-    <button class="btn btn-ghost" onclick="showsTab='completed';go('shows')">✅ Completed Shows (${done.length})</button>
+    <button class="btn btn-ghost" onclick="showsTab='upcoming';go('shows')">📅 All Upcoming (${plannedCount})</button>
+    <button class="btn btn-ghost" onclick="showsTab='completed';go('shows')">✅ Completed (${done.length})</button>
   </div>
-  ${missedShows.length?`<button class="btn btn-ghost btn-full" style="margin-bottom:8px;border-color:var(--redbd);color:var(--red)" onclick="showsTab='missed';go('shows')">⚠️ Missed / Did Not Do (${missedShows.length})</button>`:''}`;
+  ${missedShows.length?`<button class="btn btn-ghost btn-full" style="margin-bottom:14px;border-color:var(--redbd);color:var(--red)" onclick="showsTab='missed';go('shows')">⚠️ Missed / Did Not Do (${missedShows.length})</button>`:'<div style="height:6px"></div>'}`;
 
-  // (Headline season stats now render at the top of Home — see DASHBOARD STATS above.)
+  // ---- 6) CALENDAR — primary at-a-glance, right on the dashboard ----
+  html+=miniCalHTML();
 
-  // ---- DASHBOARD SECTIONS (each data section now opens its own detail view) ----
+  // ---- 7) COMPLETED PERFORMANCE — the full stat suite, collapsed behind a button ----
+  html+=`<button class="btn btn-ghost btn-full" style="margin-bottom:${homeStatsOpen?'10':'14'}px;justify-content:space-between" onclick="toggleStats()"><span>📊 Season Performance Stats</span><span style="color:var(--muted)">${homeStatsOpen?'Hide ▲':'Show ▼'}</span></button>`;
+  if(homeStatsOpen){
+    const G='var(--green)',R='var(--red)',AMBER='#FFB300',BLUE='var(--blue)',BLUEBD='rgba(79,195,247,0.32)',GB='var(--greenbd)',RB='var(--redbd)';
+    const dcard=(label,val,o={})=>`<div class="dcard${o.big?' lg':''}${o.onclick?' click':''}"${o.border?` style="border-color:${o.border}"`:''}${o.onclick?` onclick="${o.onclick}"`:''}>
+        <div class="dcard-l">${label}</div>
+        <div class="dcard-v" style="color:${o.color||'var(--text)'}">${val}</div>
+        ${o.sub?`<div class="dcard-s">${o.sub}</div>`:''}
+      </div>`;
+    const gpColor=cGrossProfit>=0?G:R, netColorD=cNet>=0?G:R, adpColor=avgDailyProfit>=0?G:R;
+    html+=`<div class="sec-lbl">📊 COMPLETED PERFORMANCE · 2026 SEASON</div>
+    <div class="dhero">
+      <div class="dcard lg dhead" style="border-color:${GB};background:var(--goldbg)">
+        <div class="dcard-l">Total Sales Volume</div>
+        <div class="dcard-v" style="color:${G}">${fmt(cGross)}</div>
+        <div class="dcard-s">${done.length} completed show${done.length!==1?'s':''} · money collected</div>
+      </div>
+      <div class="dcard lg dhead" style="border-color:${gpColor===G?GB:RB};background:${gpColor===G?'var(--goldbg)':'var(--redbg)'}">
+        <div class="dcard-l">Gross Profit</div>
+        <div class="dcard-v" style="color:${gpColor}">${fmt(cGrossProfit)}</div>
+        <div class="dcard-s">Sales − COGS − booth − commissions</div>
+      </div>
+    </div>
+    <div class="dash-div"></div>
+    <div class="dash2">
+      <div class="dcol">
+        <div class="col-hdr" style="color:${G};border-color:${GB}">💰 Performance</div>
+        ${dcard('Completed Shows',fmtN(done.length),{color:G,onclick:"showsTab='completed';go('shows')",sub:fmtN(cDays)+' show-day'+(cDays!==1?'s':'')+' worked'})}
+        ${dcard('Average Day',fmt(avgDay),{color:G,sub:'Revenue ÷ completed days'})}
+        ${dcard('Average Daily Profit',fmt(avgDailyProfit),{color:adpColor,sub:'Completed shows only'})}
+        ${dcard('Biggest Show',fmt(biggestVal),{color:G,sub:bestGross?bestGross.name:'No shows yet'})}
+        ${dcard('Biggest Day',fmt(biggestDay),{color:G,sub:biggestDayLabel||'No sales logged'})}
+        ${dcard('Collected vs Full Price',colPot>0?pctF((colAct/colPot)*100)+' captured':'—',{onclick:"openSection('collected')",sub:fmt(colAct)+' of '+fmt(colPot)})}
+      </div>
+      <div class="dcol">
+        <div class="col-hdr" style="color:${R};border-color:${RB}">💸 Costs &amp; Inventory</div>
+        ${dcard('Total Cost of Goods',fmt(cCogs),{color:R,border:RB,sub:'Product COGS (completed)'})}
+        ${dcard('Total Booth Rent',fmt(cBooth),{color:R,border:RB,sub:'Completed shows'})}
+        ${dcard('Total Expenses',fmt(cOtherExp),{color:R,border:RB,sub:'Gas, hotel, supplies, comm.'})}
+        ${dcard('Freight & Shipping',fmt(freightTotal()),{color:R,border:RB,onclick:"openSection('freight')",sub:'Inbound + outbound · tap to log'})}
+        ${dcard('Total Tax Reserve',fmt(cTaxRes),{color:AMBER,border:'rgba(255,179,0,0.3)',sub:pctF(S.settings.tax*100)+' set aside from profit'})}
+        ${dcard('Units Sold by Product',fmtN(cUnits),{onclick:"openSection('units')",sub:'completed · tap for breakdown'})}
+        ${dcard('Master Inventory',invUnits+' units',{onclick:"go('stock')",sub:fmt(invRetail)+' retail · tap to manage'})}
+      </div>
+    </div>
+    <div class="dcard lg dnet" style="border-color:${netColorD===G?GB:RB};background:${cNet>=0?'var(--greenbg)':'var(--redbg)'};margin-top:4px">
+      <div class="dcard-l">Net Profit · completed shows</div>
+      <div class="dcard-v" style="color:${netColorD};font-size:30px">${fmt(cNet)}</div>
+      <div class="dcard-s">Completed sales minus cost of goods minus show expenses (before tax set-aside)</div>
+    </div>
+    <div class="sec-lbl" style="margin-top:16px;color:${BLUE}">🔮 UPCOMING / FUTURE · not counted in the numbers above</div>
+    <div class="dash2">
+      <div class="dcol">
+        ${dcard('Upcoming Shows',fmtN(upCount),{color:BLUE,border:BLUEBD,onclick:"showsTab='upcoming';go('shows')",sub:'booked, not yet done · tap to view'})}
+        ${dcard('Future Booth Fees',fmt(upBooth),{color:BLUE,border:BLUEBD,sub:'Committed for upcoming shows'})}
+      </div>
+      <div class="dcol">
+        ${dcard('Booked Show-Days',fmtN(upDays),{color:BLUE,border:BLUEBD,sub:'Days scheduled ahead'})}
+        ${dcard('Upcoming Show Costs',fmt(upCommitted),{color:BLUE,border:BLUEBD,sub:'Committed ahead · lowers final net'})}
+      </div>
+    </div>`;
+  }
+
+  // ---- 8) DASHBOARD SECTIONS (each opens its own detail view) ----
   html+=dashSectionGrid();
-
-  // (Booth Costs, Other Expenses, Product Debt, Money Split, Payment Breakdown
-  //  now open from the Dashboard Sections grid above — see rSection / sec* helpers.)
-
-  // (Master Inventory snapshot, Mileage & Tax Deduction, and Best Shows now open
-  //  from the Dashboard Sections grid above — see rSection / sec* helpers.)
-
-  // (2026 vs 2025 comparison removed from home to declutter — lives on Shows/P&L pages)
-
-  // (Full Upcoming + Completed show lists moved to the Shows page — home shows only Next Up + buttons)
-
-  // ---- QUICK ACTIONS ----
-  html+=`<div class="sec-lbl">QUICK ACTIONS</div>
-  <div class="g2" style="margin-bottom:8px">
-    <button class="btn btn-gold" onclick="showNewShowModal()">🎪 New Show</button>
-    <button class="btn btn-ghost" onclick="showSetAllInv()">📋 Update Stock</button>
-  </div>
-  <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
-  ${activeShows.map(a=>`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${a.id}')">🔴 Open Active Show: ${a.name}</button>`).join('')}`;
-
-  // ---- DAYS UNTIL NEXT SHOW (countdown) — just above the crew launcher ----
-  html+=`<div class="sec-lbl">NEXT SHOW</div>`+nextShowCountdownHTML(activeShows,nextUp);
 
   /*CREW_START*/
   // ---- CREW APPS / TEAM TRACKER — bottom of page (PERSONAL APP ONLY; stripped from blank/crew copies) ----
@@ -1647,8 +1734,40 @@ function rHome(){
   </div>`;
   /*CREW_END*/
 
-  html+=`<div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.7</div>`;
+  // ---- 9) QUICK ACTIONS ----
+  html+=`<div class="sec-lbl">QUICK ACTIONS</div>
+  <div class="g2" style="margin-bottom:8px">
+    <button class="btn btn-gold" onclick="showNewShowModal()">🎪 New Show</button>
+    <button class="btn btn-ghost" onclick="showSetAllInv()">📋 Update Stock</button>
+  </div>
+  <div class="g2" style="margin-bottom:8px">
+    <button class="btn btn-ghost" onclick="openFreight()">🚚 Log Freight</button>
+    <button class="btn btn-ghost" onclick="openManageExpenses()">💸 Log Expense</button>
+  </div>
+  <button class="btn btn-ghost btn-full" style="margin-bottom:14px" onclick="exportCalICS()">📅 Export Shows to Calendar</button>
+  ${activeShows.map(a=>`<button class="btn btn-gold btn-full" style="margin-bottom:14px" onclick="go('show','${a.id}')">🔴 Open Active Show: ${a.name}</button>`).join('')}`;
 
+  // ---- 10) THE BOTTOM LINE — full reconciliation, pinned at the very bottom ----
+  const _freightYTD=freightTotal();
+  const _overhead=cOther;                                   // season overhead (Other Expenses), not tied to a show
+  const _blBeforeTax=cNet-_overhead-_freightYTD-upCommitted;
+  const _blKeep=_blBeforeTax-cTaxRes;
+  html+=`<div class="sec-lbl">🧮 THE BOTTOM LINE</div>
+  <div class="card ${_blKeep>=0?'grb':'rb'}" style="margin-bottom:14px">
+    <div class="sr"><span class="srl">Completed sales collected</span><span class="srv gold">${fmt(cGross)}</span></div>
+    <div class="sr"><span class="srl">− Cost of goods (COGS)</span><span class="srv">${fmt(cCogs)}</span></div>
+    <div class="sr"><span class="srl">− Booth rent</span><span class="srv">${fmt(cBooth)}</span></div>
+    <div class="sr"><span class="srl">− Show expenses (gas, hotel, comm.)</span><span class="srv">${fmt(cOtherExp)}</span></div>
+    <div class="sr" style="border-top:1px solid var(--border)"><span class="srl b">Completed net profit</span><span class="srv b ${cNet>=0?'green':'red'}">${fmt(cNet)}</span></div>
+    <div class="sr"><span class="srl">− Other expenses (overhead)</span><span class="srv">${fmt(_overhead)}</span></div>
+    <div class="sr"><span class="srl">− Freight &amp; shipping</span><span class="srv">${fmt(_freightYTD)}</span></div>
+    <div class="sr"><span class="srl">− Upcoming committed costs</span><span class="srv">${fmt(upCommitted)}</span></div>
+    <div class="sr" style="border-top:1px solid var(--border)"><span class="srl b">Bottom line (before tax)</span><span class="srv b ${_blBeforeTax>=0?'green':'red'}">${fmt(_blBeforeTax)}</span></div>
+    <div class="sr"><span class="srl">− Tax reserve (${pctF(S.settings.tax*100)})</span><span class="srv red">${fmt(cTaxRes)}</span></div>
+    <div class="sr" style="border-top:2px solid var(--border)"><span class="srl b" style="font-size:16px">NET — what you keep</span><span class="srv b lg ${_blKeep>=0?'green':'red'}">${fmt(_blKeep)}</span></div>
+  </div>
+  <div style="text-align:center;font-size:11px;color:var(--muted);padding-bottom:4px">Best Solution App · Dot Dynasty LLC · v7.8</div>
+  `;
   pg('home').innerHTML=html;
 }
 
@@ -1867,7 +1986,7 @@ function secInventory(C){
     </div>
     <table class="inv-table">
       <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
-      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:9px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
+      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:9px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*getCost(s.key))}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
       <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${C.invUnits}</td><td style="font-weight:900">${fmt(C.invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</td></tr>
     </table>
     ${C.lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${C.lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
@@ -1928,7 +2047,7 @@ function secBest(C){
 // ---- BORROWED FROM BATMAN (fully isolated tally; never touches inventory/shows/P&L) ----
 function bmInv(){ if(!S.batmanBorrow||typeof S.batmanBorrow!=="object")S.batmanBorrow={}; return S.batmanBorrow; }
 function bmBottles(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0),0);}
-function bmCost(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*s.cost,0);}
+function bmCost(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getCost(s.key),0);}
 function bmRetail(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getP(s.key),0);}
 function secBatman(){
   const b=bmInv(); const units=bmBottles(), cost=bmCost(), retail=bmRetail();
@@ -1945,7 +2064,7 @@ function secBatman(){
   <div class="card">
     <table class="inv-table">
       <tr><th>Product</th><th>Bottles</th><th>Cost Val</th><th>Sell Val</th></tr>
-      ${SKUS.map(s=>{const q=b[s.key]||0;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong></td><td style="font-weight:700;color:${q>0?"var(--text)":"var(--muted)"}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join("")}
+      ${SKUS.map(s=>{const q=b[s.key]||0;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong></td><td style="font-weight:700;color:${q>0?"var(--text)":"var(--muted)"}">${q}</td><td>${fmt(q*getCost(s.key))}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join("")}
       <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL OWED</td><td style="font-weight:900;color:var(--gold)">${units}</td><td style="font-weight:900">${fmt(cost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(retail)}</td></tr>
     </table>
   </div>
@@ -1965,11 +2084,11 @@ function dashSectionGrid(){
     {k:'mileage',icon:'🚚',label:'Mileage &amp; Tax Deduction',sub:fmtN(C.ytd.miles)+' mi · '+fmt(C.mileDeduct)},
     {k:'booth',icon:'🎪',label:'Booth Costs',sub:'2026 season'},
     {k:'expenses',icon:'💸',label:'Other Expenses',sub:fmt(C.ytd.otherSpend)+' YTD'},
+    {k:'freight',icon:'🚚',label:'Freight &amp; Shipping',sub:fmt(freightTotal())+' YTD'},
     {k:'debt',icon:'🧾',label:'Product Debt',sub:((S.productDebt&&S.productDebt.supplier)||'Supplier')},
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
-    {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
-    {k:'batman',icon:'🦇',label:'Borrowed from Batman',sub:bmBottles()+' bottles owed · '+fmt(bmRetail())}
+    {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'}
   ];
   let h=`<div class="sec-lbl">MORE BREAKDOWNS</div><div class="g2" style="margin-bottom:8px">`;
   h+=cards.map(c=>`<button class="btn btn-ghost" style="height:auto;padding:13px 11px;flex-direction:column;align-items:flex-start;text-align:left;white-space:normal;gap:0" onclick="openSection('${c.k}')"><span style="font-size:20px;line-height:1;margin-bottom:5px">${c.icon}</span><span style="font-size:13px;font-weight:800;line-height:1.2">${c.label}</span><span style="font-size:10px;color:var(--muted);margin-top:3px;font-weight:600">${c.sub}</span></button>`).join('');
@@ -1989,6 +2108,7 @@ function rSection(){
     mileage:{t:'Mileage & Tax Deduction',f:secMileage},
     booth:{t:'Booth Costs — 2026 Season',f:secBooth},
     expenses:{t:'Other Expenses',f:secExpenses},
+    freight:{t:'Freight & Shipping',f:secFreight},
     debt:{t:'Product Debt'+((S.productDebt&&S.productDebt.supplier)?' — '+S.productDebt.supplier:''),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
     payments:{t:'Payment Breakdown (YTD)',f:secPayments},
@@ -2031,13 +2151,14 @@ function rStock(){
     ${[...(S.transfers||[])].slice().reverse().slice(0,12).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}<span style="color:var(--muted)"> · ${tr.date||''}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
   </div>`:''}
   ${SKUS.map(s=>{
-    const q=S.inventory[s.key]||0;const val=q*s.cost;const margin=Math.round(((getP(s.key)-s.cost)/getP(s.key))*100);const low=q<5;
+    const q=S.inventory[s.key]||0;const cst=getCost(s.key);const val=q*cst;const margin=Math.round(((getP(s.key)-cst)/getP(s.key))*100);const low=q<5;
     return`<div class="card ${low?'rb':''}">
       <div style="display:flex;align-items:center;gap:12px">
         <span style="font-size:30px">${s.emoji}</span>
         <div style="flex:1">
           <div style="font-weight:900;font-size:15px">${s.name} ${low?'<span class="chip red" style="font-size:9px">LOW STOCK</span>':''}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(s.cost)} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} on hand</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(cst)} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} on hand</div>
+          <div style="margin-top:5px"><button class="btn btn-xs btn-outline" style="font-size:10px;padding:4px 8px" onclick="openEditCost('${s.key}')">✏️ Adjust cost of goods</button></div>
           <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
             <button class="crb" onclick="adjInv('${s.key}',-1)">−</button>
             <input class="cri" type="number" value="${q}" min="0" onchange="setInv('${s.key}',this.value)" onfocus="this.select()">
@@ -2643,6 +2764,7 @@ function rPnL(){
     <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
     <div class="sr"><span class="srl">Show Expenses (fuel, hotel, etc.)</span><span class="srv red">-${fmt(showExpTotal+lodgingTotal+dayExpTotal)}</span></div>
     <div class="sr" style="border-bottom:none"><span class="srl">Supply Purchases</span><span class="srv red">-${fmt(globalSupply)}</span></div>
+    ${freightTotal()>0?`<div class="sr" style="border-bottom:none"><span class="srl">Freight &amp; Shipping</span><span class="srv red">-${fmt(freightTotal())}</span></div>`:''}
     ${ytd.totalCommissions>0?`<div class="sr" style="border-top:1px solid var(--redbd);margin-top:4px;border-bottom:none"><span class="srl">Rep Commissions (earned)</span><span class="srv red">-${fmt(ytd.totalCommissions)}</span></div>`:''}
   </div>
   ${(()=>{
@@ -2898,7 +3020,14 @@ function exportRepCSV(){
 function exportExpensesCSV(){
   const rows=[['Date','Category','Amount','Note']];
   (S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
-  rows.push([]); rows.push(['TOTAL','',(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
+  // Freight & shipping — logged in its own ledger, exported here as its own category line
+  (S.freight||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(f=>rows.push([f.date||'','Freight & Shipping'+(f.type?' — '+f.type:''),(parseFloat(f.amount)||0).toFixed(2),[f.carrier,f.desc].filter(Boolean).join(' · ')]));
+  const otherTot=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const freightTot=freightTotal();
+  rows.push([]);
+  rows.push(['Other expenses subtotal','',otherTot.toFixed(2),'']);
+  rows.push(['Freight & shipping subtotal','',freightTot.toFixed(2),'']);
+  rows.push(['TOTAL','',(otherTot+freightTot).toFixed(2),'']);
   dlFile('best-solution-expenses-'+_stamp()+'.csv',_csvRows(rows));
 }
 function _money(n){return '$'+(Number(n)||0).toFixed(2);}
@@ -3170,7 +3299,7 @@ function preShowStockOf(sh){
 function preShowTotals(sh){
   const st=preShowStockOf(sh);
   let units=0,volume=0,cogs=0;
-  SKUS.forEach(s=>{const q=parseInt(st[s.key])||0;units+=q;volume+=q*getP(s.key);cogs+=q*s.cost;});
+  SKUS.forEach(s=>{const q=parseInt(st[s.key])||0;units+=q;volume+=q*getP(s.key);cogs+=q*getCost(s.key);});
   const commission=volume*DEFAULT_COMM_RATE; // potential commission if every unit sold, at the generic rate
   return {st,units,volume,cogs,commission};
 }
@@ -3625,6 +3754,73 @@ function openManageExpenses(){
   </div>
   <div id="manageExpList" style="max-height:58vh;overflow-y:auto;-webkit-overflow-scrolling:touch">${rows}</div>
   <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="mClose()">Done</button>`);
+}
+
+// ===================================================
+// FREIGHT & SHIPPING LEDGER
+// Inbound product freight, outbound shipping, postage. A real cost — rolls into
+// Other Expenses / P&L / bottom line, but kept on its own line so you can see it.
+// ===================================================
+function secFreight(){
+  const list=[...(S.freight||[])].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const total=list.reduce((t,f)=>t+(parseFloat(f.amount)||0),0);
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let h=`<div class="card rb">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Freight &amp; Shipping — YTD</div><div style="font-size:26px;font-weight:900;color:var(--red)">${fmt(total)}</div></div>
+      <button class="btn btn-gold btn-sm" onclick="openFreight()">+ Log Freight</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted)">Counts toward your Other Expenses and the bottom line.</div>
+  </div>`;
+  if(!list.length){
+    h+=`<div class="card" style="text-align:center;padding:28px 18px;color:var(--muted)"><div style="font-size:38px;margin-bottom:8px">🚚</div><div style="font-size:13px">No freight or shipping logged yet. Tap <strong>+ Log Freight</strong> after you pay a pallet freight bill or ship an order.</div></div>`;
+    return h;
+  }
+  h+=`<div class="card">`+list.map(f=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div style="min-width:0;flex:1;cursor:pointer" onclick="openFreight('${f.id}')">
+        <div style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.desc||f.type||'Freight / Shipping')}</div>
+        <div style="font-size:10px;color:var(--muted)">${esc(f.date||'')}${f.carrier?' · '+esc(f.carrier):''}${f.type?' · '+esc(f.type):''}</div>
+      </div>
+      <div style="color:var(--red);font-weight:900;font-size:14px;white-space:nowrap">${fmt(f.amount)}</div>
+      <button class="btn btn-xs btn-ghost" title="Edit" onclick="openFreight('${f.id}')">✏️</button>
+      <button class="btn btn-xs" title="Delete" style="background:var(--redbg);border:1px solid var(--redbd);color:var(--red)" onclick="delFreight('${f.id}')">🗑️</button>
+    </div>`).join('')+`</div>`;
+  return h;
+}
+function openFreight(id){
+  if(!Array.isArray(S.freight))S.freight=[];
+  const f=id?S.freight.find(x=>x.id===id):null;
+  const esc=s=>String(s==null?'':s).replace(/"/g,'&quot;');
+  const types=['Inbound freight','Outbound shipping','Postage','Fuel surcharge','Other'];
+  const curType=f?(f.type||'Inbound freight'):'Inbound freight';
+  mOpen(`<div class="mh"><div class="mt">🚚 ${f?'Edit':'Log'} Freight / Shipping</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" id="fr_date" type="date" value="${f&&f.date?esc(f.date):_stamp()}"></div>
+  <div class="fg"><label class="fl">Type</label><select class="fi" id="fr_type">${types.map(t=>`<option value="${t}"${t===curType?' selected':''}>${t}</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">Carrier / Vendor (optional)</label><input class="fi" id="fr_carrier" type="text" value="${f?esc(f.carrier||''):''}" placeholder="e.g. FedEx Freight, USPS, supplier"></div>
+  <div class="fg"><label class="fl">Description (optional)</label><input class="fi" id="fr_desc" type="text" value="${f?esc(f.desc||''):''}" placeholder="e.g. Pallet of C5 small, inbound"></div>
+  <div class="fg"><label class="fl">Amount ($)</label><input class="fi" id="fr_amt" type="number" step="0.01" min="0" value="${f&&f.amount!=null?f.amount:''}" placeholder="0.00" onfocus="this.select()"></div>
+  <button class="btn btn-gold btn-full" onclick="saveFreight('${id||''}')">${f?'Save Changes':'Add Freight'}</button>
+  ${f?`<button class="btn btn-ghost btn-full" style="margin-top:8px;color:var(--red)" onclick="delFreight('${f.id}')">Delete</button>`:''}
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+function saveFreight(id){
+  if(!Array.isArray(S.freight))S.freight=[];
+  const amt=parseFloat(($$('fr_amt').value||'').trim());
+  if(isNaN(amt)||amt<0){toast('Enter a valid amount');return;}
+  const rec={date:($$('fr_date').value||'').trim()||_stamp(),type:($$('fr_type').value||'').trim(),carrier:($$('fr_carrier').value||'').trim(),desc:($$('fr_desc').value||'').trim(),amount:amt};
+  if(id){const f=S.freight.find(x=>x.id===id);if(f)Object.assign(f,rec);}
+  else{rec.id='fr_'+Date.now().toString(36)+Math.floor(Math.random()*1000);S.freight.push(rec);}
+  saveS();mClose();toast('✅ Freight saved');
+  if(curPg==='section')rSection();
+}
+function delFreight(id){
+  if(!confirm('Delete this freight entry?'))return;
+  S.freight=(S.freight||[]).filter(x=>x.id!==id);
+  saveS();
+  if($$('mo').classList.contains('on'))mClose();
+  toast('Deleted');
+  if(curPg==='section')rSection();
 }
 
 // ===================================================
@@ -4185,8 +4381,13 @@ function rSettings(){
   <div class="fg"><label class="fl">Paper towels per show ($)</label><input class="fi" type="number" id="st_paper" value="${paperPerShow()}" step="1" min="0" onchange="setSt('paperPerShow',parseFloat(this.value))"></div>
   <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag (2 per 5×7), 8oz/16oz/32oz = 1 bag each (C5 rides along in the polish bag). Candy + paper towels are flat per show. All auto-added to each show's expenses &amp; break-even.</div>
   </div>
+  <div class="card gb"><div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:4px">💲 COST OF GOODS (COGS)</div>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:10px">What each bottle actually costs you. Adjust the polish sizes and C5 here whenever your supplier price changes. This drives every COGS and profit number in the app.</div>
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} — cost each${(S.costs&&S.costs[s.key]!=null&&S.costs[s.key]!=='')?'':' (default)'}</label><input class="fi" type="number" id="sc_${s.key}" value="${getCost(s.key)}" step="0.01" min="0" onchange="setCost('${s.key}',this.value)"></div>`).join('')}
+  <button class="btn btn-ghost btn-sm btn-full" onclick="resetCosts()">↩︎ Reset all costs to defaults</button>
+  </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
-  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(getCost(s.key))} · margin: ${Math.round(((getP(s.key)-getCost(s.key))/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
   </div>
   <div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">🎤 PASTE CLAUDE UPDATE</div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Speak to Claude on your phone, copy the command it gives you, paste it here. Updates inventory instantly — no tapping required.</div>
@@ -4258,6 +4459,20 @@ function rSettings(){
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
 function setP(k,v){if(!S.prices)S.prices={};S.prices[k]=v;saveS();}
+
+// ---- Editable cost of goods (COGS) ----
+function setCost(k,v){if(!S.costs)S.costs={};const n=(v===''||v==null)?null:(parseFloat(v)||0);S.costs[k]=(n==null?SKUS.find(s=>s.key===k).cost:Math.max(0,n));saveS();toast('✅ Cost updated');}
+function resetCosts(){if(!confirm('Reset every product cost back to its built-in default?'))return;S.costs={};SKUS.forEach(s=>S.costs[s.key]=s.cost);saveS();toast('↩︎ Costs reset to defaults');if(curPg==='settings')rSettings();}
+function openEditCost(k){
+  const sku=SKUS.find(s=>s.key===k);if(!sku)return;
+  const cur=getCost(k);
+  mOpen(`<div class="mh"><div class="mt">💲 ${sku.name} — Cost of Goods</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">What one ${sku.short} bottle costs you. Updating this re-figures COGS and profit everywhere in the app.</div>
+  <div class="fg"><label class="fl">Cost each ($)</label><input class="fi" id="ec_cost_${k}" type="number" step="0.01" min="0" value="${cur}" onfocus="this.select()"></div>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Sell price ${fmt(getP(k))} · default cost ${fmt(sku.cost)}</div>
+  <button class="btn btn-gold btn-full" onclick="setCost('${k}',($$('ec_cost_${k}').value||'').trim());mClose();">Save Cost</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
 function applyClaudeCmd(){
   const raw=($$('claudeCmd').value||'').trim().toUpperCase();
   if(!raw){toast('Nothing to apply!');return;}
