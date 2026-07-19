@@ -46,6 +46,15 @@
 
     /* CARDS */
     .card{background:var(--card);border-radius:12px;padding:14px;margin-bottom:10px;border:1px solid var(--border)}
+    /* Collapsible section ("put things behind buttons") */
+    details.collap{background:var(--card);border-radius:12px;margin-bottom:10px;border:1px solid var(--border);overflow:hidden}
+    details.collap>summary{list-style:none;cursor:pointer;padding:13px 14px;display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;color:var(--gold)}
+    details.collap>summary::-webkit-details-marker{display:none}
+    details.collap>summary .cchev{color:var(--muted);font-weight:700;transition:transform .15s;font-size:13px}
+    details.collap[open]>summary .cchev{transform:rotate(90deg)}
+    details.collap>summary .csub{color:var(--muted);font-weight:600;text-transform:none;letter-spacing:0;margin-left:auto;margin-right:8px;font-size:11px}
+    details.collap>.collap-b{padding:0 14px 14px}
+    details.collap>.collap-b>.card{border:none;background:transparent;padding:0;margin:0}
     .card.gb{border-color:var(--goldbd)}
     .card.grb{border-color:var(--greenbd)}
     .card.rb{border-color:var(--redbd)}
@@ -1331,9 +1340,22 @@ function calcRepSalesComm(rs){
 function calcDayComm(day){ return (day.repSales||[]).reduce((t,rs)=>t+calcRepSalesComm(rs),0); }
 // Calculated commission a rep earned across a show's days (before any payout override)
 function repShowCalcComm(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=calcRepSalesComm(rs); })); return t; }
-// Effective per-show payout for a rep: a manual per-show payout override WINS, else the calculated commission.
-function repShowComm(sh,repId){ const ov=sh.repPayout&&sh.repPayout[repId]; if(ov!=null&&ov!=='')return parseFloat(ov)||0; return repShowCalcComm(sh,repId); }
-function showRepIds(sh){ const ids=new Set(); (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId)ids.add(rs.repId); })); if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids.add(k)); return [...ids]; }
+// PER-DAY payout overrides: d.repPayout[repId] = what a rep was actually paid THAT day.
+// These pin a payout to the exact day it happened (e.g. paid Andre $40 on the 17th, Les $140 on the 18th).
+function repDayOverride(sh,di,repId){ const d=(sh.days||[])[di]; const v=d&&d.repPayout&&d.repPayout[repId]; return (v!=null&&v!=='')?(parseFloat(v)||0):null; }
+function repHasDayOverride(sh,repId){ return (sh.days||[]).some(d=>d&&d.repPayout&&d.repPayout[repId]!=null&&d.repPayout[repId]!==''); }
+// A rep's payout on ONE day when per-day overrides are in play: the day's override if set, else that day's own calc.
+function repDayPayTier1(sh,di,repId){ const ov=repDayOverride(sh,di,repId); if(ov!=null)return ov; const d=(sh.days||[])[di]; return d?repDayCalcComm(d,repId):0; }
+// Effective per-show payout for a rep. Precedence:
+//   1) any PER-DAY override present ⇒ sum of each day's (day override, else that day's calc),
+//   2) else a whole-show payout override,
+//   3) else the calculated commission.
+function repShowComm(sh,repId){
+  if(repHasDayOverride(sh,repId))return (sh.days||[]).reduce((t,_,di)=>t+repDayPayTier1(sh,di,repId),0);
+  const ov=sh.repPayout&&sh.repPayout[repId]; if(ov!=null&&ov!=='')return parseFloat(ov)||0;
+  return repShowCalcComm(sh,repId);
+}
+function showRepIds(sh){ const ids=new Set(); (sh.days||[]).forEach(d=>{ (d.repSales||[]).forEach(rs=>{ if(rs.repId)ids.add(rs.repId); }); if(d.repPayout)Object.keys(d.repPayout).forEach(k=>ids.add(k)); }); if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids.add(k)); return [...ids]; }
 function calcShowComm(sh){ return showRepIds(sh).reduce((t,repId)=>t+repShowComm(sh,repId),0); }
 // ---- Flat / hourly / manual workers (e.g. Olivia paid straight cash). Not commission-based reps. ----
 // Each worker: {id,name,role,type:'flat'|'hourly'|'manual',hours,rate,amount,paid,payMethod,payNote}
@@ -1372,6 +1394,7 @@ function flatPayoutDayIndex(sh,repId){
 function dayCommEffective(sh,di){
   const d=(sh.days||[])[di]; if(!d)return 0; let total=0;
   showRepIds(sh).forEach(repId=>{
+    if(repHasDayOverride(sh,repId)){ total+=repDayPayTier1(sh,di,repId); return; } // per-day payout pins to its day
     const eff=repShowComm(sh,repId); if(!eff)return;
     const calcTot=repShowCalcComm(sh,repId);
     if(calcTot>0){ total+=eff*(repDayCalcComm(d,repId)/calcTot); return; }
@@ -2155,10 +2178,30 @@ function showOnHand(sh){
   const r={}; SKUS.forEach(s=>r[s.key]=0);
   if(!sh||sh.status!=='active')return r;            // only active shows hold stock out of the garage
   const days=sh.days||[];
-  for(let i=days.length-1;i>=0;i--){ if(days[i]&&days[i].eveningCount){ SKUS.forEach(s=>r[s.key]=parseInt(days[i].eveningCount[s.key])||0); return r; } }
-  for(let i=days.length-1;i>=0;i--){ if(days[i]&&days[i].morningCount){ SKUS.forEach(s=>r[s.key]=parseInt(days[i].morningCount[s.key])||0); return r; } }
+  // Use the latest day that has a count. Evening count = authoritative physical count (use as-is).
+  // Morning-only = day in progress ⇒ on-hand = morning + anything restocked into the booth that day
+  // (e.g. more stock brought from the garage mid-show).
+  for(let i=days.length-1;i>=0;i--){ const d=days[i]; if(!d)continue;
+    if(d.eveningCount){ SKUS.forEach(s=>r[s.key]=parseInt(d.eveningCount[s.key])||0); return r; }
+    if(d.morningCount){ const rk=d.restock||{}; SKUS.forEach(s=>r[s.key]=(parseInt(d.morningCount[s.key])||0)+(parseInt(rk[s.key])||0)); return r; }
+  }
   if(sh.packedInventory)SKUS.forEach(s=>r[s.key]=parseInt(sh.packedInventory[s.key])||0);
   return r;
+}
+// Move `qty` units of a SKU into (qty>0) or out of (qty<0) a show's on-hand, keeping the sold/COGS
+// reconciliation intact. Used by garage⇄show transfers so master stock is conserved.
+function addToShowStock(sh,sku,qty){
+  sh.packedInventory=sh.packedInventory||{};
+  sh.packedInventory[sku]=Math.max(0,(parseInt(sh.packedInventory[sku])||0)+qty); // baseline of what was brought
+  const days=sh.days||[];
+  let li=-1; for(let i=days.length-1;i>=0;i--){ if(days[i]&&(days[i].morningCount||days[i].eveningCount)){ li=i; break; } }
+  if(li<0)return;                                   // no counts yet — packed baseline is what on-hand reads
+  const d=days[li]; d.restock=d.restock||{};
+  // NET restock (brought in minus carried back out). Allowed to go negative so a transfer OUT reduces
+  // on-hand without looking like a sale: sold = morning + restock − evening stays correct either way.
+  d.restock[sku]=(parseInt(d.restock[sku])||0)+qty;
+  // if the day is already closed out (has an evening count), move it too so sold stays unchanged and on-hand shifts
+  if(d.eveningCount)d.eveningCount[sku]=Math.max(0,(parseInt(d.eveningCount[sku])||0)+qty);
 }
 function activeStockShows(){ return (S.shows||[]).filter(s=>s.status==='active'); }
 function atShowsInv(){ const r={}; SKUS.forEach(s=>r[s.key]=0); activeStockShows().forEach(sh=>{ const o=showOnHand(sh); SKUS.forEach(s=>r[s.key]+=(o[s.key]||0)); }); return r; }
@@ -2216,7 +2259,7 @@ function rStock(){
   // ---- IN GARAGE — editable ----
   h+=`<div class="sec-lbl">🏠 IN GARAGE · tap to adjust</div>`;
   h+=`<div style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock Between Shows</button>
+    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('GARAGE')">🔄 Transfer Garage ⇄ Show</button>
   </div>`;
   h+=`${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
@@ -2993,45 +3036,47 @@ function delDiscount(shId,id){
 // NOT a sale; never touches day counts, payments, revenue, or units-sold.
 // ===================================================
 function transferableShows(){ return (S.shows||[]).filter(s=>s.status==='active'||s.status==='planned'); }
-function openTransferModal(presetFromId){
-  const shows=transferableShows();
-  if(shows.length<2){ toast('Need 2+ active/planned shows to transfer between'); return; }
-  const from=presetFromId&&shows.find(s=>s.id===presetFromId)?presetFromId:shows[0].id;
-  const toDefault=(shows.find(s=>s.id!==from)||{}).id;
-  const opt=(sel)=>shows.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}${s.status==='active'?' 🔴':''}</option>`).join('');
-  mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock Between Shows</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Moves packed units from one show to another (e.g. one booth ran out). This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
+// Transfer nodes = the Garage (home stock) plus every active/planned show. Garage uses the sentinel id 'GARAGE'.
+function transferNodes(){ return [{id:'GARAGE',name:'🏠 Garage (home stock)'}].concat(transferableShows().map(s=>({id:s.id,name:s.name+(s.status==='active'?' 🔴':'')}))); }
+function transferNodeName(id){ if(id==='GARAGE')return 'Garage'; const s=(S.shows||[]).find(x=>x.id===id); return s?s.name:id; }
+function transferNodeOnHand(id,sku){ if(id==='GARAGE')return parseInt((S.inventory||{})[sku])||0; const s=(S.shows||[]).find(x=>x.id===id); return s?(showOnHand(s)[sku]||0):0; }
+// Apply a stock delta to a node (Garage or a show). +qty adds, −qty removes. Conserves master when paired.
+function transferApply(id,sku,qty){ if(id==='GARAGE'){ S.inventory=S.inventory||{}; S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)+qty); return; } const s=(S.shows||[]).find(x=>x.id===id); if(s)addToShowStock(s,sku,qty); }
+function openTransferModal(presetFromId,presetToId){
+  const nodes=transferNodes();
+  if(nodes.length<2){ toast('Need the garage plus a show (or two shows) to transfer between'); return; }
+  const from=presetFromId&&nodes.find(n=>n.id===presetFromId)?presetFromId:'GARAGE';
+  const toDefault=(presetToId&&presetToId!==from&&nodes.find(n=>n.id===presetToId))?presetToId:(nodes.find(n=>n.id!==from)||{}).id;
+  const opt=(sel)=>nodes.map(n=>`<option value="${n.id}"${n.id===sel?' selected':''}>${n.name}</option>`).join('');
+  mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Move units between your <b>garage</b> and a <b>show</b>, or between two shows (e.g. you carried 10 more from home to a booth). This is NOT a sale — revenue, units sold, and rep totals are untouched. Master stock stays the same; it just changes location.</div>
   <div class="fg"><label class="fl">Product</label><select class="fi" id="tr_sku">${SKUS.map(s=>`<option value="${s.key}">${s.name}</option>`).join('')}</select></div>
   <div class="fg"><label class="fl">Quantity</label><input class="fi" type="number" id="tr_qty" placeholder="0" min="1" step="1" inputmode="numeric"></div>
-  <div class="fg"><label class="fl">From Show</label><select class="fi" id="tr_from">${opt(from)}</select></div>
-  <div class="fg"><label class="fl">To Show</label><select class="fi" id="tr_to">${opt(toDefault)}</select></div>
+  <div class="fg"><label class="fl">From</label><select class="fi" id="tr_from">${opt(from)}</select></div>
+  <div class="fg"><label class="fl">To</label><select class="fi" id="tr_to">${opt(toDefault)}</select></div>
   <button class="btn btn-gold btn-full" onclick="saveTransfer()">✅ Transfer</button>`);
 }
 function saveTransfer(){
   const sku=$$('tr_sku').value, qty=parseInt($$('tr_qty').value)||0;
   const fromId=$$('tr_from').value, toId=$$('tr_to').value;
   if(qty<=0){toast('Enter a quantity');return;}
-  if(fromId===toId){toast('Pick two different shows');return;}
-  const from=S.shows.find(s=>s.id===fromId), to=S.shows.find(s=>s.id===toId);
-  if(!from||!to){toast('Show not found');return;}
-  from.packedInventory=from.packedInventory||{}; to.packedInventory=to.packedInventory||{};
-  const avail=from.packedInventory[sku]||0;
-  if(qty>avail&&!confirm(`${from.name} only shows ${avail} packed. Transfer anyway?`))return;
-  from.packedInventory[sku]=(from.packedInventory[sku]||0)-qty;
-  to.packedInventory[sku]=(to.packedInventory[sku]||0)+qty;
+  if(fromId===toId){toast('Pick two different places');return;}
+  const avail=transferNodeOnHand(fromId,sku);
+  if(qty>avail&&!confirm(`${transferNodeName(fromId)} only shows ${avail}. Transfer anyway?`))return;
+  transferApply(fromId,sku,-qty);
+  transferApply(toId,sku,qty);
   if(!S.transfers)S.transfers=[];
-  S.transfers.push({id:'tr_'+Date.now(),ts:new Date().toISOString(),date:new Date().toISOString().split('T')[0],sku,qty,fromShowId:fromId,fromName:from.name,toShowId:toId,toName:to.name});
+  S.transfers.push({id:'tr_'+Date.now(),ts:new Date().toISOString(),date:new Date().toISOString().split('T')[0],sku,qty,fromShowId:fromId,fromName:transferNodeName(fromId),toShowId:toId,toName:transferNodeName(toId)});
   mClose();saveS();
   const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
-  toast(`🔄 Moved ${qty} ${sName}: ${from.name} → ${to.name}`);
+  toast(`🔄 Moved ${qty} ${sName}: ${transferNodeName(fromId)} → ${transferNodeName(toId)}`);
 }
 function delTransfer(id){
   if(!S.transfers)return;
   const tr=S.transfers.find(x=>x.id===id);if(!tr)return;
   if(!confirm('Undo this transfer? Units move back from '+tr.toName+' to '+tr.fromName+'.'))return;
-  const from=S.shows.find(s=>s.id===tr.fromShowId), to=S.shows.find(s=>s.id===tr.toShowId);
-  if(from){from.packedInventory=from.packedInventory||{};from.packedInventory[tr.sku]=(from.packedInventory[tr.sku]||0)+tr.qty;}
-  if(to){to.packedInventory=to.packedInventory||{};to.packedInventory[tr.sku]=(to.packedInventory[tr.sku]||0)-tr.qty;}
+  transferApply(tr.toShowId,tr.sku,-tr.qty);   // pull back out of the destination
+  transferApply(tr.fromShowId,tr.sku,tr.qty);  // return to the source
   S.transfers=S.transfers.filter(x=>x.id!==id);
   saveS();toast('Transfer undone');
 }
@@ -3198,7 +3243,7 @@ function rShow(){
     ${(sh.discounts||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">${[...(sh.discounts||[])].slice().reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0"><span style="color:var(--muted);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.note||'(no note)'} <span style="opacity:.6">${x.date||''}</span></span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--red);font-weight:700">-${fmt(x.amount)}</span><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delDiscount('${sh.id}','${x.id}')">✕</span></span></div>`).join('')}</div>`:''}
   </div>
   ${actBtn}
-  ${(sh.status==='active'||sh.status==='planned')?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock to/from Another Show</button>`:''}
+  ${(sh.status==='active'||sh.status==='planned')?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('GARAGE','${sh.id}')">🔄 Transfer Stock (garage or another show)</button>`:''}
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
@@ -3206,11 +3251,9 @@ function rShow(){
   ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
   ${sh.status!=='planned'?(()=>{
     const st=invStatus(sh),meta=invStatusMeta(st),carry=invCarryIssues(sh),neg=invNegativeSold(sh),unres=invUnresolved(sh);
-    let h=`<div class="card" style="margin-top:12px;border-color:${meta.c}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">📦 Daily Inventory Reconciliation</div>
-        <span style="font-size:11px;font-weight:800;color:${meta.c}">${meta.i} ${meta.l}</span>
-      </div>`;
+    // collapsed by default, but auto-open when there's a mismatch worth the owner's attention
+    let h=`<details class="collap"${st==='red'?' open':''} style="border-color:${meta.c}"><summary style="color:${meta.c}">📦 Daily Inventory <span class="csub">${meta.i} ${meta.l}</span><span class="cchev">▸</span></summary>
+    <div class="collap-b"><div class="card" style="margin-top:0;border:none;background:transparent;padding:0">`;
     if(unres.length||neg.length){ h+=`<div class="wb" style="background:var(--redbg);border:1px solid var(--redbd);color:#ffb3b3;margin-bottom:8px"><strong>⚠️ Inventory mismatch detected.</strong> Review before you trust these numbers.</div>`; }
     h+=(sh.days||[]).map((d,i)=>{
       const hasM=!!d.morningCount,hasE=!!d.eveningCount;
@@ -3225,7 +3268,7 @@ function rShow(){
       const tag=rowBad?'<span style="color:var(--red)">🔴 mismatch</span>':(dayCarry.length?'<span style="color:var(--gold)">🟡 overridden</span>':((hasM&&hasE)?'<span style="color:var(--green)">🟢 ok</span>':'<span style="color:var(--muted)">—</span>'));
       let r=`<div style="padding:6px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700"><span>${d.date||('Day '+(i+1))}${d.locked?' 🔒':''}</span>${tag}</div>
-        <div style="font-size:11px;color:var(--muted)">Opening ${openT==null?'—':openT}${restockT?' + Restock '+restockT:''} − Sold ${soldT==null?'—':soldT}${lostT?' − Lost/Damaged '+lostT:''} = Ending ${endT==null?'—':endT}${lostT?` <span style="opacity:.7">(lost units still count as COGS)</span>`:''}${d.carryReason?` · note: ${(''+d.carryReason).replace(/</g,'&lt;')}`:''}</div>`;
+        <div style="font-size:11px;color:var(--muted)">Opening ${openT==null?'—':openT}${restockT?(restockT>0?' + Restock '+restockT:' − Moved out '+(-restockT)):''} − Sold ${soldT==null?'—':soldT}${lostT?' − Lost/Damaged '+lostT:''} = Ending ${endT==null?'—':endT}${lostT?` <span style="opacity:.7">(lost units still count as COGS)</span>`:''}${d.carryReason?` · note: ${(''+d.carryReason).replace(/</g,'&lt;')}`:''}</div>`;
       if(dayCarry.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Opening ≠ last night ending: ${dayCarry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>
         <div style="display:flex;gap:6px;margin-top:4px"><button class="btn btn-xs btn-ghost" onclick="fixCarryFromPrev('${sh.id}',${i})">↩︎ Reset to last night</button><button class="btn btn-xs btn-ghost" onclick="reconcileCarry('${sh.id}',${i})">✓ Explain / keep</button></div>`; }
       if(dayNeg.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Ending &gt; opening (impossible sale — restock or fix): ${dayNeg.map(m=>m.short+' '+m.morn+'→'+m.eve).join(', ')}</div>`; }
@@ -3233,11 +3276,11 @@ function rShow(){
       return r+`</div>`;
     }).join('');
     if((sh.invLog||[]).length){ h+=`<details style="margin-top:8px"><summary style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;cursor:pointer">🧾 Change log (${sh.invLog.length})</summary><div style="margin-top:6px">${sh.invLog.slice(-15).reverse().map(e=>`<div style="font-size:10px;color:var(--muted);padding:2px 0">${(e.ts||'').replace('T',' ').slice(0,16)} · ${e.type} ${e.date||''} — ${((e.changes||[]).join(', ')).replace(/</g,'&lt;')}</div>`).join('')}</div></details>`; }
-    return h+`</div>`;
+    return h+`</div></div></details>`;
   })():''}
-  <div class="card" style="margin-top:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">SHOW DETAILS</div>
+  <details class="collap"><summary>Show Details <span class="csub">booth · miles · gas · tax</span><span class="cchev">▸</span></summary>
+  <div class="collap-b">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
       <button class="btn btn-xs" style="background:rgba(255,215,0,0.15);border:1px solid var(--goldbd);color:var(--gold)" onclick="showEditCosts('${sh.id}')">✏️ Edit Show</button>
     </div>
     <div class="sr"><span class="srl">Booth Cost</span><span class="srv">${fmt(sh.boothCost||0)}</span></div>
@@ -3248,16 +3291,16 @@ function rShow(){
     <div class="sr"><span class="srl">Gas Cost${(sh.gasOverride!=null&&sh.gasOverride!=='')?' (manual)':' (est.)'}</span><span class="srv">${fmt(showGas(sh))}</span></div>
     <div class="sr"><span class="srl">Lodging / Hotel</span><span class="srv">${fmt(sh.lodging||0)}</span></div>
     <div class="sr"><span class="srl">Tax Rate</span><span class="srv">${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?'':' (global)'}</span></div>
-  </div>
-  <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700">💸 OTHER EXPENSES</div>
+  </div></details>
+  <details class="collap"${(sh.showExpenses||[]).length?' open':''}><summary style="color:#FFA500">Other Expenses <span class="csub">${(sh.showExpenses||[]).length?'-'+fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0)):'none yet'}</span><span class="cchev">▸</span></summary>
+  <div class="collap-b">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
       <button class="btn btn-xs" style="background:rgba(255,165,0,0.15);border:1px solid rgba(255,165,0,0.4);color:#FFA500" onclick="showShowExpModal('${sh.id}')">+ Add</button>
     </div>
     ${(sh.showExpenses||[]).length===0?`<div style="font-size:12px;color:var(--muted)">No expenses logged yet. Tap + Add to log fuel, hotel, flights, supplies, etc.</div>`:`
     ${(sh.showExpenses||[]).map(e=>{const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};return`<div class="sr"><span class="srl">${cat.icon} ${cat.label}${e.desc?' — '+e.desc:''}</span><span class="srv red">-${fmt(e.amount)}</span></div>`;}).join('')}
     <div class="sr" style="border-top:1px solid rgba(255,165,0,0.2);margin-top:4px"><span class="srl b">Total Other Expenses</span><span class="srv red lg">-${fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0))}</span></div>`}
-  </div>
+  </div></details>
   ${(()=>{
     const allReps=(S.reps||[]).filter(r=>r.active);
     const assignedIds=sh.repIds||[];
@@ -3275,8 +3318,9 @@ function rShow(){
       ${assigned.length===0?`<div style="font-size:12px;color:var(--muted)">No reps assigned. Tap Edit to assign reps to this show.</div>`:`
       ${assigned.map(r=>{
         const calc=repShowCalcComm(sh,r.id);          // calculated commission (formula)
-        const ov=sh.repPayout&&sh.repPayout[r.id]; const hasOv=ov!=null&&ov!=='';
-        const actual=repShowComm(sh,r.id);            // actual payout = override if set, else calc
+        const _hasDayOv=repHasDayOverride(sh,r.id);
+        const ov=sh.repPayout&&sh.repPayout[r.id]; const hasOv=_hasDayOv||(ov!=null&&ov!=='');
+        const actual=repShowComm(sh,r.id);            // actual payout = override(s) if set, else calc
         const paid=repPaid(r.id,sh.id);
         const owed=Math.max(0,actual-paid);
         const _hrs=(sh.repHours&&sh.repHours[r.id]!=null)?(parseFloat(sh.repHours[r.id])||0):null;
@@ -3289,7 +3333,7 @@ function rShow(){
           <div style="text-align:right;display:flex;align-items:flex-start;gap:8px">
             <div>
             ${r.isSelf?'<div style="color:var(--muted)">Owner — paid by profit</div>':`
-              ${(calc>0||hasOv)?`<div style="color:var(--muted);font-size:10px">Calc: ${fmt(calc)}${hasOv?` · <span style="color:var(--gold)">Override: ${fmt(parseFloat(ov)||0)}</span>`:''}</div>
+              ${(calc>0||hasOv)?`<div style="color:var(--muted);font-size:10px">Calc: ${fmt(calc)}${hasOv?` · <span style="color:var(--gold)">${_hasDayOv?'Paid (by day)':'Override'}: ${fmt(actual)}</span>`:''}</div>
               <div style="color:var(--red);font-weight:700">Payout: ${fmt(actual)}</div>
               ${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid ${fmt(paid)}</div>`}`:'<div style="color:var(--muted)">No sales yet</div>'}`}
             </div>
@@ -3299,18 +3343,20 @@ function rShow(){
       ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800">
         <span>Total Commissions / Payouts</span><span style="color:var(--red)">-${fmt(showComm)}</span>
       </div>`:''}
-      ${assigned.filter(r=>!r.isSelf).length?`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">🔒 Commission Detail (manager) — per-rep rates</div>
+      ${assigned.filter(r=>!r.isSelf).length?`<details style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px">
+        <summary style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px;cursor:pointer;list-style:none">🔒 Commission Detail (manager) — tap to show math</summary>
         ${assigned.filter(r=>!r.isSelf).map(r=>{
           const rt=repCommRates(r);
           let cash=0,cardElec=0;
           (sh.days||[]).forEach(d=>{(d.repSales||[]).forEach(rs=>{ if(rs.repId===r.id){ PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0; if(CASH_COMM_KEYS.includes(p.key))cash+=v; else cardElec+=v;}); } }); });
           const autoC=cash*rt.cash+cardElec*rt.card;
-          const ov=sh.repPayout&&sh.repPayout[r.id]; const hasOv=ov!=null&&ov!=='';
+          const hasDayOv=repHasDayOverride(sh,r.id);
+          const ov=sh.repPayout&&sh.repPayout[r.id]; const hasOv=hasDayOv||(ov!=null&&ov!=='');
+          const payoutVal=repShowComm(sh,r.id);
           if(cash===0&&cardElec===0&&!hasOv)return'';
-          return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(hasOv?(parseFloat(ov)||0):autoC)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×${Math.round(rt.cash*100)}% = ${fmt(cash*rt.cash)} · Card/Elec ${fmt(cardElec)}×${Math.round(rt.card*100)}% = ${fmt(cardElec*rt.card)}${hasOv?` · <b style="color:var(--gold)">manual payout ${fmt(parseFloat(ov)||0)}</b>`:''}</div></div>`;
+          return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(hasOv?payoutVal:autoC)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×${Math.round(rt.cash*100)}% = ${fmt(cash*rt.cash)} · Card/Elec ${fmt(cardElec)}×${Math.round(rt.card*100)}% = ${fmt(cardElec*rt.card)}${hasOv?` · <b style="color:var(--gold)">manual payout ${fmt(payoutVal)}${hasDayOv?' (by day)':''}</b>`:''}</div></div>`;
         }).join('')}
-      </div>`:''}`}
+      </details>`:''}`}
       ${(()=>{
         const ws=sh.workers||[];
         let h=`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px">
@@ -3344,8 +3390,9 @@ function rShow(){
     const bagN=showBagCount(sh); const bagC=showBagCost(sh);
     const flatOn=!(typeof isMissed==='function'&&isMissed(sh));
     const candyC=flatOn?candyPerShow():0; const paperC=flatOn?paperPerShow():0;
-    return `<div class="card" style="margin-top:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🧴 Supplies Used</div><button class="btn btn-xs btn-ghost" onclick="openSupplyUse('${sh.id}')">✏️ Edit</button></div>
+    return `<details class="collap"><summary>🧴 Supplies Used <span class="csub">${sc>0?'-'+fmt(sc):'—'}</span><span class="cchev">▸</span></summary>
+      <div class="collap-b">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn btn-xs btn-ghost" onclick="openSupplyUse('${sh.id}')">✏️ Edit</button></div>
       ${(bagN||candyC||paperC)?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Bags &amp; overhead</div>
         ${bagN?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Lace bags × ${bagN} <span style="color:var(--muted)">@ ${fmt(bagUnitCost())}</span></span><span style="color:var(--muted)">${fmt(bagC)}</span></div>`:''}
         ${candyC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Candy (flat)</span><span style="color:var(--muted)">${fmt(candyC)}</span></div>`:''}
@@ -3353,7 +3400,7 @@ function rShow(){
       ${autoRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Auto give-aways (from sales)</div>${autoRows}`:''}
       ${manRows?`<div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Manual</div>${manRows}`:''}
       ${sc>0?`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`:'<div style="font-size:12px;color:var(--muted)">No supply cost yet.</div>'}
-    </div>`;
+    </div></details>`;
   })()}
   ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
   <div style="height:10px"></div>`;
@@ -4257,13 +4304,17 @@ function openEditPayout(shId,repId){
   const meta=(sh.repPayMeta&&sh.repPayMeta[repId])||{};
   const paidThis=repPaid(repId,sh.id);
   const methodOpts=['','Cash','Square','Debit','Venmo','Zelle','Cash App','PayPal','Check','Other'].map(m=>`<option value="${m}"${meta.method===m?' selected':''}>${m||'— select —'}</option>`).join('');
+  // Day selector: pin this payout to a specific day (e.g. paid Andre on the 17th). Blank = whole show.
+  const dayOpts=`<option value="">Whole show</option>`+(sh.days||[]).map((d,i)=>`<option value="${i}">${(d.date||('Day '+(i+1)))}</option>`).join('');
+  const _ovMap={'':(cur!==''?cur:'')}; (sh.days||[]).forEach((d,i)=>{ const dv=d.repPayout&&d.repPayout[repId]; _ovMap[i]=(dv!=null&&dv!=='')?dv:''; });
   mOpen(`<div class="mh"><div class="mt">💵 Payout — ${rep.name}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name}</div>
   <div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px">
     Calculated commission (formula): <strong style="color:var(--gold)">${fmt(auto)}</strong><br>
     <span style="color:var(--muted)">The override below is what you ACTUALLY paid. It never erases the calculated number — both are kept and shown.</span>
   </div>
-  <div class="fg"><label class="fl">Actual payout override for this show ($) — blank = use calculated</label><input class="fi" type="number" id="ep_amt" step="0.01" min="0" value="${cur}" placeholder="${auto.toFixed(2)}"></div>
+  <div class="fg"><label class="fl">Which day was this paid? (pins it to that day's numbers)</label><select class="fi" id="ep_day" onchange="var m=${JSON.stringify(_ovMap)};var a=document.getElementById('ep_amt');a.value=(m[this.value]!=null?m[this.value]:'');">${dayOpts}</select></div>
+  <div class="fg"><label class="fl">Actual payout override ($) — blank = use calculated</label><input class="fi" type="number" id="ep_amt" step="0.01" min="0" value="${cur}" placeholder="${auto.toFixed(2)}"></div>
   <div class="fg"><label class="fl">Payment method used to pay the rep</label><select class="fi" id="ep_method">${methodOpts}</select></div>
   <div class="fg"><label class="fl">Payout note (optional)</label><input class="fi" id="ep_note" value="${(meta.note||'').replace(/"/g,'&quot;')}" placeholder="e.g. paid cash same night, included $20 gas"></div>
   <div class="fg"><label class="fl">Log a payment now (optional) — $ paid this show</label><input class="fi" type="number" id="ep_paid" step="0.01" min="0" placeholder="0.00"></div>
@@ -4275,21 +4326,33 @@ function saveEditPayout(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const rep=(S.reps||[]).find(r=>r.id===repId);
   const raw=($$('ep_amt')||{}).value;
-  if(!sh.repPayout)sh.repPayout={};
-  if(raw==null||raw==='')delete sh.repPayout[repId];
-  else sh.repPayout[repId]=parseFloat(raw)||0;
+  const dayRaw=($$('ep_day')||{}).value;
+  const dayIdx=(dayRaw==null||dayRaw==='')?null:parseInt(dayRaw);
+  if(dayIdx==null){
+    // whole-show override
+    if(!sh.repPayout)sh.repPayout={};
+    if(raw==null||raw==='')delete sh.repPayout[repId];
+    else sh.repPayout[repId]=parseFloat(raw)||0;
+  } else {
+    // per-day override — pins the payout to that exact day
+    const d=(sh.days||[])[dayIdx];
+    if(d){ if(!d.repPayout)d.repPayout={}; if(raw==null||raw==='')delete d.repPayout[repId]; else d.repPayout[repId]=parseFloat(raw)||0; }
+    // a per-day override supersedes any lingering whole-show override for this rep (avoid double counting)
+    if(sh.repPayout&&sh.repPayout[repId]!=null)delete sh.repPayout[repId];
+  }
   // payment method + note (per show), preserved separately from the calculated commission
   if(!sh.repPayMeta)sh.repPayMeta={};
   const method=($$('ep_method')||{}).value||''; const note=(($$('ep_note')||{}).value||'').trim();
   if(method||note)sh.repPayMeta[repId]={method,note}; else delete sh.repPayMeta[repId];
-  // optional: log an actual payment attributed to this show
+  // optional: log an actual payment attributed to this show (dated to the chosen day when one was picked)
   const paid=parseFloat(($$('ep_paid')||{}).value);
-  if(paid&&paid>0&&rep){ if(!rep.payments)rep.payments=[]; rep.payments.push({id:'rp_'+Date.now(),date:new Date().toISOString().split('T')[0],amount:paid,note:note||('Payout — '+sh.name),method,showId:sh.id}); }
+  if(paid&&paid>0&&rep){ if(!rep.payments)rep.payments=[]; const payDate=(dayIdx!=null&&(sh.days||[])[dayIdx]&&sh.days[dayIdx].date)?sh.days[dayIdx].date:new Date().toISOString().split('T')[0]; rep.payments.push({id:'rp_'+Date.now(),date:payDate,amount:paid,note:note||('Payout — '+sh.name),method,showId:sh.id}); }
   mClose();saveS();toast('✅ Payout saved');renderCur();
 }
 function clearEditPayout(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   if(sh.repPayout)delete sh.repPayout[repId];
+  (sh.days||[]).forEach(d=>{ if(d.repPayout)delete d.repPayout[repId]; }); // clear any per-day overrides too
   mClose();saveS();toast('Override cleared — using calculated');renderCur();
 }
 // ---- Flat / hourly / manual workers (non-commission, e.g. Olivia paid straight cash) ----
