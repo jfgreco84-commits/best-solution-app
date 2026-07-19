@@ -1348,18 +1348,35 @@ function showLaborTotal(sh){ return calcShowComm(sh)+showWorkerPayouts(sh); }
 function repShowSales(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=PMTS.reduce((a,p)=>a+(parseFloat(rs[p.key])||0),0); })); return t; }
 // A rep's CALCULATED commission on one day (before any override)
 function repDayCalcComm(d,repId){ let t=0; (d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=calcRepSalesComm(rs); }); return t; }
-// Effective commission for a DAY: each rep's per-show payout split across days by that day's share of the rep's sales/comm.
-// No override ⇒ equals the day's calculated comm. With override ⇒ days sum to the payout (matches calcShowComm).
+// For a FLAT payout/bonus with no daily sales to split on (e.g. cash handed to a rep who logged no
+// sales), pick the ONE day it actually happened so it books as a real cash line on that day instead of
+// being smeared a few dollars across every day of the show.
+//   1) the show day matching a dated payout logged for this rep (truest signal — you told the app when),
+//   2) else the furthest-along day that has a count (where you are now / settle-up day),
+//   3) else day 0.
+function flatPayoutDayIndex(sh,repId){
+  const days=sh.days||[]; if(!days.length)return 0;
+  const rep=(S.reps||[]).find(r=>r.id===repId);
+  const showDates=getShowDates(sh);
+  if(rep&&rep.payments&&showDates.length){
+    const pays=(rep.payments||[]).filter(p=>p.showId===sh.id&&p.date).sort((a,b)=>a.date<b.date?1:-1); // latest first
+    for(const p of pays){ const idx=showDates.indexOf(p.date); if(idx>=0&&days[idx])return idx; }
+  }
+  for(let i=days.length-1;i>=0;i--){ if(days[i]&&(days[i].eveningCount||days[i].morningCount))return i; }
+  return 0;
+}
+// Effective commission/payout for a DAY: each rep's per-show payout split across days by that day's share
+// of the rep's sales/comm. No override ⇒ equals the day's calculated comm. Override that tracks sales ⇒
+// split by sales day. FLAT override with no sales basis ⇒ booked whole to its actual pay day (above).
+// Either way, the days always sum to the rep's per-show payout (matches calcShowComm) — no cash lost.
 function dayCommEffective(sh,di){
   const d=(sh.days||[])[di]; if(!d)return 0; let total=0;
   showRepIds(sh).forEach(repId=>{
     const eff=repShowComm(sh,repId); if(!eff)return;
     const calcTot=repShowCalcComm(sh,repId);
     if(calcTot>0){ total+=eff*(repDayCalcComm(d,repId)/calcTot); return; }
-    const days=(sh.days||[]);
-    const selling=days.filter(x=>(x.repSales||[]).some(rs=>rs.repId===repId&&PMTS.some(p=>(parseFloat(rs[p.key])||0)>0)));
-    const pool=selling.length?selling:days;
-    if(pool.indexOf(d)>=0)total+=eff/pool.length;
+    // no daily sales basis to split on — book the whole payout to the single day it happened
+    if(di===flatPayoutDayIndex(sh,repId))total+=eff;
   });
   return total;
 }
@@ -3414,7 +3431,7 @@ function rDay(sh,di){
   const pmtT=calcPmt(d.payments||{});
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
-  const dayComm=dayCommEffective(sh,di); // reflects MANUAL payout overrides (split across days), not just the cash/card calc
+  const dayComm=dayCommEffective(sh,di); // reflects MANUAL payout overrides; flat cash bonuses book to their actual pay day
   const dayLoss=Math.max(0,rev-pmtT); // potential not collected (discounts/freebies/shortfall)
   const profit=pmtT-cogs-dayExp-bpd-dayComm; // net is REAL CASH: money collected minus this day's costs
   const taxRes=Math.max(0,profit*showTaxRate(sh));
@@ -3467,7 +3484,7 @@ function rDay(sh,di){
     <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv red">-${fmt(cogs)}</span></div>
     <div class="sr"><span class="srl">Day Expenses</span><span class="srv red">-${fmt(dayExp)}</span></div>
     <div class="sr"><span class="srl">Booth Share</span><span class="srv red">-${fmt(bpd)}</span></div>
-    ${dayComm>0?`<div class="sr"><span class="srl">Rep Commissions</span><span class="srv red">-${fmt(dayComm)}</span></div>`:''}
+    ${dayComm>0?`<div class="sr"><span class="srl">Rep Commissions / Payouts</span><span class="srv red">-${fmt(dayComm)}</span></div>`:''}
     <div class="sr"><span class="srl b">Net Profit (cash)</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve (${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?' · show rate':''})</span><span class="srv red">-${fmt(taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
