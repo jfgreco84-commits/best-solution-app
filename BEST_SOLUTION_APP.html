@@ -273,13 +273,10 @@ const SKUS=[
 // COMM_CARD / COMM_CASH below are the TAX-base rates only (PMTS[].commRate). Do not repurpose for rep commission.
 const COMM_CARD = 0.30;
 const COMM_CASH = 0.35;
-// ----- Rep commission engine (2026 matrix) -----
-// Two buckets: DIRECT (cash + Venmo + PayPal + Cash App + Zelle) and CARD (Square + Credit + Debit).
-// Per-rep rates live on rep.commCash (DIRECT) and rep.commCard (CARD); blank falls back to DEFAULT_COMM_RATE.
-// Matrix: Isaiah 40/40 · Anthony 40 direct / 30 card · everyone else 30/30.
-const DEFAULT_COMM_RATE = 0.30;
-const CASH_COMM_KEYS = ['cash','venmo','paypal','cashapp','zelle'];
-function commRateForKey(key){ return CASH_COMM_KEYS.includes(key) ? DEFAULT_COMM_RATE : DEFAULT_COMM_RATE; } // generic default label only; per-rep uses repRateForMethod()
+// ----- Rep pay (Jul 2026 overhaul) -----
+// Commission percentages are GONE. Reps are paid a flat dollar amount PER DAY, entered daily on the
+// day screen. Stored as day.repPay = { repId: $ }. Legacy per-show payouts (sh.repPayout) from the old
+// commission system still count toward what a rep earned, so old shows and logged payments reconcile.
 const PMTS=[
   {key:'cash',   label:'Cash',    icon:'💵',color:'#00D26A', commRate:COMM_CASH},
   {key:'square', label:'Square',  icon:'⬛',color:'#4FC3F7', commRate:COMM_CARD},
@@ -867,7 +864,7 @@ function applyOneTimeUpdates(d){
   // Add Dave to the rep roster (Jul 2026) — standard 30/30 commission
   if(!d._applied['reps_add_dave_v1']){
     if(!d.reps)d.reps=[];
-    if(!d.reps.find(x=>x.id==='rep_dave'))d.reps.push({id:'rep_dave', name:'Dave', isSelf:false, active:true, payments:[], commCash:0.30, commCard:0.30});
+    if(!d.reps.find(x=>x.id==='rep_dave'))d.reps.push({id:'rep_dave', name:'Dave', isSelf:false, active:true, payments:[]});
     d._applied['reps_add_dave_v1']=true;
   }
   // Add repIds + repOnlyShow fields to all shows that don't have them
@@ -1029,17 +1026,13 @@ function applyOneTimeUpdates(d){
     d._applied['audit_2026_0614_v1']=true;
   }
 
-  // ===== Commission matrix (2026) — set explicit per-rep DIRECT/CARD rates =====
-  // Isaiah 40% all · Anthony 40% direct (cash/Venmo/PayPal/Cash App/Zelle) & 30% card (Square/Credit/Debit) · everyone else 30/30.
-  if(!d._applied['commission_matrix_v1']){
-    (d.reps||[]).forEach(r=>{
-      if(r.isSelf)return; // owner earns show profit, not commission
-      const nm=(r.name||'').toLowerCase();
-      if(r.id==='rep_isaiah'||nm.includes('isaiah')){ r.commCash=0.40; r.commCard=0.40; }
-      else if(r.id==='rep_anthony'||nm.includes('anthony')){ r.commCash=0.40; r.commCard=0.30; }
-      else { r.commCash=0.30; r.commCard=0.30; }
-    });
-    d._applied['commission_matrix_v1']=true;
+
+  // ===== Jul 2026 — PER-DAY PAY overhaul. Commission percentages are gone. =====
+  // Strip old rate fields from reps and make sure every day can hold day pay entries.
+  if(!d._applied['day_pay_v1']){
+    (d.reps||[]).forEach(r=>{ delete r.commCash; delete r.commCard; });
+    (d.shows||[]).forEach(sh=>(sh.days||[]).forEach(day=>{ if(!day.repPay)day.repPay={}; }));
+    d._applied['day_pay_v1']=true;
   }
 }
 
@@ -1051,7 +1044,7 @@ function buildPlannedShow(e){
     dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
   }
   const days=[];
-  for(let i=0;i<e.numDays;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'});
+  for(let i=0;i<e.numDays;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],repPay:{},notes:'',status:'open'});
   return{
     id:'sh_auto_'+e.name.replace(/[^a-z0-9]/gi,'').toLowerCase().substring(0,20)+'_'+Date.now()+Math.floor(Math.random()*1000),
     name:e.name,location:e.location||'',numDays:e.numDays,dates,startDate:e.startDate,
@@ -1120,9 +1113,9 @@ function calcShow(sh){
   exp+=(sh.lodging||0);
   const supplyCost=(typeof showSupplyCost==='function')?showSupplyCost(sh):0; // auto bags + manual supplies (0 until costs entered)
   exp+=supplyCost;
-  // Rep commissions — honors per-show payout overrides; owner's comp = net profit
-  const commissions=calcShowComm(sh);
-  exp+=commissions;
+  // Rep pay — per-day amounts entered daily (legacy per-show payouts still honored); owner's comp = net profit
+  const repPay=showRepPayTotal(sh);
+  exp+=repPay;
   // Flat / hourly / manual workers (e.g. Olivia paid straight cash) — real labor cost against profit
   const workerPay=showWorkerPayouts(sh);
   exp+=workerPay;
@@ -1130,7 +1123,7 @@ function calcShow(sh){
   const gross=(typeof showActualRev==='function')?showActualRev(sh):0;
   const profit=gross-cogs-exp;
   const taxRes=Math.max(0,profit)*showTaxRate(sh); // tax reserve = % of NET PROFIT (not gross, not card sales)
-  return{gross,cogs,expenses:exp,commissions,workerPay,supplyCost,potential,profit,taxRes};
+  return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,potential,profit,taxRes};
 }
 // ---- Revenue: Potential vs Actual vs Discounts (Change 2) ----
 // Potential = units sold x full price (same basis as calcShow().gross).
@@ -1209,7 +1202,7 @@ function bestShowCardHTML(sh,label){
       <div style="text-align:center"><div style="font-size:14px;font-weight:900">${fmt(sh.boothCost||0)}</div><div style="font-size:9px;color:var(--muted)">BOOTH</div></div>
       <div style="text-align:center"><div style="font-size:14px;font-weight:900">${fmt(t.expenses)}</div><div style="font-size:9px;color:var(--muted)">EXPENSES</div></div>
     </div>
-    ${t.commissions>0?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">Commissions: <strong style="color:var(--red)">${fmt(t.commissions)}</strong></div>`:''}
+    ${t.repPay>0?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">Rep Pay: <strong style="color:var(--red)">${fmt(t.repPay)}</strong></div>`:''}
     <div style="margin-top:8px;font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Units Sold</div>
     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${units}</div>
     <div style="margin-top:8px;font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Payments Collected</div>
@@ -1241,14 +1234,14 @@ function calcYTD(){
   // Other expenses: supplies, equipment, misc — logged separately
   const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   expenses+=otherSpend;
-  // Total rep commissions earned across all shows
-  const totalCommissions=(S.shows||[]).reduce((t,sh)=>t+calcShowComm(sh),0);
-  // (commissions already included in expenses via calcShow/boothPaid paths above)
+  // Total rep pay earned across all shows
+  const totalRepPay=(S.shows||[]).reduce((t,sh)=>t+showRepPayTotal(sh),0);
+  // (rep pay already included in expenses via calcShow/boothPaid paths above)
   const profit=gross-cogs-expenses;
   const taxRes=taxResSum;
   const keep=Math.max(0,profit-taxRes);
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
-  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalCommissions};
+  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay};
 }
 function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
 function boothPaid(sh){return(sh.boothPayments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);}
@@ -1269,32 +1262,27 @@ function calcBoothTally(){
   return{paid,owed,due,confirmedCnt,possibleCnt,paidShows,unpaidShows};
 }
 // ===================================================
-// COMMISSION CALCULATIONS
+// REP PAY CALCULATIONS — flat $ per day, entered daily
 // ===================================================
-// Per-rep commission rates (default to global 35% cash / 30% card+electronic)
-function repCommRates(rep){ return {
-  cash:(rep&&rep.commCash!=null&&rep.commCash!=='')?(parseFloat(rep.commCash)||0):DEFAULT_COMM_RATE,
-  card:(rep&&rep.commCard!=null&&rep.commCard!=='')?(parseFloat(rep.commCard)||0):DEFAULT_COMM_RATE }; }
-// Effective commission % for a specific payment method on a rep (DIRECT bucket vs CARD bucket)
-function repRateForMethod(rep,key){ const rt=repCommRates(rep); return CASH_COMM_KEYS.includes(key)?rt.cash:rt.card; }
-// All payment methods for the rep commission profile display (point 6). 'credit' is card-processed = CARD bucket.
-const COMM_PROFILE_METHODS=[{k:'cash',l:'Cash'},{k:'venmo',l:'Venmo'},{k:'paypal',l:'PayPal'},{k:'cashapp',l:'Cash App'},{k:'zelle',l:'Zelle'},{k:'square',l:'Square'},{k:'credit',l:'Credit Card'},{k:'debit',l:'Debit Card'}];
-function calcRepSalesComm(rs){
-  // rs = { repId, square, debit, venmo, zelle, cashapp, paypal, cash }. Owner (isSelf) earns nothing.
-  const rep=(S.reps||[]).find(r=>r.id===rs.repId);
-  if(!rep||rep.isSelf)return 0;
-  const rt=repCommRates(rep);
-  let cashAmt=0,cardElecAmt=0;
-  PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0; if(CASH_COMM_KEYS.includes(p.key))cashAmt+=v; else cardElecAmt+=v;});
-  return cashAmt*rt.cash+cardElecAmt*rt.card;
+// day.repPay = { repId: $ } — what each rep gets for that day. No percentages, no formulas.
+function repDayPay(d,repId){ return parseFloat((d&&d.repPay?d.repPay[repId]:null))||0; }
+// Total of one day's rep pay across everyone (owner never gets day pay)
+function calcDayPay(d){ return Object.keys((d&&d.repPay)||{}).reduce((t,k)=>t+repDayPay(d,k),0); }
+// A rep's day pay summed across a show's days
+function repShowDayPay(sh,repId){ return (sh.days||[]).reduce((t,d)=>t+repDayPay(d,repId),0); }
+// Legacy day-level payout overrides from the OLD commission system (d.repPayout, used on the blank app)
+function repLegacyDayPayout(d,repId){ const v=d&&d.repPayout?d.repPayout[repId]:null; return (v!=null&&v!=='')?(parseFloat(v)||0):null; }
+function repShowLegacyDayPayout(sh,repId){ return (sh.days||[]).reduce((t,d)=>{const v=repLegacyDayPayout(d,repId);return t+(v||0);},0); }
+// What a rep earns on a show: day pay entries win; legacy payouts from the old commission system
+// (per-day d.repPayout, then per-show sh.repPayout) still count when no day pay was entered.
+function repShowPay(sh,repId){
+  const dp=repShowDayPay(sh,repId); if(dp>0)return dp;
+  const ldp=repShowLegacyDayPayout(sh,repId); if(ldp>0)return ldp;
+  const ov=sh.repPayout&&sh.repPayout[repId]; if(ov!=null&&ov!=='')return parseFloat(ov)||0;
+  return 0;
 }
-function calcDayComm(day){ return (day.repSales||[]).reduce((t,rs)=>t+calcRepSalesComm(rs),0); }
-// Calculated commission a rep earned across a show's days (before any payout override)
-function repShowCalcComm(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=calcRepSalesComm(rs); })); return t; }
-// Effective per-show payout for a rep: a manual per-show payout override WINS, else the calculated commission.
-function repShowComm(sh,repId){ const ov=sh.repPayout&&sh.repPayout[repId]; if(ov!=null&&ov!=='')return parseFloat(ov)||0; return repShowCalcComm(sh,repId); }
-function showRepIds(sh){ const ids=new Set(); (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId)ids.add(rs.repId); })); if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids.add(k)); return [...ids]; }
-function calcShowComm(sh){ return showRepIds(sh).reduce((t,repId)=>t+repShowComm(sh,repId),0); }
+function showRepIds(sh){ const ids=new Set(); (sh.days||[]).forEach(d=>{ (d.repSales||[]).forEach(rs=>{ if(rs.repId)ids.add(rs.repId); }); Object.keys(d.repPay||{}).forEach(k=>ids.add(k)); Object.keys(d.repPayout||{}).forEach(k=>ids.add(k)); }); if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids.add(k)); return [...ids]; }
+function showRepPayTotal(sh){ return showRepIds(sh).reduce((t,repId)=>t+repShowPay(sh,repId),0); }
 // ---- Flat / hourly / manual workers (e.g. Olivia paid straight cash). Not commission-based reps. ----
 // Each worker: {id,name,role,type:'flat'|'hourly'|'manual',hours,rate,amount,paid,payMethod,payNote}
 const WORKER_TYPES=[{k:'flat',l:'Flat cash payout'},{k:'hourly',l:'Hourly payout'},{k:'manual',l:'Manual custom payout'}];
@@ -1302,28 +1290,23 @@ function workerPayout(w){ if(!w)return 0; if(w.type==='hourly')return (parseFloa
 function showWorkerPayouts(sh){ return (sh.workers||[]).reduce((t,w)=>t+workerPayout(w),0); }
 function showWorkerPaid(sh){ return (sh.workers||[]).reduce((t,w)=>t+(parseFloat(w.paid)||0),0); }
 function showWorkerOwed(sh){ return (sh.workers||[]).reduce((t,w)=>t+Math.max(0,workerPayout(w)-(parseFloat(w.paid)||0)),0); }
-// Total of EVERY person's payout on a show: commission reps (incl. overrides) + flat/hourly/manual workers
-function showLaborTotal(sh){ return calcShowComm(sh)+showWorkerPayouts(sh); }
+// Total of EVERY person's payout on a show: day-pay reps (incl. legacy payouts) + flat/hourly/manual workers
+function showLaborTotal(sh){ return showRepPayTotal(sh)+showWorkerPayouts(sh); }
 // Total $ a rep rang up across a show (all payment methods)
 function repShowSales(sh,repId){ let t=0; (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=PMTS.reduce((a,p)=>a+(parseFloat(rs[p.key])||0),0); })); return t; }
-// A rep's CALCULATED commission on one day (before any override)
-function repDayCalcComm(d,repId){ let t=0; (d.repSales||[]).forEach(rs=>{ if(rs.repId===repId)t+=calcRepSalesComm(rs); }); return t; }
-// Effective commission for a DAY: each rep's per-show payout split across days by that day's share of the rep's sales/comm.
-// No override ⇒ equals the day's calculated comm. With override ⇒ days sum to the payout (matches calcShowComm).
-function dayCommEffective(sh,di){
+// Rep pay charged against ONE day: day pay entries for that day; legacy per-day payouts stay on
+// their day; a legacy per-show payout is split evenly across days so day P&Ls still sum to the show.
+function dayPayEffective(sh,di){
   const d=(sh.days||[])[di]; if(!d)return 0; let total=0;
   showRepIds(sh).forEach(repId=>{
-    const eff=repShowComm(sh,repId); if(!eff)return;
-    const calcTot=repShowCalcComm(sh,repId);
-    if(calcTot>0){ total+=eff*(repDayCalcComm(d,repId)/calcTot); return; }
-    const days=(sh.days||[]);
-    const selling=days.filter(x=>(x.repSales||[]).some(rs=>rs.repId===repId&&PMTS.some(p=>(parseFloat(rs[p.key])||0)>0)));
-    const pool=selling.length?selling:days;
-    if(pool.indexOf(d)>=0)total+=eff/pool.length;
+    if(repShowDayPay(sh,repId)>0){ total+=repDayPay(d,repId); return; }
+    if(repShowLegacyDayPayout(sh,repId)>0){ total+=repLegacyDayPayout(d,repId)||0; return; }
+    const ov=sh.repPayout&&sh.repPayout[repId];
+    if(ov!=null&&ov!==''){ total+=(parseFloat(ov)||0)/(((sh.days||[]).length)||1); }
   });
   return total;
 }
-function repEarned(repId,shId){ let total=0; (S.shows||[]).forEach(sh=>{ if(shId&&sh.id!==shId)return; total+=repShowComm(sh,repId); }); return total; }
+function repEarned(repId,shId){ let total=0; (S.shows||[]).forEach(sh=>{ if(shId&&sh.id!==shId)return; total+=repShowPay(sh,repId); }); return total; }
 function repPaid(repId,shId){
   const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return 0;
   return (rep.payments||[]).filter(p=>!shId||p.showId===shId).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
@@ -2100,7 +2083,7 @@ function showConflicts(sh){
 function showStaffCount(sh){ const reps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active&&!r.isSelf;}).length; return reps + (sh.repOnlyShow?0:1); } // reps (excluding owner) + owner unless rep-only
 function showWorkHoursTotal(sh){ const n=(sh.numDays||((sh.days||[]).length)||1); let t=0; for(let i=0;i<n;i++)t+=dayWorkHours(sh,i); return t; }
 function staffedHours(sh){ return showWorkHoursTotal(sh)*showStaffCount(sh); }
-function _bsBlankDay(n,dateStr){ return {dayNum:n,date:dateStr||('Day '+n),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'}; }
+function _bsBlankDay(n,dateStr){ return {dayNum:n,date:dateStr||('Day '+n),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],repPay:{},notes:'',status:'open'}; }
 function _bsDatesFor(startDate,n){ const out=[]; if(startDate){ const s=new Date(startDate+'T12:00:00'); for(let i=0;i<n;i++){ const d=new Date(s); d.setDate(d.getDate()+i); out.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } } else { for(let i=0;i<n;i++) out.push('Day '+(i+1)); } return out; }
 function resizeShowDays(sh,newND){
   sh.days=sh.days||[]; newND=Math.max(1,Math.round(newND)||1);
@@ -2149,7 +2132,7 @@ function showEditCosts(id){
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">Call time = 1 hour before open. Different each day is fine (e.g. Fri 4–8, Sat 10–4, Sun 10–3).</div>
   <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
-  <div class="fg"><label class="fl">👥 Crew — hours worked &amp; what you paid</label>
+  <div class="fg"><label class="fl">👥 Crew — hours worked (pay is entered per day)</label>
     ${(()=>{
       const ids=[...(sh.repIds||[])]; const owner=(S.reps||[]).find(r=>r.isSelf);
       if(owner&&!sh.repOnlyShow&&!ids.includes(owner.id))ids.unshift(owner.id);
@@ -2157,15 +2140,14 @@ function showEditCosts(id){
       if(!ids.length)return '<div style="font-size:12px;color:var(--muted)">No reps assigned yet — assign reps on the show first, then set hours here.</div>';
       return ids.map(rid=>{ const r=(S.reps||[]).find(x=>x.id===rid); if(!r)return '';
         const hrs=(sh.repHours&&sh.repHours[rid]!=null)?sh.repHours[rid]:(r.isSelf&&sh.myHours!=null?sh.myHours:'');
-        const paid=(sh.repPayout&&sh.repPayout[rid]!=null)?sh.repPayout[rid]:'';
-        const autoC=repShowCalcComm(sh,rid);
+        const pay=repShowPay(sh,rid);
         return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="min-width:74px;font-size:12px;font-weight:700">${r.name}${r.isSelf?' 👑':''}</div>
           <input class="fi" type="number" step="0.5" min="0" id="ec_hrs_${rid}" value="${hrs}" placeholder="hrs" style="flex:1">
-          ${r.isSelf?'<div style="flex:1;font-size:11px;color:var(--muted);text-align:center">earns profit</div>':`<input class="fi" type="number" step="0.01" min="0" id="ec_paid_${rid}" value="${paid}" placeholder="paid ${autoC?fmt(autoC):'0'}" style="flex:1">`}</div>`;
+          ${r.isSelf?'<div style="flex:1;font-size:11px;color:var(--muted);text-align:center">earns profit</div>':`<div style="flex:1;font-size:11px;color:var(--muted);text-align:center">pay: ${fmt(pay)}</div>`}</div>`;
       }).join('');
     })()}
   </div>
-  <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">"Paid" replaces the auto commission for that rep this show (blank = use auto). The show detail then shows each person's $/hour.</div>
+  <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">Rep pay is entered PER DAY on each day's screen (💵 Day Pay). Hours here just give you each person's $/hour on the show detail.</div>
   <div class="fg"><label class="fl">Show notes</label><textarea class="fi" id="ec_notes" placeholder="Anything to remember about this show…">${(sh.notes||'').replace(/</g,'&lt;')}</textarea></div>
   <button class="btn btn-gold btn-full" onclick="saveEditCosts('${id}')">Save Costs</button>`);
   setTimeout(ecUpdateTravelPreview,40);
@@ -2204,12 +2186,11 @@ function saveEditCosts(id){
   for(let i=0; $$('ec_open_'+i); i++){ const o=v('ec_open_'+i), c=v('ec_close_'+i); if(sh.days&&sh.days[i]){ sh.days[i].openTime=o||null; sh.days[i].closeTime=c||null; } }
   if(sh.days&&sh.days[0]){ sh.openTime=sh.days[0].openTime||null; sh.closeTime=sh.days[0].closeTime||null; } // keep show-level = day 1 for back-compat
   const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
-  // crew: hours worked + amount paid (paid reuses the per-show payout override)
+  // crew: hours worked (rep pay is entered per day on the day screens)
   if(!sh.repHours)sh.repHours={};
   const _crew=[...new Set([...((S.reps||[]).filter(r=>r.isSelf).map(r=>r.id)), ...(sh.repIds||[]), ...Object.keys(sh.repPayout||{})])];
   _crew.forEach(rid=>{
     const hEl=$$('ec_hrs_'+rid); if(hEl){ const hv=(hEl.value||'').trim(); if(hv==='')delete sh.repHours[rid]; else sh.repHours[rid]=parseFloat(hv)||0; }
-    const pEl=$$('ec_paid_'+rid); if(pEl){ const pv=(pEl.value||'').trim(); if(!sh.repPayout)sh.repPayout={}; if(pv==='')delete sh.repPayout[rid]; else sh.repPayout[rid]=parseFloat(pv)||0; }
   });
   const _own=(S.reps||[]).find(r=>r.isSelf); if(_own&&sh.repHours[_own.id]!=null)sh.myHours=sh.repHours[_own.id];
   sh.notes=v('ec_notes');
@@ -2222,19 +2203,10 @@ function calcBreakEven(sh){
   const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   const flatOverhead=(typeof showFlatOverhead==='function')?showFlatOverhead(sh):0; // candy + paper towels
   const workerPay=(typeof showWorkerPayouts==='function')?showWorkerPayouts(sh):0; // flat/hourly/manual workers are fixed labor
-  const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp+flatOverhead+workerPay;
-  // If paid reps assigned, breakeven needs to account for commission variable cost
-  // Use algebraic solution: BE = fixedCosts / (1 - cogsRate - blendedCommRate)
-  // cogsRate ≈ 30% (2025 average), blendedCommRate = 60% cash × 40% + 40% card × 30% = 36%
-  const paidRepList=(sh.repIds||[]).map(id=>(S.reps||[]).find(x=>x.id===id)).filter(r=>r&&!r.isSelf&&r.active);
-  if(paidRepList.length){
-    const cogsRate=0.30;
-    // Each assigned rep's blended rate (≈60% cash / 40% card sales mix), averaged across the reps working it.
-    const blendedCommRate=paidRepList.reduce((t,r)=>{const rt=repCommRates(r);return t+(0.60*rt.cash+0.40*rt.card);},0)/paidRepList.length;
-    const variableRate=cogsRate+blendedCommRate;
-    return variableRate>=1?fixedCosts*3:fixedCosts/(1-variableRate);
-  }
-  return fixedCosts/(1-0.30); // no reps: just account for COGS
+  // Rep day pay is flat labor too (no % of sales anymore) — whatever's been entered counts as a fixed cost.
+  const repPay=(typeof showRepPayTotal==='function')?showRepPayTotal(sh):0;
+  const fixedCosts=(sh.boothCost||0)+gas+(sh.lodging||0)+showExp+flatOverhead+workerPay+repPay;
+  return fixedCosts/(1-0.30); // only variable cost left is COGS (≈30% of sales, 2025 average)
 }
 const SHOW_EXP_CATS=[
   {key:'fuel',   label:'Fuel',         icon:'⛽'},
@@ -2438,12 +2410,12 @@ function rPnL(){
     <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
     <div class="sr"><span class="srl">Show Expenses (fuel, hotel, etc.)</span><span class="srv red">-${fmt(showExpTotal+lodgingTotal+dayExpTotal)}</span></div>
     <div class="sr" style="border-bottom:none"><span class="srl">Supply Purchases</span><span class="srv red">-${fmt(globalSupply)}</span></div>
-    ${ytd.totalCommissions>0?`<div class="sr" style="border-top:1px solid var(--redbd);margin-top:4px;border-bottom:none"><span class="srl">Rep Commissions (earned)</span><span class="srv red">-${fmt(ytd.totalCommissions)}</span></div>`:''}
+    ${ytd.totalRepPay>0?`<div class="sr" style="border-top:1px solid var(--redbd);margin-top:4px;border-bottom:none"><span class="srl">Rep Pay (earned)</span><span class="srv red">-${fmt(ytd.totalRepPay)}</span></div>`:''}
   </div>
   ${(()=>{
     const owedReps=allRepsOwed();if(!owedReps.length)return'';
     const totalOwed=owedReps.reduce((t,x)=>t+x.owed,0);
-    return`<div class="sec-lbl">REP COMMISSIONS</div>
+    return`<div class="sec-lbl">REP PAY</div>
     <div class="card ${totalOwed>0?'rb':'grb'}" style="margin-bottom:12px">
       <div class="g2" style="gap:8px;margin-bottom:10px">
         <div class="sbox rb"><div class="sl">Total Earned YTD</div><div class="sv r sm">${fmt(owedReps.reduce((t,x)=>t+x.earned,0))}</div></div>
@@ -2554,7 +2526,7 @@ function createShow(){
   const dates=[];
   if(ds){const s=new Date(ds+'T12:00:00');for(let i=0;i<nd;i++){const d=new Date(s);d.setDate(d.getDate()+i);dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}}
   const days=[];
-  for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],notes:'',status:'open'});
+  for(let i=0;i<nd;i++)days.push({dayNum:i+1,date:dates[i]||'Day '+(i+1),morningCount:null,eveningCount:null,payments:{cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},expenses:{gas:0,food:0,parking:0,hotel:0,other:0},repSales:[],repPay:{},notes:'',status:'open'});
   const sh={id:'sh_'+Date.now(),name,location:$$('ns_l').value.trim(),numDays:nd,startDate:ds||'',dates,boothCost:bc,miles:mi,status:'planned',showExpenses:[],repIds:[],repOnlyShow:false,days,packedInventory:null,createdAt:new Date().toISOString()};
   S.shows.push(sh);mClose();saveS();toast('Show created!');go('show',sh.id,0);
 }
@@ -2653,11 +2625,11 @@ function dlFile(name,text,mime){
 }
 function _slug(s){ return String(s||'show').replace(/[^a-z0-9]+/gi,'-').toLowerCase().replace(/^-|-$/g,''); }
 function exportSeasonCSV(){
-  const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Commissions','Worker Payouts','Net Profit','Tax Reserve']];
+  const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Rep Pay','Worker Payouts','Net Profit','Tax Reserve']];
   (S.shows||[]).slice().sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
-    rows.push([sh.name,sh.status,(sh.dates||[]).join(' - '),sh.location||'',sh.numDays||1,showPotentialRev(sh).toFixed(2),showActualRev(sh).toFixed(2),showDiscountTotal(sh).toFixed(2),t.cogs.toFixed(2),t.expenses.toFixed(2),(t.commissions||0).toFixed(2),(t.workerPay||0).toFixed(2),t.profit.toFixed(2),(t.taxRes||0).toFixed(2)]); });
+    rows.push([sh.name,sh.status,(sh.dates||[]).join(' - '),sh.location||'',sh.numDays||1,showPotentialRev(sh).toFixed(2),showActualRev(sh).toFixed(2),showDiscountTotal(sh).toFixed(2),t.cogs.toFixed(2),t.expenses.toFixed(2),(t.repPay||0).toFixed(2),(t.workerPay||0).toFixed(2),t.profit.toFixed(2),(t.taxRes||0).toFixed(2)]); });
   const y=calcYTD(); const seasonWorkerPay=(S.shows||[]).reduce((tt,sh)=>tt+(calcShow(sh).workerPay||0),0);
-  rows.push([]); rows.push(['SEASON TOTAL','','','','','','','',y.cogs.toFixed(2),y.expenses.toFixed(2),(y.totalCommissions||0).toFixed(2),seasonWorkerPay.toFixed(2),y.profit.toFixed(2),(y.taxRes||0).toFixed(2)]);
+  rows.push([]); rows.push(['SEASON TOTAL','','','','','','','',y.cogs.toFixed(2),y.expenses.toFixed(2),(y.totalRepPay||0).toFixed(2),seasonWorkerPay.toFixed(2),y.profit.toFixed(2),(y.taxRes||0).toFixed(2)]);
   dlFile('best-solution-season-'+_stamp()+'.csv',_csvRows(rows));
 }
 function exportShowCSV(shId){
@@ -2666,11 +2638,12 @@ function exportShowCSV(shId){
   (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) rows.push([i+1,d.date||'',s.short,q,getP(s.key).toFixed(2),(q*getP(s.key)).toFixed(2)]); }); } });
   rows.push([]); rows.push(['Payments collected by method']); PMTS.forEach(p=>{ let tot=0; (sh.days||[]).forEach(d=>tot+=parseFloat((d.payments||{})[p.key])||0); if(tot>0)rows.push([p.label,'','','','',tot.toFixed(2)]); });
   if((sh.discounts||[]).length){ rows.push([]); rows.push(['Discounts / Freebies']); (sh.discounts||[]).forEach(x=>rows.push([x.date||'',x.note||'','','','',(parseFloat(x.amount)||0).toFixed(2)])); }
-  // Rep payouts — calculated commission AND actual payout (override never erases the calc)
+  // Rep pay — per-day amounts (legacy per-show payouts shown where no day pay was entered)
   const _repIds=showRepIds(sh).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&!r.isSelf;});
-  if(_repIds.length){ rows.push([]); rows.push(['Rep payouts','Sales','Calc Commission','Manual Override','Actual Payout','Paid','Owed','Pay Method','Note']);
-    _repIds.forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id)||{}; const calc=repShowCalcComm(sh,id); const ov=sh.repPayout&&sh.repPayout[id]; const act=repShowComm(sh,id); const paid=repPaid(id,sh.id); const meta=(sh.repPayMeta&&sh.repPayMeta[id])||{};
-      rows.push([r.name||id,repShowSales(sh,id).toFixed(2),calc.toFixed(2),(ov!=null&&ov!=='')?(parseFloat(ov)||0).toFixed(2):'',act.toFixed(2),paid.toFixed(2),Math.max(0,act-paid).toFixed(2),meta.method||'',meta.note||'']); }); }
+  if(_repIds.length){ rows.push([]); rows.push(['Rep pay','Sales','Day-by-Day Pay','Total Pay','Paid','Owed','Pay Method','Note']);
+    _repIds.forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id)||{}; const act=repShowPay(sh,id); const paid=repPaid(id,sh.id); const meta=(sh.repPayMeta&&sh.repPayMeta[id])||{};
+      const byDay=(sh.days||[]).map((d,i)=>{const v=repDayPay(d,id);return v>0?((d.date||('Day '+(i+1)))+' '+v.toFixed(2)):'';}).filter(Boolean).join(' · ');
+      rows.push([r.name||id,repShowSales(sh,id).toFixed(2),byDay,act.toFixed(2),paid.toFixed(2),Math.max(0,act-paid).toFixed(2),meta.method||'',meta.note||'']); }); }
   // Flat / hourly / manual workers (e.g. Olivia)
   if((sh.workers||[]).length){ rows.push([]); rows.push(['Workers (flat/hourly/manual)','Role','Type','Payout','Paid','Owed','Pay Method','Note']);
     (sh.workers||[]).forEach(w=>{ const pay=workerPayout(w); const paid=parseFloat(w.paid)||0; rows.push([w.name||'',w.role||'',w.type||'',pay.toFixed(2),paid.toFixed(2),Math.max(0,pay-paid).toFixed(2),w.payMethod||'',w.payNote||'']); }); }
@@ -2679,8 +2652,8 @@ function exportShowCSV(shId){
   rows.push(['Actual Collected','','','','',showActualRev(sh).toFixed(2)]);
   rows.push(['Discounts','','','','',showDiscountTotal(sh).toFixed(2)]);
   rows.push(['COGS','','','','',t.cogs.toFixed(2)]);
-  rows.push(['Expenses (incl. commissions + workers)','','','','',t.expenses.toFixed(2)]);
-  rows.push(['Commissions','','','','',(t.commissions||0).toFixed(2)]);
+  rows.push(['Expenses (incl. rep pay + workers)','','','','',t.expenses.toFixed(2)]);
+  rows.push(['Rep Pay','','','','',(t.repPay||0).toFixed(2)]);
   rows.push(['Worker Payouts','','','','',(t.workerPay||0).toFixed(2)]);
   rows.push(['Net Profit','','','','',t.profit.toFixed(2)]);
   dlFile('best-solution-'+_slug(sh.name)+'-'+_stamp()+'.csv',_csvRows(rows));
@@ -2688,7 +2661,7 @@ function exportShowCSV(shId){
 function exportRepCSV(){
   const rows=[['Rep','Owner?','Earned','Paid','Owed']];
   (S.reps||[]).forEach(r=>{ const e=repEarned(r.id),p=repPaid(r.id); rows.push([r.name,r.isSelf?'yes':'no',e.toFixed(2),p.toFixed(2),Math.max(0,e-p).toFixed(2)]); });
-  dlFile('best-solution-rep-commissions-'+_stamp()+'.csv',_csvRows(rows));
+  dlFile('best-solution-rep-pay-'+_stamp()+'.csv',_csvRows(rows));
 }
 function exportExpensesCSV(){
   const rows=[['Date','Category','Amount','Note']];
@@ -2719,7 +2692,7 @@ function printFullReport(){
     '<h1>Best Solution — 2026 Season Report</h1><div class="muted">Generated '+_stamp()+' · Dot Dynasty LLC</div>'+
     '<h2>Season Totals</h2><table><tr><th>Gross</th><th>COGS</th><th>Expenses</th><th>Net Profit</th><th>Tax Reserve</th><th>Units Sold</th></tr><tr class="tot"><td class="r">'+_money(y.gross)+'</td><td class="r">'+_money(y.cogs)+'</td><td class="r">'+_money(y.expenses)+'</td><td class="r">'+_money(y.profit)+'</td><td class="r">'+_money(y.taxRes)+'</td><td class="r">'+fmtN(y.totalUnits)+'</td></tr></table>'+
     '<h2>All Shows</h2><table><tr><th>Show</th><th>Status</th><th>Dates</th><th>Potential</th><th>Collected</th><th>COGS</th><th>Expenses</th><th>Profit</th></tr>'+showRows+'</table>'+
-    (repRows?'<h2>Rep Commissions</h2><table><tr><th>Rep</th><th>Earned</th><th>Paid</th><th>Owed</th></tr>'+repRows+'</table>':'')+
+    (repRows?'<h2>Rep Pay</h2><table><tr><th>Rep</th><th>Earned</th><th>Paid</th><th>Owed</th></tr>'+repRows+'</table>':'')+
     (expRows?'<h2>Other Expenses (write-offs)</h2><table><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th></tr>'+expRows+'<tr class="tot"><td>TOTAL</td><td></td><td class="r">'+_money(expTot)+'</td><td></td></tr></table>':''));
 }
 function printShowReport(shId){
@@ -2733,17 +2706,18 @@ function printShowReport(shId){
     (payRows?'<h2>Payments Collected</h2><table><tr><th>Method</th><th>Amount</th></tr>'+payRows+'</table>':'')+
     (()=>{ const ids=showRepIds(sh).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&!r.isSelf;});
       let pr='';
-      ids.forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id)||{}; const calc=repShowCalcComm(sh,id); const ov=sh.repPayout&&sh.repPayout[id]; const act=repShowComm(sh,id); const meta=(sh.repPayMeta&&sh.repPayMeta[id])||{};
-        pr+='<tr><td>'+_esc(r.name||id)+'</td><td class="r">'+_money(calc)+'</td><td class="r">'+((ov!=null&&ov!=='')?_money(parseFloat(ov)||0):'—')+'</td><td class="r">'+_money(act)+'</td><td>'+_esc(meta.method||'')+'</td></tr>'; });
-      (sh.workers||[]).forEach(w=>{ pr+='<tr><td>'+_esc(w.name||'')+' <span class="muted">('+_esc(w.type||'flat')+')</span></td><td class="r">—</td><td class="r">—</td><td class="r">'+_money(workerPayout(w))+'</td><td>'+_esc(w.payMethod||'')+'</td></tr>'; });
-      return pr?'<h2>Reps &amp; Worker Payouts</h2><table><tr><th>Name</th><th>Calc Commission</th><th>Override</th><th>Actual Payout</th><th>Method</th></tr>'+pr+'</table>':''; })()+
+      ids.forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id)||{}; const act=repShowPay(sh,id); const meta=(sh.repPayMeta&&sh.repPayMeta[id])||{};
+        const byDay=(sh.days||[]).map((d,i)=>{const v=repDayPay(d,id);return v>0?(_esc(d.date||('Day '+(i+1)))+' '+_money(v)):'';}).filter(Boolean).join(' · ');
+        pr+='<tr><td>'+_esc(r.name||id)+'</td><td>'+(byDay||'<span class="muted">legacy per-show payout</span>')+'</td><td class="r">'+_money(act)+'</td><td>'+_esc(meta.method||'')+'</td></tr>'; });
+      (sh.workers||[]).forEach(w=>{ pr+='<tr><td>'+_esc(w.name||'')+' <span class="muted">('+_esc(w.type||'flat')+')</span></td><td>—</td><td class="r">'+_money(workerPayout(w))+'</td><td>'+_esc(w.payMethod||'')+'</td></tr>'; });
+      return pr?'<h2>Rep &amp; Worker Pay</h2><table><tr><th>Name</th><th>Pay by Day</th><th>Total Pay</th><th>Method</th></tr>'+pr+'</table>':''; })()+
     '<h2>Summary</h2><table>'+
     '<tr><td>Potential Gross</td><td class="r">'+_money(showPotentialRev(sh))+'</td></tr>'+
     '<tr><td>Actual Collected</td><td class="r">'+_money(showActualRev(sh))+'</td></tr>'+
     '<tr><td>Discounts / Freebies</td><td class="r">'+_money(showDiscountTotal(sh))+'</td></tr>'+
     '<tr><td>COGS</td><td class="r">'+_money(t.cogs)+'</td></tr>'+
     '<tr><td>Expenses</td><td class="r">'+_money(t.expenses)+'</td></tr>'+
-    '<tr><td>Commissions</td><td class="r">'+_money(t.commissions||0)+'</td></tr>'+
+    '<tr><td>Rep Pay</td><td class="r">'+_money(t.repPay||0)+'</td></tr>'+
     '<tr><td>Worker Payouts</td><td class="r">'+_money(t.workerPay||0)+'</td></tr>'+
     '<tr class="tot"><td>Net Profit</td><td class="r">'+_money(t.profit)+'</td></tr></table>');
 }
@@ -2854,26 +2828,27 @@ function rShow(){
     const allReps=(S.reps||[]).filter(r=>r.active);
     const assignedIds=sh.repIds||[];
     const assigned=assignedIds.map(id=>allReps.find(r=>r.id===id)).filter(Boolean);
-    const showComm=calcShowComm(sh);
+    const showPay=showRepPayTotal(sh);
     return`<div class="card" style="margin-top:10px;border-color:rgba(79,195,247,0.3)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700">👥 Reps &amp; Workers This Show</div>
         <div style="display:flex;gap:6px;align-items:center">
           ${sh.repOnlyShow?'<span style="font-size:10px;color:var(--gold);font-weight:700">REP-ONLY SHOW</span>':''}
-          <button class="btn btn-xs btn-ghost" title="Log hours worked & what you paid" onclick="showEditCosts('${sh.id}')">⏱ Hours</button>
+          <button class="btn btn-xs btn-ghost" title="Log hours worked" onclick="showEditCosts('${sh.id}')">⏱ Hours</button>
           <button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAssignReps('${sh.id}')">✏️ Edit</button>
         </div>
       </div>
       ${assigned.length===0?`<div style="font-size:12px;color:var(--muted)">No reps assigned. Tap Edit to assign reps to this show.</div>`:`
       ${assigned.map(r=>{
-        const calc=repShowCalcComm(sh,r.id);          // calculated commission (formula)
-        const ov=sh.repPayout&&sh.repPayout[r.id]; const hasOv=ov!=null&&ov!=='';
-        const actual=repShowComm(sh,r.id);            // actual payout = override if set, else calc
+        const dp=repShowDayPay(sh,r.id);              // day pay entered so far
+        const legacyOv=sh.repPayout&&sh.repPayout[r.id]; const hasLegacy=dp<=0&&legacyOv!=null&&legacyOv!=='';
+        const actual=repShowPay(sh,r.id);             // day pay total (or legacy per-show payout on old shows)
         const paid=repPaid(r.id,sh.id);
         const owed=Math.max(0,actual-paid);
         const _hrs=(sh.repHours&&sh.repHours[r.id]!=null)?(parseFloat(sh.repHours[r.id])||0):null;
         const _sales=repShowSales(sh,r.id);
         const meta=(sh.repPayMeta&&sh.repPayMeta[r.id])||{};
+        const daysPaid=(sh.days||[]).filter(d=>repDayPay(d,r.id)>0).length;
         const _sub=[]; if(_sales)_sub.push('sold '+fmt(_sales)); if(_hrs)_sub.push(_hrs+'h'); if(_hrs&&actual)_sub.push(fmt(actual/_hrs)+'/hr');
         if(meta.method)_sub.push('paid via '+meta.method); if(meta.note)_sub.push((''+meta.note).replace(/</g,'&lt;'));
         return`<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
@@ -2881,27 +2856,15 @@ function rShow(){
           <div style="text-align:right;display:flex;align-items:flex-start;gap:8px">
             <div>
             ${r.isSelf?'<div style="color:var(--muted)">Owner — paid by profit</div>':`
-              ${(calc>0||hasOv)?`<div style="color:var(--muted);font-size:10px">Calc: ${fmt(calc)}${hasOv?` · <span style="color:var(--gold)">Override: ${fmt(parseFloat(ov)||0)}</span>`:''}</div>
-              <div style="color:var(--red);font-weight:700">Payout: ${fmt(actual)}</div>
-              ${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid ${fmt(paid)}</div>`}`:'<div style="color:var(--muted)">No sales yet</div>'}`}
+              ${actual>0?`<div style="color:var(--muted);font-size:10px">${hasLegacy?'Legacy per-show payout':daysPaid+' day'+(daysPaid!==1?'s':'')+' entered'}</div>
+              <div style="color:var(--red);font-weight:700">Pay: ${fmt(actual)}</div>
+              ${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid ${fmt(paid)}</div>`}`:'<div style="color:var(--muted)">No day pay yet</div>'}`}
             </div>
-            ${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Edit what you actually paid this rep for this show" onclick="openEditPayout('${sh.id}','${r.id}')">✏️ Payout</button>`:''}
+            ${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Enter this rep's pay for each day of the show" onclick="openRepDayPay('${sh.id}','${r.id}')">💵 Day Pay</button>`:''}
           </div>
         </div>`;}).join('')}
-      ${showComm>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800">
-        <span>Total Commissions / Payouts</span><span style="color:var(--red)">-${fmt(showComm)}</span>
-      </div>`:''}
-      ${assigned.filter(r=>!r.isSelf).length?`<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px">
-        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">🔒 Commission Detail (manager) — per-rep rates</div>
-        ${assigned.filter(r=>!r.isSelf).map(r=>{
-          const rt=repCommRates(r);
-          let cash=0,cardElec=0;
-          (sh.days||[]).forEach(d=>{(d.repSales||[]).forEach(rs=>{ if(rs.repId===r.id){ PMTS.forEach(p=>{const v=parseFloat(rs[p.key])||0; if(CASH_COMM_KEYS.includes(p.key))cash+=v; else cardElec+=v;}); } }); });
-          const autoC=cash*rt.cash+cardElec*rt.card;
-          const ov=sh.repPayout&&sh.repPayout[r.id]; const hasOv=ov!=null&&ov!=='';
-          if(cash===0&&cardElec===0&&!hasOv)return'';
-          return`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${r.name}</span><span style="color:var(--red)">${fmt(hasOv?(parseFloat(ov)||0):autoC)}</span></div><div style="color:var(--muted)">Cash ${fmt(cash)}×${Math.round(rt.cash*100)}% = ${fmt(cash*rt.cash)} · Card/Elec ${fmt(cardElec)}×${Math.round(rt.card*100)}% = ${fmt(cardElec*rt.card)}${hasOv?` · <b style="color:var(--gold)">manual payout ${fmt(parseFloat(ov)||0)}</b>`:''}</div></div>`;
-        }).join('')}
+      ${showPay>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800">
+        <span>Total Rep Pay</span><span style="color:var(--red)">-${fmt(showPay)}</span>
       </div>`:''}`}
       ${(()=>{
         const ws=sh.workers||[];
@@ -2910,7 +2873,7 @@ function rShow(){
             <div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">🧍 Flat / Hourly / Manual Workers</div>
             <button class="btn btn-xs btn-ghost" onclick="openAddWorker('${sh.id}')">+ Add Worker</button>
           </div>`;
-        if(!ws.length){ h+=`<div style="font-size:11px;color:var(--muted)">None. Add a non-commission worker (e.g. flat cash like Olivia).</div>`; }
+        if(!ws.length){ h+=`<div style="font-size:11px;color:var(--muted)">None. Add a helper who isn't a daily-pay rep (e.g. flat cash like Olivia).</div>`; }
         else{
           h+=ws.map(w=>{const pay=workerPayout(w);const paid=parseFloat(w.paid)||0;const owed=Math.max(0,pay-paid);const tl=(WORKER_TYPES.find(t=>t.k===w.type)||{}).l||w.type||'Flat';
             const sub=[tl]; if(w.type==='hourly')sub.push((w.hours||0)+'h × '+fmt(w.rate||0)); if(w.payMethod)sub.push('paid via '+w.payMethod); if(w.payNote)sub.push((''+w.payNote).replace(/</g,'&lt;'));
@@ -2960,9 +2923,9 @@ function rDay(sh,di){
   const pmtT=calcPmt(d.payments||{});
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
-  const dayComm=dayCommEffective(sh,di); // reflects MANUAL payout overrides (split across days), not just the cash/card calc
+  const dayPay=dayPayEffective(sh,di); // this day's rep pay (legacy per-show payouts split evenly across days)
   const dayLoss=Math.max(0,rev-pmtT); // potential not collected (discounts/freebies/shortfall)
-  const profit=pmtT-cogs-dayExp-bpd-dayComm; // net is REAL CASH: money collected minus this day's costs
+  const profit=pmtT-cogs-dayExp-bpd-dayPay; // net is REAL CASH: money collected minus this day's costs
   const taxRes=Math.max(0,profit*showTaxRate(sh));
   const soldChips=sold?SKUS.filter(s=>(sold[s.key]||0)>0).map(s=>`<span class="chip gold">${s.short}: <strong>${sold[s.key]}</strong></span>`).join(''):'';
   const moneyCheck=dayCashCheckHTML(sh,di,true);
@@ -3013,46 +2976,32 @@ function rDay(sh,di){
     <div class="sr"><span class="srl">Product Cost (COGS)</span><span class="srv red">-${fmt(cogs)}</span></div>
     <div class="sr"><span class="srl">Day Expenses</span><span class="srv red">-${fmt(dayExp)}</span></div>
     <div class="sr"><span class="srl">Booth Share</span><span class="srv red">-${fmt(bpd)}</span></div>
-    ${dayComm>0?`<div class="sr"><span class="srl">Rep Commissions</span><span class="srv red">-${fmt(dayComm)}</span></div>`:''}
+    ${dayPay>0?`<div class="sr"><span class="srl">Rep Pay (this day)</span><span class="srv red">-${fmt(dayPay)}</span></div>`:''}
     <div class="sr"><span class="srl b">Net Profit (cash)</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve (${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?' · show rate':''})</span><span class="srv red">-${fmt(taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
     ${isA?`<div class="div"></div><div class="fg"><label class="fl">Notes / What Worked</label><textarea class="fi" placeholder="Best sellers? Weather? What to restock?" onchange="saveDayNote('${sh.id}',${di},this.value)">${d.notes||''}</textarea></div>`
     :d.notes?`<div class="div"></div><div style="font-size:12px;color:var(--muted)"><strong>Notes:</strong> ${d.notes}</div>`:''}
     ${(()=>{
-      const showReps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;});
-      if(!showReps.length)return''; // solo show: day money is entered directly, no per-person breakdown
-      const ownerRep=(S.reps||[]).find(r=>r.isSelf&&r.active);
-      // On a staffed show you attend, YOUR own sales must be captured too, or the auto-summed day total undercounts.
-      // Always show your line unless it's a rep-only show (you're not there).
-      const sellers=(ownerRep&&!sh.repOnlyShow&&!showReps.includes(ownerRep.id))?[ownerRep.id,...showReps]:showReps;
-      const dayComm=calcDayComm(d);
-      const dayTotal=calcPmt(sumRepSalesForDay(d));
-      const repRows=sellers.map(repId=>{
-        const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return'';
-        const rs=(d.repSales||[]).find(x=>x.repId===repId)||{square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0};
-        const repTotal=PMTS.reduce((t,p)=>t+(parseFloat(rs[p.key])||0),0);
-        const repComm=calcRepSalesComm({...rs,repId});
-        const ownerZero=rep.isSelf&&repTotal===0; // your line still empty — nudge
-        return`<div style="background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:8px${ownerZero?';border:1px solid var(--gold)':''}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div style="font-weight:800;font-size:13px">${rep.isSelf?'You ('+rep.name+')':rep.name}${rep.isSelf?' 👑':''}</div>
-            <div style="text-align:right">
-              <div style="font-size:13px;font-weight:900;color:var(--gold)">${fmt(repTotal)}</div>
-              ${!rep.isSelf&&repComm>0?`<div style="font-size:10px;color:var(--red)">Comm: ${fmt(repComm)}</div>`:''}
-            </div>
-          </div>
-          ${ownerZero?`<div style="font-size:10px;color:var(--gold);margin-bottom:6px">← Did you sell today too? Log YOUR sales so the day total is complete.</div>`:''}
-          <button class="btn btn-xs btn-ghost" style="width:100%" onclick="openRepSalesEntry('${sh.id}',${di},'${repId}')">✏️ Log Sales for ${rep.isSelf?'You':rep.name}</button>
+      // Per-rep sales tracking is GONE — the day's money is one total (Money column above).
+      // The only per-person thing on a day is DAY PAY: the flat $ each rep gets for working it.
+      const payReps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+      if(!payReps.length)return'';
+      const dayPayT=calcDayPay(d);
+      const repRows=payReps.map(rep=>{
+        const rp=repDayPay(d,rep.id);
+        return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:6px">
+          <div style="font-weight:800;font-size:13px">${rep.name}</div>
+          <div style="font-size:13px;font-weight:900;color:${rp>0?'var(--red)':'var(--muted)'}">${rp>0?fmt(rp):'not paid yet'}</div>
         </div>`;
       }).join('');
       return`<div class="div"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Sales by Person Today</div>
-          ${dayComm>0?`<div style="font-size:11px;color:var(--red);font-weight:700">Total Comm: ${fmt(dayComm)}</div>`:''}
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">💵 Rep Pay Today</div>
+          ${dayPayT>0?`<div style="font-size:11px;color:var(--red);font-weight:700">${fmt(dayPayT)}</div>`:''}
         </div>
         ${repRows}
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:800;padding:4px 2px 0"><span>Day total (auto-summed)</span><span style="color:var(--green)">${fmt(dayTotal)}</span></div>`;
+        <button class="btn ${dayPayT>0?'btn-ghost':'btn-gold'} btn-full" style="margin-top:2px" onclick="openDayPay('${sh.id}',${di})">💵 ${dayPayT>0?'Edit':'Enter'} Day Pay</button>`;
     })()}
   </div>`;
 }
@@ -3070,20 +3019,17 @@ function openCloseout(shId,di){
   const reconOK=!carry.length&&!neg.length;
   const cc=dayCashCheck(sh,di);
   const cashLine=cc.state==='short'?(' · cash short '+fmt(cc.amt)+' vs product sold (ok if discounts)'):cc.state==='over'?(' · cash '+fmt(cc.amt)+' OVER — recheck counts'):cc.state==='ok'?' · cash matches inventory':'';
-  const payCount=(d.repSales||[]).length+(sh.workers||[]).length;
   const ic=v=>v===true?'✅':v==='opt'?'◽':'⬜';
   const step=(n,title,state,detail,btn)=>`<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)"><div style="font-size:17px;line-height:1.3">${ic(state)}</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">${n}. ${title}</div><div style="font-size:11px;color:var(--muted)">${detail}</div>${btn?`<div style="margin-top:6px">${btn}</div>`:''}</div></div>`;
   const canLock=hasE&&hasP&&!reconBad;
-  const moneyBtn=staffed
-    ? `<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="mClose();go('show','${sh.id}',${di})">${hasP?'Review rep sales':'Enter rep sales'}</button> <button class="btn btn-xs btn-ghost" onclick="showMoneyModal('${sh.id}',${di})">Override total</button>`
-    : `<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="showMoneyModal('${sh.id}',${di})">${hasP?'Edit money':'Count money'}</button>`;
+  const moneyBtn=`<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="showMoneyModal('${sh.id}',${di})">${hasP?'Edit money':'Count money'}</button>`;
   mOpen(`<div class="mh"><div class="mt">🏁 Day Closeout</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} · ${d.date||('Day '+(di+1))}. Work top to bottom — reopen anytime to see what's left.</div>
   ${d.locked?`<div class="wb green" style="margin-bottom:10px">🔒 Finalized & locked. <button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${di});setTimeout(()=>openCloseout('${sh.id}',${di}),50)">Unlock to edit</button></div>`:''}
   ${step(1,'Evening count',hasE?true:false,hasE?'Counted — unsold product recorded.':'Count all unsold product at end of day.',`<button class="btn btn-xs ${hasE?'btn-ghost':'btn-gold'}" onclick="showCntModal('${sh.id}',${di},'evening')" ${!hasM?'disabled style="opacity:.5"':''}>${hasE?'Edit count':'Count now'}</button>${!hasM?' <span style="font-size:10px;color:var(--muted)">(do morning count first)</span>':''}`)}
-  ${step(2,'Money'+(staffed?' (auto-sums from reps)':''),hasP?true:false,hasP?('Day total '+fmt(dayTotal)+(d.paymentsAuto?' · auto from reps':'')):(staffed?'Enter each rep\'s sales — day total fills in automatically.':'Enter the day\'s money count.'),moneyBtn)}
+  ${step(2,'Money',hasP?true:false,hasP?('Day total '+fmt(dayTotal)+(d.paymentsAuto?' · auto from old rep-sales data':'')):'Count the day\'s money — one total, by payment method.',moneyBtn)}
   ${step(3,'Day expenses',(d.expenses&&Object.values(d.expenses).some(v=>parseFloat(v)>0))?true:'opt','Gas, food, parking, hotel for the day (optional).',`<button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit expenses</button>`)}
-  ${step(4,'Rep & worker payouts',payCount?true:'opt',payCount?(payCount+' logged. Set what you actually paid on the show page.'):'Set what you paid each person (optional). Open the show to log.',`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to payouts</button>`)}
+  ${step(4,'Day pay — what each rep gets today',staffed?(calcDayPay(d)>0?true:false):'opt',staffed?(calcDayPay(d)>0?('Entered — '+fmt(calcDayPay(d))+' today.'):'Enter each rep\'s flat $ for this day before you close out.'):'No reps on this show. Workers are logged on the show page.',staffed?`<button class="btn btn-xs ${calcDayPay(d)>0?'btn-ghost':'btn-gold'}" onclick="openDayPay('${sh.id}',${di})">${calcDayPay(d)>0?'Edit day pay':'Enter day pay'}</button>`:`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to show</button>`)}
   ${step(5,'Reconciliation — inventory + cash',reconBad?false:(reconOK?true:'opt'),(reconBad?'⚠️ Inventory mismatch — fix before locking.':(reconOK?'Counts reconcile.':'Reviewed (override on file).'))+cashLine,reconBad?`<button class="btn btn-xs btn-gold" onclick="mClose();go('show','${sh.id}',${di})">Review mismatch</button>`:'')}
   ${(cc.state==='short'||cc.state==='over')?dayCashCheckHTML(sh,di,false):''}
   <div style="margin-top:14px">
@@ -3180,7 +3126,7 @@ function showMoneyModal(shId,di){
   let exp=0;if(d.morningCount&&d.eveningCount){const sold=daySold(d);exp=calcRev(sold);}
   const repTot=calcPmt(sumRepSalesForDay(d)); const hasRepSales=(d.repSales||[]).length>0&&repTot>0;
   mOpen(`<div class="mh"><div class="mt">💰 Money Count</div><button class="mx" onclick="mClose()">×</button></div>
-  ${hasRepSales?`<div class="wb" style="margin-bottom:12px;background:rgba(79,195,247,0.1);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7;font-size:12px">This day auto-fills from each rep's entered sales (currently <strong>${fmt(repTot)}</strong>). Only edit here to override with a manual count — re-saving any rep's sales will re-sum it.</div>`:''}
+  ${hasRepSales?`<div class="wb" style="margin-bottom:12px;background:rgba(79,195,247,0.1);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7;font-size:12px">This day has old per-rep sales data totaling <strong>${fmt(repTot)}</strong> (from before per-rep tracking was removed). Saving a count here overrides it.</div>`:''}
   ${exp>0?`<div class="wb gold" style="margin-bottom:12px">Expected from inventory sold: <strong>${fmt(exp)}</strong></div>`:''}
   ${PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${pmts[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('')}
   <div style="background:var(--card2);border-radius:9px;padding:12px;margin:10px 0;display:flex;justify-content:space-between;align-items:center">
@@ -3590,12 +3536,12 @@ function addSupItem(){
 // ===================================================
 // REPS PAGE (standalone tab) + per-rep profile
 // ===================================================
-function repWorkedShows(repId){ return (S.shows||[]).filter(sh=>(sh.repIds||[]).includes(repId)||repShowSales(sh,repId)>0||(sh.repPayout&&sh.repPayout[repId]!=null)); }
+function repWorkedShows(repId){ return (S.shows||[]).filter(sh=>(sh.repIds||[]).includes(repId)||repShowSales(sh,repId)>0||repShowDayPay(sh,repId)>0||(sh.repPayout&&sh.repPayout[repId]!=null)); }
 function rReps(){
   const reps=[...(S.reps||[])].filter(r=>r.active).sort((a,b)=>(b.isSelf?1:0)-(a.isSelf?1:0));
   let h=`<div class="sec-title" style="margin-bottom:4px">👥 Sales Reps</div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Tap a rep for their full breakdown — shows worked, sales, and what they're owed.</div>`;
-  // ---- Payouts Due board: every commission rep + flat/hourly/manual worker who is still owed money ----
+  // ---- Payouts Due board: every daily-pay rep + flat/hourly/manual worker who is still owed money ----
   (()=>{
     const repDebts=reps.filter(r=>!r.isSelf).map(r=>({r,owed:Math.max(0,repEarned(r.id)-repPaid(r.id))})).filter(x=>x.owed>0.005);
     const workerDebts=[]; (S.shows||[]).forEach(sh=>(sh.workers||[]).forEach(w=>{const owed=Math.max(0,workerPayout(w)-(parseFloat(w.paid)||0));if(owed>0.005)workerDebts.push({sh,w,owed});}));
@@ -3604,22 +3550,22 @@ function rReps(){
     const row=(name,sub,owed,btn)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div style="min-width:0"><div style="font-weight:700;font-size:13px">${name}</div><div style="font-size:10px;color:var(--muted)">${sub}</div></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span style="color:var(--gold);font-weight:800">${fmt(owed)}</span>${btn}</div></div>`;
     h+=`<div class="card" style="border-color:var(--gold);margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700">💸 Payouts Due</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(grand)}</div></div>
-      ${repDebts.map(x=>row(x.r.name,'commission rep',x.owed,`<button class="btn btn-xs btn-gold" onclick="openLogRepPmt('${x.r.id}')">Pay</button>`)).join('')}
+      ${repDebts.map(x=>row(x.r.name,'sales rep · paid per day',x.owed,`<button class="btn btn-xs btn-gold" onclick="openLogRepPmt('${x.r.id}')">Pay</button>`)).join('')}
       ${workerDebts.map(x=>row((x.w.name||'Worker').replace(/</g,'&lt;'),x.sh.name.replace(/</g,'&lt;')+' · '+(((WORKER_TYPES.find(t=>t.k===x.w.type)||{}).l)||'flat'),x.owed,`<button class="btn btn-xs btn-gold" onclick="openEditWorker('${x.sh.id}','${x.w.id}')">Pay</button>`)).join('')}
     </div>`;
   })();
   if(!reps.length){ h+='<div class="empty"><div class="ei">👥</div><div>No reps yet.</div></div>'; }
   reps.forEach(r=>{
     const earned=repEarned(r.id),paid=repPaid(r.id),owed=Math.max(0,earned-paid);
-    const worked=repWorkedShows(r.id); let sold=0; worked.forEach(sh=>sold+=repShowSales(sh,r.id));
+    const worked=repWorkedShows(r.id);
     h+=`<div class="card" style="margin-bottom:8px;cursor:pointer" onclick="openRepProfile('${r.id}')">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:800;font-size:15px">${r.name}${r.isSelf?' 👑':''}</div>
         <div style="font-size:11px;color:var(--muted)">${worked.length} show${worked.length!==1?'s':''} ›</div>
       </div>
-      ${r.isSelf?`<div style="font-size:12px;color:var(--muted);margin-top:4px">Owner — paid by show profit, no commission</div>`:`
+      ${r.isSelf?`<div style="font-size:12px;color:var(--muted);margin-top:4px">Owner — paid by show profit</div>`:`
       <div class="g3" style="margin-top:8px">
-        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--green)">${fmt(sold)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Sold</div></div>
+        <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--green)">${fmt(earned)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Earned</div></div>
         <div style="text-align:center"><div style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(owed)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Owed</div></div>
         <div style="text-align:center"><div style="font-size:15px;font-weight:900">${fmt(paid)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Paid</div></div>
       </div>`}
@@ -3632,25 +3578,24 @@ function openRepProfile(repId){
   const r=(S.reps||[]).find(x=>x.id===repId); if(!r)return;
   const earned=repEarned(repId),paid=repPaid(repId),owed=Math.max(0,earned-paid);
   const shows=repWorkedShows(repId);
-  const rows=shows.map(sh=>{const sold=repShowSales(sh,repId),comm=repShowComm(sh,repId);const hrs=(sh.repHours&&sh.repHours[repId]!=null)?(parseFloat(sh.repHours[repId])||0):null;
-    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${sh.name}</span><span style="color:var(--gold)">${fmt(comm)}</span></div><div style="color:var(--muted);font-size:11px">sold ${fmt(sold)}${hrs?` · ${hrs}h · ${fmt(hrs>0?comm/hrs:0)}/hr`:''}</div></div>`;}).join('');
+  const rows=shows.map(sh=>{const pay=repShowPay(sh,repId);const hrs=(sh.repHours&&sh.repHours[repId]!=null)?(parseFloat(sh.repHours[repId])||0):null;
+    const daysPaid=(sh.days||[]).filter(d=>repDayPay(d,repId)>0).length;
+    const sub=[daysPaid?`${daysPaid} day${daysPaid!==1?'s':''} paid`:'no day pay yet']; if(hrs){sub.push(hrs+'h'); if(pay)sub.push(fmt(pay/hrs)+'/hr');}
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${sh.name}</span><span style="color:var(--gold)">${fmt(pay)}</span></div><div style="color:var(--muted);font-size:11px">${sub.join(' · ')}</div></div>`;}).join('');
   const pays=(r.payments||[]).slice().reverse().map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>${p.date}${p.note?' — '+p.note:''}</span><span style="color:var(--green)">${fmt(p.amount)}</span></div>`).join('');
   mOpen(`<div class="mh"><div class="mt">${r.name}${r.isSelf?' 👑':''}</div><button class="mx" onclick="mClose()">×</button></div>
-  ${r.isSelf?'<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Owner — your pay is the show profit, not a commission.</div>':`
+  ${r.isSelf?'<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Owner — your pay is the show profit.</div>':`
   <div class="g3" style="margin-bottom:12px">
     <div class="sbox"><div class="sl">EARNED</div><div class="sv sm r">${fmt(earned)}</div></div>
     <div class="sbox"><div class="sl">PAID</div><div class="sv sm g">${fmt(paid)}</div></div>
     <div class="sbox"><div class="sl">BALANCE OWED</div><div class="sv sm" style="color:var(--gold)">${fmt(owed)}</div></div>
-  </div>`}
-  ${r.isSelf?'':`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">💰 Commission profile</div>
-  <div style="background:var(--card2);border-radius:8px;padding:8px;margin-bottom:12px;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px">
-    ${COMM_PROFILE_METHODS.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--muted)">${m.l}</span><span style="font-weight:700">${Math.round(repRateForMethod(r,m.k)*100)}%</span></div>`).join('')}
-  </div>`}
+  </div>
+  <div style="background:var(--card2);border-radius:8px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--muted)">💵 Paid a flat amount <strong style="color:var(--text)">per day</strong> — enter it on each show day (💵 Day Pay). Earned = the day pays added up.</div>`}
   <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Shows worked (${shows.length})</div>
   ${rows||'<div style="font-size:12px;color:var(--muted)">No shows yet.</div>'}
   ${pays?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:10px 0 4px">Payments logged</div>${pays}`:''}
   ${!r.isSelf?`<button class="btn btn-gold btn-full" style="margin-top:12px" onclick="mClose();openLogRepPmt('${repId}')">💰 Log Payment to ${r.name}</button>`:''}
-  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose();openEditRep('${repId}')">✏️ Edit Rep &amp; Rates</button>`);
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose();openEditRep('${repId}')">✏️ Edit Rep</button>`);
 }
 function openAddRep(){
   mOpen(`<div class="mh"><div class="mt">👤 Add Rep</div><button class="mx" onclick="mClose()">×</button></div>
@@ -3677,14 +3622,7 @@ function openEditRep(repId){
       <span>Active (appears in show rosters)</span>
     </label>
   </div>
-  ${!rep.isSelf?`<div class="fg"><label class="fl">Commission rates — blank = default (${Math.round(DEFAULT_COMM_RATE*100)}% all methods)</label>
-    <div class="g2" style="gap:8px">
-      <div><label class="fl" style="font-size:10px">DIRECT % <span style="opacity:.6">(Cash/Venmo/PayPal/Cash App/Zelle)</span></label><input class="fi" type="number" id="er_commcash" step="1" min="0" max="100" value="${(rep.commCash!=null&&rep.commCash!=='')?Math.round(rep.commCash*100):''}" placeholder="${Math.round(DEFAULT_COMM_RATE*100)}"></div>
-      <div><label class="fl" style="font-size:10px">CARD % <span style="opacity:.6">(Square/Credit/Debit)</span></label><input class="fi" type="number" id="er_commcard" step="1" min="0" max="100" value="${(rep.commCard!=null&&rep.commCard!=='')?Math.round(rep.commCard*100):''}" placeholder="${Math.round(DEFAULT_COMM_RATE*100)}"></div>
-    </div>
-    <div style="font-size:10px;color:var(--muted);margin-top:4px">${COMM_PROFILE_METHODS.map(m=>m.l+' '+Math.round(repRateForMethod(rep,m.k)*100)+'%').join(' · ')}</div>
-  </div>
-  <button type="button" class="btn btn-ghost btn-sm btn-full" style="margin:-4px 0 12px" onclick="var c=prompt('Flat commission % — applies to BOTH cash and card','40');if(c!==null&&c!==''){$$('er_commcash').value=c;$$('er_commcard').value=c;}">⚡ Set one flat rate (e.g. 40% both)</button>`:''}
+  ${!rep.isSelf?`<div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--muted)">💵 <strong style="color:var(--text)">Paid per day.</strong> No commission percentages. Enter what ${rep.name} gets for each day worked on the day screen (💵 Day Pay) or from the show's rep list.</div>`:''}
   ${(()=>{
     const earned=repEarned(repId);const paid=repPaid(repId);const owed=Math.max(0,earned-paid);
     if(!earned)return'';
@@ -3703,56 +3641,58 @@ function saveEditRep(repId){
   rep.name=($$('er_name').value||rep.name).trim();
   rep.phone=($$('er_phone').value||'').trim();
   rep.active=$$('er_active').checked;
-  if(!rep.isSelf){
-    const cc=($$('er_commcash')||{}).value; rep.commCash=(cc==null||cc==='')?null:((parseFloat(cc)||0)/100);
-    const cd=($$('er_commcard')||{}).value; rep.commCard=(cd==null||cd==='')?null:((parseFloat(cd)||0)/100);
-  }
   mClose();saveS();toast('✅ Saved!');rSettings();
 }
-// Per-show payout override — set what you ACTUALLY paid a rep for this show (replaces the calculated commission)
-function openEditPayout(shId,repId){
+// ---- DAY PAY ENTRY ----
+// Two ways in, same data (day.repPay): per DAY for everyone (openDayPay, the daily workflow),
+// or per REP across all the show's days (openRepDayPay, from the show's rep list).
+function openDayPay(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
+  const reps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+  if(!reps.length){toast('Assign reps to this show first');return;}
+  mOpen(`<div class="mh"><div class="mt">💵 Day Pay — ${d.date||'Day '+(di+1)}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${sh.name} — enter the flat $ each rep gets for THIS day. No percentages. Blank = not paid this day.</div>
+  ${reps.map(r=>`<div class="fg"><label class="fl">${r.name} — pay for this day ($)</label><input class="fi" type="number" id="dp_${r.id}" step="0.01" min="0" value="${(d.repPay&&d.repPay[r.id]!=null&&d.repPay[r.id]!=='')?d.repPay[r.id]:''}" placeholder="0.00" inputmode="decimal"></div>`).join('')}
+  <button class="btn btn-gold btn-full" onclick="saveDayPay('${shId}',${di})">✅ Save Day Pay</button>`);
+}
+function saveDayPay(shId,di){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
+  if(!d.repPay)d.repPay={};
+  (sh.repIds||[]).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(); if(v==='')delete d.repPay[rid]; else d.repPay[rid]=parseFloat(v)||0; });
+  mClose();saveS();toast('✅ Day pay saved · '+fmt(calcDayPay(d))+' this day');renderCur();
+}
+// Per-rep view: one input per show day, plus pay method/note and an optional payment log.
+function openRepDayPay(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);const rep=(S.reps||[]).find(r=>r.id===repId);
   if(!sh||!rep)return;
-  const auto=repShowCalcComm(sh,repId);
-  const ov=sh.repPayout&&sh.repPayout[repId];
-  const cur=(ov!=null&&ov!=='')?ov:'';
   const meta=(sh.repPayMeta&&sh.repPayMeta[repId])||{};
   const paidThis=repPaid(repId,sh.id);
+  const legacyOv=sh.repPayout&&sh.repPayout[repId];
+  const hasLegacy=(legacyOv!=null&&legacyOv!=='')&&repShowDayPay(sh,repId)<=0;
   const methodOpts=['','Cash','Square','Debit','Venmo','Zelle','Cash App','PayPal','Check','Other'].map(m=>`<option value="${m}"${meta.method===m?' selected':''}>${m||'— select —'}</option>`).join('');
-  mOpen(`<div class="mh"><div class="mt">💵 Payout — ${rep.name}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name}</div>
-  <div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px">
-    Calculated commission (formula): <strong style="color:var(--gold)">${fmt(auto)}</strong><br>
-    <span style="color:var(--muted)">The override below is what you ACTUALLY paid. It never erases the calculated number — both are kept and shown.</span>
-  </div>
-  <div class="fg"><label class="fl">Actual payout override for this show ($) — blank = use calculated</label><input class="fi" type="number" id="ep_amt" step="0.01" min="0" value="${cur}" placeholder="${auto.toFixed(2)}"></div>
+  mOpen(`<div class="mh"><div class="mt">💵 Day Pay — ${rep.name}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — flat $ per day worked. Enter each day ${rep.name} worked and what they get for it.</div>
+  ${hasLegacy?`<div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--muted)">This show has a <strong style="color:var(--gold)">legacy payout of ${fmt(parseFloat(legacyOv)||0)}</strong> from the old commission system. Entering day pay below replaces it.</div>`:''}
+  ${(sh.days||[]).map((d,i)=>`<div class="fg"><label class="fl">${d.date||('Day '+(i+1))} ($)</label><input class="fi" type="number" id="rdp_${i}" step="0.01" min="0" value="${(d.repPay&&d.repPay[repId]!=null&&d.repPay[repId]!=='')?d.repPay[repId]:''}" placeholder="0.00" inputmode="decimal"></div>`).join('')}
   <div class="fg"><label class="fl">Payment method used to pay the rep</label><select class="fi" id="ep_method">${methodOpts}</select></div>
-  <div class="fg"><label class="fl">Payout note (optional)</label><input class="fi" id="ep_note" value="${(meta.note||'').replace(/"/g,'&quot;')}" placeholder="e.g. paid cash same night, included $20 gas"></div>
-  <div class="fg"><label class="fl">Log a payment now (optional) — $ paid this show</label><input class="fi" type="number" id="ep_paid" step="0.01" min="0" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Pay note (optional)</label><input class="fi" id="ep_note" value="${(meta.note||'').replace(/"/g,'&quot;')}" placeholder="e.g. paid cash same night, included $20 gas"></div>
+  <div class="fg"><label class="fl">Log a payment now (optional) — $ actually handed over</label><input class="fi" type="number" id="ep_paid" step="0.01" min="0" placeholder="0.00"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Already logged paid for this show: <strong>${fmt(paidThis)}</strong></div>
-  <button class="btn btn-gold btn-full" style="margin-bottom:8px" onclick="saveEditPayout('${shId}','${repId}')">Save Payout</button>
-  ${(ov!=null&&ov!=='')?`<button class="btn btn-ghost btn-full" onclick="clearEditPayout('${shId}','${repId}')">↩︎ Clear override (use calculated ${fmt(auto)})</button>`:''}`);
+  <button class="btn btn-gold btn-full" onclick="saveRepDayPay('${shId}','${repId}')">✅ Save Day Pay</button>`);
 }
-function saveEditPayout(shId,repId){
+function saveRepDayPay(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const rep=(S.reps||[]).find(r=>r.id===repId);
-  const raw=($$('ep_amt')||{}).value;
-  if(!sh.repPayout)sh.repPayout={};
-  if(raw==null||raw==='')delete sh.repPayout[repId];
-  else sh.repPayout[repId]=parseFloat(raw)||0;
-  // payment method + note (per show), preserved separately from the calculated commission
+  (sh.days||[]).forEach((d,i)=>{ const el=$$('rdp_'+i); if(!el)return; if(!d.repPay)d.repPay={}; const v=(el.value||'').trim(); if(v==='')delete d.repPay[repId]; else d.repPay[repId]=parseFloat(v)||0; });
+  // once day pay exists, retire any legacy per-show payout so it can't double up
+  if(repShowDayPay(sh,repId)>0&&sh.repPayout)delete sh.repPayout[repId];
   if(!sh.repPayMeta)sh.repPayMeta={};
   const method=($$('ep_method')||{}).value||''; const note=(($$('ep_note')||{}).value||'').trim();
   if(method||note)sh.repPayMeta[repId]={method,note}; else delete sh.repPayMeta[repId];
   // optional: log an actual payment attributed to this show
   const paid=parseFloat(($$('ep_paid')||{}).value);
-  if(paid&&paid>0&&rep){ if(!rep.payments)rep.payments=[]; rep.payments.push({id:'rp_'+Date.now(),date:new Date().toISOString().split('T')[0],amount:paid,note:note||('Payout — '+sh.name),method,showId:sh.id}); }
-  mClose();saveS();toast('✅ Payout saved');renderCur();
-}
-function clearEditPayout(shId,repId){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  if(sh.repPayout)delete sh.repPayout[repId];
-  mClose();saveS();toast('Override cleared — using calculated');renderCur();
+  if(paid&&paid>0&&rep){ if(!rep.payments)rep.payments=[]; rep.payments.push({id:'rp_'+Date.now(),date:new Date().toISOString().split('T')[0],amount:paid,note:note||('Day pay — '+sh.name),method,showId:sh.id}); }
+  mClose();saveS();toast('✅ Day pay saved · '+fmt(repShowPay(sh,repId))+' this show');renderCur();
 }
 // ---- Flat / hourly / manual workers (non-commission, e.g. Olivia paid straight cash) ----
 function openAddWorker(shId){ _openWorkerModal(shId,null); }
@@ -3764,7 +3704,7 @@ function _openWorkerModal(shId,wid){
   const typeOpts=WORKER_TYPES.map(t=>`<option value="${t.k}"${type===t.k?' selected':''}>${t.l}</option>`).join('');
   const methodOpts=['','Cash','Square','Debit','Venmo','Zelle','Cash App','PayPal','Check','Other'].map(m=>`<option value="${m}"${w.payMethod===m?' selected':''}>${m||'— select —'}</option>`).join('');
   mOpen(`<div class="mh"><div class="mt">${wid?'✏️ Edit':'➕ Add'} Worker</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — flat / hourly / manual (non-commission)</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — flat / hourly / manual helper (not a daily-pay rep)</div>
   <div class="fg"><label class="fl">Name</label><input class="fi" id="wk_name" value="${(w.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Olivia"></div>
   <div class="fg"><label class="fl">Role (optional)</label><input class="fi" id="wk_role" value="${(w.role||'').replace(/"/g,'&quot;')}" placeholder="e.g. helper, setup"></div>
   <div class="fg"><label class="fl">Payout type</label><select class="fi" id="wk_type" onchange="_wkToggle()">${typeOpts}</select></div>
@@ -3845,52 +3785,11 @@ function saveAssignReps(shId){
   const reps=(S.reps||[]).filter(r=>r.active);
   sh.repIds=reps.filter(r=>$$('ar_'+r.id)&&$$('ar_'+r.id).checked).map(r=>r.id);
   sh.repOnlyShow=!!($$('ar_reponly')&&$$('ar_reponly').checked);
-  // Ensure all show days have repSales slots for each rep
-  (sh.days||[]).forEach(day=>{
-    if(!day.repSales)day.repSales=[];
-    sh.repIds.forEach(repId=>{
-      if(!day.repSales.find(x=>x.repId===repId))
-        day.repSales.push({repId,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0});
-    });
-  });
   mClose();saveS();toast('✅ Roster saved!');rShow();
 }
-function openRepSalesEntry(shId,di,repId){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  const day=sh.days[di];if(!day)return;
-  if(!day.repSales)day.repSales=[];
-  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep)return;
-  let rs=day.repSales.find(x=>x.repId===repId);
-  if(!rs){rs={repId,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0,cash:0};day.repSales.push(rs);}
-  const pmtFields=PMTS.map(p=>`<div class="fg"><label class="fl">${p.icon} ${p.label}${!rep.isSelf?` (${Math.round(repRateForMethod(rep,p.key)*100)}% comm)`:''}</label><input class="fi" type="number" id="rs_${p.key}" placeholder="0.00" step="0.01" min="0" value="${rs[p.key]||''}" inputmode="decimal"></div>`).join('');
-  const currentComm=calcRepSalesComm({...rs,repId});
-  mOpen(`<div class="mh"><div class="mt">💰 ${rep.name}${rep.isSelf?' 👑':''} — ${day.date}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter totals collected by ${rep.name} for this day. Each payment type separately.</div>
-  ${pmtFields}
-  ${!rep.isSelf?`<div style="background:var(--redbg);border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;text-align:center">
-    Commission will auto-calculate on save
-  </div>`:''}
-  <button class="btn btn-gold btn-full" onclick="saveRepSalesEntry('${shId}',${di},'${repId}')">✅ Save Sales</button>`);
-}
-// Sum every rep's entered money for a day, per payment method (the day's money total when reps are used)
+// LEGACY: per-rep sales entry was removed (Jul 2026) — the day's money is one total now.
+// Old d.repSales data is still read for display on old shows; this just sums it.
 function sumRepSalesForDay(day){ const p={}; PMTS.forEach(x=>p[x.key]=0); (day.repSales||[]).forEach(rs=>PMTS.forEach(x=>{p[x.key]+=parseFloat(rs[x.key])||0;})); return p; }
-function saveRepSalesEntry(shId,di,repId){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  const day=sh.days[di];if(!day)return;
-  if(!day.repSales)day.repSales=[];
-  let rs=day.repSales.find(x=>x.repId===repId);
-  if(!rs){rs={repId};day.repSales.push(rs);}
-  PMTS.forEach(p=>{rs[p.key]=parseFloat($$('rs_'+p.key).value)||0;});
-  const comm=calcRepSalesComm({...rs,repId});
-  // Auto-tally: the day's Money total becomes the SUM of all reps' entered sales (no more double entry).
-  day.payments=sumRepSalesForDay(day);
-  day.paymentsAuto=true; // marks the day total as rep-derived (vs a manual money count)
-  mClose();saveS();
-  const rep=(S.reps||[]).find(r=>r.id===repId);
-  const dayTot=calcPmt(day.payments);
-  toast('✅ Sales saved'+(comm>0?` · Comm: ${fmt(comm)}`:'')+` · Day total: ${fmt(dayTot)}`);
-  go('show',shId,di);
-}
 
 // ===================================================
 // SETTINGS
@@ -3978,7 +3877,7 @@ function rSettings(){
   <div class="g2" style="gap:8px;margin-bottom:8px">
     <button class="btn btn-ghost btn-full" onclick="exportSeasonCSV()">📄 Season CSV</button>
     <button class="btn btn-ghost btn-full" onclick="exportExpensesCSV()">📄 Expenses CSV</button>
-    <button class="btn btn-ghost btn-full" onclick="exportRepCSV()">📄 Rep Commission CSV</button>
+    <button class="btn btn-ghost btn-full" onclick="exportRepCSV()">📄 Rep Pay CSV</button>
     <button class="btn btn-gold btn-full" onclick="printFullReport()">🖨️ Full Report (PDF)</button>
   </div>
   <div style="font-size:11px;color:var(--muted)">Tip: open any show and tap Export for a single-show CSV or PDF.</div></div>
