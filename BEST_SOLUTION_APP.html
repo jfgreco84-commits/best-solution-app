@@ -2174,6 +2174,8 @@ function showEditCosts(id){
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">Call time = 1 hour before open. Different each day is fine (e.g. Fri 4–8, Sat 10–4, Sun 10–3).</div>
   <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
+  <div class="fg"><label class="fl">Sales Tax % on CARD sales at THIS venue</label><input class="fi" type="number" id="ec_ctax" step="0.1" min="0" max="15" value="${(sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?(sh.cardTaxRate*100):''}" placeholder="${(((S.settings.cardTax||0))*100).toFixed(1)} (global default)"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Rates differ by county/state: West Bend 5.5, Waukesha Cty 5.0, Milwaukee city 7.9, Franklin 5.9. Leave blank for the global rate.</div>
   <div class="fg"><label class="fl">👥 Crew — hours worked (pay is entered per day)</label>
     ${(()=>{
       const ids=[...(sh.repIds||[])]; const owner=(S.reps||[]).find(r=>r.isSelf);
@@ -2228,6 +2230,7 @@ function saveEditCosts(id){
   for(let i=0; $$('ec_open_'+i); i++){ const o=v('ec_open_'+i), c=v('ec_close_'+i); if(sh.days&&sh.days[i]){ sh.days[i].openTime=o||null; sh.days[i].closeTime=c||null; } }
   if(sh.days&&sh.days[0]){ sh.openTime=sh.days[0].openTime||null; sh.closeTime=sh.days[0].closeTime||null; } // keep show-level = day 1 for back-compat
   const tx=v('ec_tax'); sh.taxRate = tx===''?null:((parseFloat(tx)||0)/100);
+  const ctx=v('ec_ctax'); sh.cardTaxRate = ctx===''?null:((parseFloat(ctx)||0)/100);
   // crew: hours worked (rep pay is entered per day on the day screens)
   if(!sh.repHours)sh.repHours={};
   const _crew=[...new Set([...((S.reps||[]).filter(r=>r.isSelf).map(r=>r.id)), ...(sh.repIds||[]), ...Object.keys(sh.repPayout||{})])];
