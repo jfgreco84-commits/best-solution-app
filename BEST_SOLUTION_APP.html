@@ -3716,7 +3716,7 @@ function openRepProfile(repId){
     const daysPaid=(sh.days||[]).filter(d=>repDayPay(d,repId)>0).length;
     const sub=[daysPaid?`${daysPaid} day${daysPaid!==1?'s':''} paid`:'no day pay yet']; if(hrs){sub.push(hrs+'h'); if(pay)sub.push(fmt(pay/hrs)+'/hr');}
     return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="display:flex;justify-content:space-between;font-weight:700"><span>${sh.name}</span><span style="color:var(--gold)">${fmt(pay)}</span></div><div style="color:var(--muted);font-size:11px">${sub.join(' · ')}</div></div>`;}).join('');
-  const pays=(r.payments||[]).slice().reverse().map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0"><span>${p.date}${p.note?' — '+p.note:''}</span><span style="color:var(--green)">${fmt(p.amount)}</span></div>`).join('');
+  const pays=(r.payments||[]).map((p,oi)=>({p,oi})).reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);padding:2px 0"><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.p.date}${x.p.note?' — '+x.p.note:''}</span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--green)">${fmt(x.p.amount)}</span><span style="cursor:pointer;color:var(--red);font-weight:900;padding:2px 6px" onclick="delRepPmt('${r.id}',${x.oi})">✕</span></span></div>`).join('');
   mOpen(`<div class="mh"><div class="mt">${r.name}${r.isSelf?' 👑':''}</div><button class="mx" onclick="mClose()">×</button></div>
   ${r.isSelf?'<div style="font-size:13px;color:var(--muted);margin-bottom:10px">Owner — your pay is the show profit.</div>':`
   <div class="g3" style="margin-bottom:12px">
@@ -3826,7 +3826,13 @@ function saveRepDayPay(shId,repId){
   if(method||note)sh.repPayMeta[repId]={method,note}; else delete sh.repPayMeta[repId];
   // optional: log an actual payment attributed to this show
   const paid=parseFloat(($$('ep_paid')||{}).value);
-  if(paid&&paid>0&&rep){ if(!rep.payments)rep.payments=[]; rep.payments.push({id:'rp_'+Date.now(),date:_todayKey(),amount:paid,note:note||('Day pay — '+sh.name),method,showId:sh.id}); }
+  if(paid&&paid>0&&rep){
+    if(!rep.payments)rep.payments=[];
+    const dup=rep.payments.find(p=>p.showId===sh.id&&Math.abs((parseFloat(p.amount)||0)-paid)<0.005);
+    if(!dup||(typeof confirm==='function'&&confirm('⚠️ '+fmt(paid)+' is ALREADY logged as paid for this show. Log it AGAIN as a second payment?')))
+      rep.payments.push({id:'rp_'+Date.now(),date:_todayKey(),amount:paid,note:note||('Day pay — '+sh.name),method,showId:sh.id});
+    else toast('Skipped duplicate payment log');
+  }
   mClose();saveS();toast('✅ Day pay saved · '+fmt(repShowPay(sh,repId))+' this show');renderCur();
 }
 // ---- Flat / hourly / manual workers (non-commission, e.g. Olivia paid straight cash) ----
@@ -3873,6 +3879,13 @@ function deleteWorker(shId,wid){
   sh.workers=(sh.workers||[]).filter(w=>w.id!==wid);
   mClose();saveS();toast('Worker removed');renderCur();
 }
+function delRepPmt(repId,oi){
+  const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep||!rep.payments||!rep.payments[oi])return;
+  const p=rep.payments[oi];
+  if(typeof confirm==='function'&&!confirm('Delete this logged payment of '+fmt(p.amount)+' ('+(p.date||'')+(p.note?' — '+p.note:'')+')?'))return;
+  rep.payments.splice(oi,1);
+  saveS();toast('🗑️ Payment removed');mClose();openRepProfile(repId);
+}
 function openLogRepPmt(repId){
   const rep=(S.reps||[]).find(r=>r.id===repId);if(!rep||rep.isSelf)return;
   const earned=repEarned(repId);const paid=repPaid(repId);const owed=Math.max(0,earned-paid);
@@ -3894,6 +3907,8 @@ function saveRepPmt(repId){ if(_dupGuard())return;
   const date=$$('lp_date').value||_todayKey();
   const note=($$('lp_note').value||'').trim();
   if(!rep.payments)rep.payments=[];
+  const dup=rep.payments.find(p=>Math.abs((parseFloat(p.amount)||0)-amt)<0.005);
+  if(dup&&typeof confirm==='function'&&!confirm('⚠️ '+fmt(amt)+' is ALREADY logged for '+rep.name+' ('+(dup.date||'')+'). Log it AGAIN as a second payment?'))return;
   rep.payments.push({id:'rp_'+Date.now(),date,amount:amt,note});
   mClose();saveS();toast('✅ Payment logged for '+rep.name);rSettings();
 }
