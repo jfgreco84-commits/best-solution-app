@@ -2804,6 +2804,7 @@ function rShow(){
   ${(()=>{const dl=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
     const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
     return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
+  ${preShowCalcHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
     <div><div class="sl">Profit</div><div class="sv ${t.profit>=0?'g':'r'}">${fmt(t.profit)}</div></div>
@@ -2974,6 +2975,69 @@ function rShow(){
   })()}
   ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
   <div style="height:10px"></div>`;
+}
+
+
+// ===================================================
+// PRE-SHOW INVENTORY CALCULATOR (restored Jul 2026)
+// "What am I bringing?" -> potential sales volume + potential over product cost, before any counts.
+// ===================================================
+function _psPrice(sh,k){ const P=sh&&sh.prices; return (P&&P[k]!=null)?P[k]:getP(k); }
+function preShowStockOf(sh){
+  if(sh.preShowStock&&Object.values(sh.preShowStock).some(v=>(parseInt(v)||0)>0))return sh.preShowStock;
+  if(sh.packedInventory&&Object.values(sh.packedInventory).some(v=>(parseInt(v)||0)>0))return sh.packedInventory;
+  return sh.preShowStock||{};
+}
+function preShowTotals(sh){
+  const st=preShowStockOf(sh);
+  let units=0,volume=0,cogs=0;
+  SKUS.forEach(s=>{const q=parseInt(st[s.key])||0;units+=q;volume+=q*_psPrice(sh,s.key);cogs+=q*getCost(s.key);});
+  return {st,units,volume,cogs,over:volume-cogs};
+}
+function preShowCalcHTML(sh){
+  const {st,units,volume,cogs,over}=preShowTotals(sh);
+  const usingPacked=!(sh.preShowStock&&Object.values(sh.preShowStock).some(v=>(parseInt(v)||0)>0)) && units>0;
+  const rows=SKUS.map(s=>{const q=parseInt(st[s.key])||0;if(!q)return'';return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)"><span>${s.emoji} ${s.short} × <strong>${q}</strong></span><span style="color:var(--gold)">${fmt(q*_psPrice(sh,s.key))}</span></div>`;}).join('');
+  return `<div class="card gb" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800">🎒 Pre-Show Inventory Calculator</div>
+      <button class="btn btn-gold btn-xs" onclick="openPreShowStock('${sh.id}')">${units>0?'✏️ Edit Stock':'+ Enter Stock'}</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Enter the stock you're bringing to this show to see what it could do — before you log a single count.${usingPacked?' <span style="color:var(--blue)">(showing packed inventory)</span>':''}</div>
+    ${units>0?`
+    <div class="g3" style="margin-bottom:10px">
+      <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmtN(units)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Units Bringing</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--green)">${fmt(volume)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Potential Sales</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--blue)">${fmt(over)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Over Product Cost</div></div>
+    </div>
+    ${rows}
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
+      <span>Cost of goods on this stock: <strong style="color:var(--text)">${fmt(cogs)}</strong></span>
+      <span>at full sell-through</span>
+    </div>`:`<div style="text-align:center;color:var(--muted);font-size:12px;padding:8px 0">No stock entered yet. Tap <strong style="color:var(--gold)">+ Enter Stock</strong> to project this show's potential.</div>`}
+  </div>`;
+}
+function openPreShowStock(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const st=sh.preShowStock||{};
+  mOpen(`<div class="mh"><div class="mt">🎒 Stock You're Bringing</div><button class="mx" onclick="mClose()">×</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Enter how many of each you're packing for <strong>${sh.name}</strong>. We'll project the potential sales volume.</div>
+    ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.emoji} ${s.name}</div><div class="cr-s">${fmt(_psPrice(sh,s.key))} each</div></div><div class="cr-c"><input class="cri" type="number" inputmode="numeric" id="pss_${s.key}" value="${parseInt(st[s.key])||''}" placeholder="0" min="0"></div></div>`).join('')}
+    <div id="pssLive" style="font-size:12px;color:var(--muted);text-align:center;margin:12px 0"></div>
+    <button class="btn btn-gold btn-full" onclick="savePreShowStock('${shId}')">Save Pre-Show Stock</button>
+    <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="clearPreShowStock('${shId}')">Clear</button>`);
+  const live=()=>{let u=0,v=0,c=0;SKUS.forEach(s=>{const q=parseInt(($$('pss_'+s.key)||{}).value)||0;u+=q;v+=q*_psPrice(sh,s.key);c+=q*getCost(s.key);});const el=$$('pssLive');if(el)el.innerHTML=`Bringing <strong style="color:var(--gold)">${u}</strong> units · potential <strong style="color:var(--green)">${fmt(v)}</strong> · over cost <strong style="color:var(--blue)">${fmt(v-c)}</strong>`;};
+  SKUS.forEach(s=>{const el=$$('pss_'+s.key);if(el)el.addEventListener('input',live);});
+  live();
+}
+function savePreShowStock(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  const st={};SKUS.forEach(s=>{const v=parseInt(($$('pss_'+s.key)||{}).value)||0;if(v>0)st[s.key]=v;});
+  sh.preShowStock=st;mClose();saveS();toast('Pre-show stock saved');
+}
+function clearPreShowStock(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  sh.preShowStock={};mClose();saveS();toast('Pre-show stock cleared');
 }
 
 function rDay(sh,di){
