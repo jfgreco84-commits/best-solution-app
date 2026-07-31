@@ -1721,7 +1721,7 @@ function secInventory(C){
     </div>
     <table class="inv-table">
       <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
-      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:10px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
+      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:10px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*getCost(s.key))}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
       <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${C.invUnits}</td><td style="font-weight:900">${fmt(C.invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</td></tr>
     </table>
     ${C.lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${C.lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
@@ -1751,7 +1751,7 @@ function secBest(C){
 // ---- BORROWED FROM BATMAN (fully isolated tally; never touches inventory/shows/P&L) ----
 function bmInv(){ if(!S.batmanBorrow||typeof S.batmanBorrow!=="object")S.batmanBorrow={}; return S.batmanBorrow; }
 function bmBottles(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0),0);}
-function bmCost(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*s.cost,0);}
+function bmCost(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getCost(s.key),0);}
 function bmRetail(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getP(s.key),0);}
 function secBatman(){
   const b=bmInv(); const units=bmBottles(), cost=bmCost(), retail=bmRetail();
@@ -1768,7 +1768,7 @@ function secBatman(){
   <div class="card">
     <table class="inv-table">
       <tr><th>Product</th><th>Bottles</th><th>Cost Val</th><th>Sell Val</th></tr>
-      ${SKUS.map(s=>{const q=b[s.key]||0;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong></td><td style="font-weight:700;color:${q>0?"var(--text)":"var(--muted)"}">${q}</td><td>${fmt(q*s.cost)}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join("")}
+      ${SKUS.map(s=>{const q=b[s.key]||0;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong></td><td style="font-weight:700;color:${q>0?"var(--text)":"var(--muted)"}">${q}</td><td>${fmt(q*getCost(s.key))}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join("")}
       <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL OWED</td><td style="font-weight:900;color:var(--gold)">${units}</td><td style="font-weight:900">${fmt(cost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(retail)}</td></tr>
     </table>
   </div>
