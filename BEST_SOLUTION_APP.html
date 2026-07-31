@@ -4468,7 +4468,16 @@ async function cloudHydrate(){
   if(cloudUsed&&!localUsed){adoptCloud(cloud);return;}
   const localT=S._updatedAt||'',cloudT=cloud._updatedAt||'';
   if(cloudT>localT){ if(!looksUsed(S)||(typeof confirm!=='function')||confirm('Cloud has a NEWER copy than this device. Load it and replace this device\'s local data? (A local backup is kept either way.)'))adoptCloud(cloud); else await cloudPush(); }
-  else if(localT>cloudT)await cloudPush();
+  else if(localT>cloudT){
+    // SAFETY GUARD: never silently overwrite a richer cloud copy with a fresh/empty device.
+    const cloudDone=(cloud.shows||[]).filter(x=>x&&x.status==='completed').length;
+    const localDone=(S.shows||[]).filter(x=>x&&x.status==='completed').length;
+    if(cloudDone>localDone){
+      if(typeof confirm!=='function'||confirm('⚠️ SAFETY CHECK: the cloud copy has '+cloudDone+' completed shows; this device has only '+localDone+'. This device looks like a fresh copy. Tap OK to LOAD THE CLOUD COPY (recommended). Cancel keeps this device as-is WITHOUT overwriting the cloud.')){
+        adoptCloud(cloud);
+      } else { setSync('error'); toast('⚠️ Sync paused — cloud copy protected. Sign out or reload to resolve.'); }
+    } else await cloudPush();
+  }
   else setSync('synced');
 }
 async function cloudInit(){
