@@ -1503,7 +1503,6 @@ function rHome(){
         </div>
         ${payMissing?`<div class="wb red" style="margin-bottom:8px;font-size:11px">💵 Money logged, rep day pay not entered.</div>`:''}
         <div style="display:flex;gap:6px">
-          ${!d.locked?`<button class="btn btn-gold" style="flex:1.4;padding:10px 4px" onclick="openAddSale('${a.id}',${di})">💵 Add Sale</button>`:''}
           ${!hasM?`<button class="btn btn-ghost" style="flex:1;padding:10px 4px" onclick="showCntModal('${a.id}',${di},'morning')">🌅 Count</button>`:!hasE?`<button class="btn btn-ghost" style="flex:1;padding:10px 4px" onclick="showCntModal('${a.id}',${di},'evening')">🌙 Count</button>`:''}
           <button class="btn btn-ghost" style="flex:1;padding:10px 4px" onclick="openCloseout('${a.id}',${di})">🏁 Closeout</button>
         </div>
@@ -3212,7 +3211,6 @@ function rDay(sh,di){
       <div style="font-size:17px;font-weight:900">${d.date||'Day '+(di+1)}</div>
       <span class="chip ${haM&&haE&&haP?'green':isA?'gold':''}">${haM&&haE&&haP?'✓ COMPLETE':isA?'IN PROGRESS':'—'}</span>
     </div>
-    ${isA&&!d.locked?`<button class="btn btn-gold btn-full" style="margin-bottom:10px;font-size:16px;padding:14px" onclick="openAddSale('${sh.id}',${di})">💵 ADD SALE</button>`:''}
     <!-- 3-COLUMN COUNTS: Morning | Evening | Money -->
     <div style="display:flex;gap:6px;margin-bottom:6px">
       <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haM?'var(--border)':'var(--gold)'}">
@@ -3288,52 +3286,6 @@ function rDay(sh,di){
 }
 
 
-// ===== ADD SALE (Jul 2026): two taps in the booth — method, then amount. Card amounts auto-add sales tax. =====
-const BUNDLES=[
-  {label:'C5S + 2oz bag',amt:20},{label:'C5S + 2oz (last ditch)',amt:15},{label:'C5S + 8oz',amt:25},
-  {label:'C5S + 16oz',amt:30},{label:'C5S + 32oz',amt:35},{label:'C5L + 8oz',amt:35},
-  {label:'C5L + 16oz',amt:40},{label:'C5L + 32oz',amt:45},{label:'Show Special (5pc)',amt:80},{label:'Glasses Kit',amt:10}
-];
-function openAddSale(shId,di,method){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
-  if(d.locked){toast('🔒 Day locked.');return;}
-  const P=sh.prices||S.prices||{};
-  const ctr=showCardTaxRate(sh);
-  if(!method){
-    mOpen(`<div class="mh"><div class="mt">💵 Add Sale — how were you paid?</div><button class="mx" onclick="mClose()">×</button></div>
-    <div class="g2" style="gap:8px">${PMTS.map(p=>`<button class="btn btn-ghost" style="font-size:15px;padding:14px" onclick="openAddSale('${shId}',${di},'${p.key}')">${p.icon} ${p.label}</button>`).join('')}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:10px">Adds on top of today's total. Use ✏️ Fix Totals (Money box) for corrections.</div>
-    ${(d.salesLog&&d.salesLog.length)?`<button class="btn btn-ghost btn-full" style="margin-top:10px;border-color:var(--redbd);color:var(--red)" onclick="undoLastSale('${shId}',${di})">↩︎ Undo last sale (${d.salesLog[d.salesLog.length-1].label||''} ${fmt(d.salesLog[d.salesLog.length-1].amt)})</button>`:''}`);
-    return;
-  }
-  const isCard=(method==='square'||method==='debit');
-  const chips=[];
-  SKUS.forEach(s=>{const pr=(P[s.key]!=null)?P[s.key]:getP(s.key);chips.push({label:s.short,amt:pr});});
-  BUNDLES.forEach(b=>chips.push(b));
-  const pm=PMTS.find(p=>p.key===method);
-  mOpen(`<div class="mh"><div class="mt">${pm.icon} ${pm.label} — how much?</div><button class="mx" onclick="openAddSale('${shId}',${di})">←</button></div>
-  ${isCard&&ctr>0?`<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Card sale: ${(ctr*100).toFixed(1)}% sales tax is added automatically so your total matches the reader.</div>`:''}
-  <div style="display:flex;flex-wrap:wrap;gap:7px">${chips.map(c=>`<button class="btn btn-ghost" style="flex:1 1 44%;padding:12px 6px" onclick="addSaleApply('${shId}',${di},'${method}',${c.amt},'${c.label.replace(/'/g,'')}')"><span style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(c.amt)}</span>&nbsp;<span style="font-size:10px;color:var(--muted)">${c.label}</span></button>`).join('')}</div>
-  <div class="fg" style="margin-top:10px"><label class="fl">Custom amount</label><div style="display:flex;gap:8px"><input class="fi" type="number" id="as_custom" step="0.01" min="0" placeholder="0.00" style="flex:1"><button class="btn btn-gold" onclick="addSaleApply('${shId}',${di},'${method}',parseFloat($$('as_custom').value)||0,'custom')">Add</button></div></div>`);
-}
-function addSaleApply(shId,di,method,amt,label){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
-  amt=parseFloat(amt)||0; if(amt<=0){toast('Enter an amount');return;}
-  const ctr=showCardTaxRate(sh); const isCard=(method==='square'||method==='debit');
-  const rec=isCard&&ctr>0?Math.round(amt*(1+ctr)*100)/100:amt;
-  d.payments=d.payments||{}; d.payments[method]=Math.round(((parseFloat(d.payments[method])||0)+rec)*100)/100;
-  d.paymentsAuto=false;
-  if(!d.salesLog)d.salesLog=[]; d.salesLog.push({ts:new Date().toISOString(),method,amt:rec,label}); if(d.salesLog.length>500)d.salesLog=d.salesLog.slice(-500);
-  mClose();saveS();renderCur();
-  toast('✅ +'+fmt(rec)+' '+method.toUpperCase()+' — today: '+fmt(calcPmt(d.payments)));
-}
-function undoLastSale(shId,di){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d||!d.salesLog||!d.salesLog.length)return;
-  const last=d.salesLog.pop();
-  d.payments[last.method]=Math.max(0,Math.round(((parseFloat(d.payments[last.method])||0)-last.amt)*100)/100);
-  mClose();saveS();renderCur();
-  toast('↩︎ Removed '+fmt(last.amt)+' '+last.method.toUpperCase());
-}
 
 // ===================================================
 // DAY CLOSEOUT WIZARD — guided end-of-day checklist
