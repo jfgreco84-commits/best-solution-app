@@ -223,7 +223,7 @@
     <span class="hdr-logo">⚡</span>
     <div><div class="hdr-name">Best Solution</div><div class="hdr-sub">Dot Dynasty LLC</div></div>
   </div>
-  <div id="hdrR"></div>
+  <div style="display:flex;align-items:center;gap:10px"><span id="syncDot" onclick="go('settings')" title="Cloud sync — tap for details" style="width:10px;height:10px;border-radius:50%;background:#666;display:inline-block;cursor:pointer;flex-shrink:0"></span><div id="hdrR"></div></div>
 </div>
 
 <!-- PAGES -->
@@ -1385,6 +1385,29 @@ function go(pg,shId,dayIdx){
 // ===================================================
 // HOME - FULL COMMAND CENTER
 // ===================================================
+
+// ===== Multi-show helpers (Jul 2026): today's day index + deposit deadlines =====
+function todayDayIndex(sh){
+  const n=(sh.days||[]).length; if(!n)return 0;
+  if(sh.startDate&&/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate)){
+    const i=Math.round((new Date(_todayKey()+'T12:00:00')-new Date(sh.startDate+'T12:00:00'))/86400000);
+    if(i>=0&&i<n)return i; if(i>=n)return n-1; return 0;
+  }
+  for(let i=0;i<n;i++){const d=sh.days[i];if(!(d.morningCount&&d.eveningCount))return i;}
+  return n-1;
+}
+function depositAlerts(withinDays){
+  const today=_todayKey(); const out=[];
+  (S.shows||[]).forEach(sh=>{
+    if(sh.status==='completed'||isMissed(sh))return;
+    if(!sh.depositDue||!/^\d{4}-\d{2}-\d{2}$/.test(sh.depositDue))return;
+    const bal=boothBalance(sh); if(bal<=0)return;
+    const days=Math.round((new Date(sh.depositDue+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
+    if(days<=withinDays)out.push({sh,due:sh.depositDue,days,bal});
+  });
+  return out.sort((a,b)=>a.days-b.days);
+}
+
 function rHome(){
   const ytd=calcYTD();
   const invCost=calcInvCost(S.inventory);
@@ -1438,36 +1461,52 @@ function rHome(){
     </div>`;
   }
 
-  // ---- ACTIVE SHOW BANNERS (one card per active show — no cap) ----
+  // ---- TODAY BOARD: mission control for every active show ----
+  (()=>{
+    const dep=depositAlerts(7);
+    if(dep.length){
+      html+=`<div class="card" style="border:1px solid var(--redbd);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="showsTab='upcoming';go('shows')">
+        <div style="font-weight:800;color:#ffb3b3;font-size:13px">💸 Booth deposit ${dep.length>1?'deadlines':'deadline'} coming up</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${dep.map(x=>`${x.sh.name}: ${fmt(x.bal)} due ${x.days<0?('OVERDUE '+(-x.days)+'d'):x.days===0?'TODAY':'in '+x.days+'d'}`).join(' · ')}</div>
+      </div>`;
+    }
+  })();
   if(activeShows.length){
-    html+=`<div class="sec-lbl">🔴 ${activeShows.length>1?`ACTIVE SHOWS (${activeShows.length})`:'ACTIVE SHOW'}</div>`;
+    html+=`<div class="sec-lbl">🔴 ${activeShows.length>1?`LIVE TODAY — ${activeShows.length} SHOWS`:'ACTIVE SHOW'}</div>`;
     activeShows.forEach(a=>{
       const t=calcShow(a);
-      const dateStr=a.dates?(a.dates.length>1?a.dates[0]+' - '+a.dates[a.dates.length-1]:a.dates[0]):'';
-      const daysDone=(a.days||[]).filter(d=>d.morningCount&&d.eveningCount).length;
-      const aActual=showActualRev(a), aDisc=showDiscountTotal(a);
+      const di=todayDayIndex(a); const d=(a.days||[])[di]||{};
+      const dayCollected=calcPmt(d.payments||{});
+      const hasM=!!d.morningCount, hasE=!!d.eveningCount;
+      const staffed=(a.repIds||[]).some(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active&&!r.isSelf;});
+      const payMissing=staffed&&dayCollected>0&&dayPayEffective(a,di)<=0;
+      const chip=(ok,lbl)=>`<span class="chip ${ok?'green':'gold'}" style="font-size:10px">${ok?'✓':'○'} ${lbl}</span>`;
+      const daysDone=(a.days||[]).filter(x=>x.morningCount&&x.eveningCount).length;
       html+=`
-      <div class="card gb" style="cursor:pointer;margin-bottom:8px" onclick="go('show','${a.id}')">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <div style="display:flex;align-items:center;gap:9px">
-            <span style="font-size:26px">🔴</span>
-            <div>
-              <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--gold);font-weight:800">ACTIVE SHOW</div>
-              <div style="font-size:19px;font-weight:900">${a.name}</div>
-              <div style="font-size:11px;color:var(--muted)">${a.location||''} ${dateStr?'· '+dateStr:''}</div>
-            </div>
+      <div class="card gb" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer" onclick="go('show','${a.id}',${di})">
+          <div>
+            <div style="font-size:17px;font-weight:900">🔴 ${a.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${d.date||('Day '+(di+1))} · day ${di+1}/${a.numDays} · show total ${fmt(t.gross)} · profit <span style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</span></div>
           </div>
-          <span style="color:var(--gold);font-size:22px;margin-right:2px">→</span>
+          <span style="color:var(--gold);font-size:20px">→</span>
         </div>
-        <div class="g4">
-          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${fmt(t.potential)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Potential</div></div>
-          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--green)">${fmt(aActual)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Collected</div></div>
-          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Profit</div></div>
-          <div style="text-align:center"><div style="font-size:17px;font-weight:900;color:var(--gold)">${daysDone}/${a.numDays}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Days</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:22px;font-weight:900;color:var(--green)">${fmt(dayCollected)}<span style="font-size:10px;color:var(--muted);font-weight:700"> TODAY</span></span>
+          <span style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${chip(hasM,'AM')}${chip(hasE,'PM')}${chip(dayCollected>0,'$')}${staffed?chip(!payMissing&&dayPayEffective(a,di)>0,'PAY'):''}</span>
         </div>
-        ${aDisc>0?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px">Discounts/freebies logged: <strong style="color:var(--red)">${fmt(aDisc)}</strong></div>`:''}
+        ${payMissing?`<div class="wb red" style="margin-bottom:8px;font-size:11px">💵 Money logged, rep day pay not entered.</div>`:''}
+        <div style="display:flex;gap:6px">
+          ${!d.locked?`<button class="btn btn-gold" style="flex:1.4;padding:10px 4px" onclick="openAddSale('${a.id}',${di})">💵 Add Sale</button>`:''}
+          ${!hasM?`<button class="btn btn-ghost" style="flex:1;padding:10px 4px" onclick="showCntModal('${a.id}',${di},'morning')">🌅 Count</button>`:!hasE?`<button class="btn btn-ghost" style="flex:1;padding:10px 4px" onclick="showCntModal('${a.id}',${di},'evening')">🌙 Count</button>`:''}
+          <button class="btn btn-ghost" style="flex:1;padding:10px 4px" onclick="openCloseout('${a.id}',${di})">🏁 Closeout</button>
+        </div>
       </div>`;
     });
+    if(activeShows.length>1){
+      const totToday=activeShows.reduce((t,a)=>{const d=(a.days||[])[todayDayIndex(a)]||{};return t+calcPmt(d.payments||{});},0);
+      html+=`<div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:8px">All shows combined today: <strong style="color:var(--green)">${fmt(totToday)}</strong></div>`;
+    }
   }
 
   // ---- NEXT UP + SHOWS BUTTONS ----
@@ -1978,6 +2017,25 @@ function rShows(){
     <button class="btn ${tab==='missed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px${(missed.length&&tab!=='missed')?';border-color:var(--redbd);color:var(--red)':''}" onclick="showsTab='missed';rShows()">⚠️ Missed (${missed.length})</button>
   </div>`;
   h+=`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="shows2025Mode=true;rShows()">📊 View 2025 Season Results</button>`;
+  if(tab==='upcoming'){
+    const planned=upcoming.filter(s=>s.status!=='active');
+    const paidS=planned.filter(s=>(s.boothCost||0)>0&&boothBalance(s)<=0);
+    const oweS=planned.filter(s=>s.confirmed!==false&&(s.boothCost||0)>0&&boothBalance(s)>0);
+    const pendS=planned.filter(s=>s.confirmed===false);
+    const dep=depositAlerts(14);
+    if(planned.length){
+      h+=`<div class="card" style="margin-bottom:12px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">📋 Booking Pipeline</div>
+        ${dep.length?dep.map(x=>`<div class="sr" style="border:none;padding:3px 0"><span class="srl" style="color:var(--red);font-weight:700">💸 ${x.sh.name}</span><span class="srv red">${fmt(x.bal)} due ${x.days<0?('OVERDUE '+(-x.days)+'d'):x.days===0?'TODAY':'in '+x.days+'d'}</span></div>`).join(''):''}
+        <div class="g3" style="margin-top:${dep.length?'8px':'0'}">
+          <div class="sbox grb"><div class="sl">Booth Paid</div><div class="sv sm g">${paidS.length}</div></div>
+          <div class="sbox ${oweS.length?'rb':''}"><div class="sl">Owe Booth</div><div class="sv sm ${oweS.length?'r':'w'}">${oweS.length}</div><div class="ss">${fmt(oweS.reduce((t,s)=>t+boothBalance(s),0))} total</div></div>
+          <div class="sbox"><div class="sl">Pending / Applied</div><div class="sv sm w">${pendS.length}</div></div>
+        </div>
+        ${oweS.length?`<div style="font-size:11px;color:var(--muted);margin-top:8px">${oweS.map(s=>`${s.name} ${fmt(boothBalance(s))}${s.depositDue?' by '+s.depositDue:''}`).join(' · ')}</div>`:''}
+      </div>`;
+    }
+  }
   if(tab==='missed'&&missed.length){h+=`<div class="wb red" style="margin-bottom:10px">These shows' dates passed but were never completed. Open one to mark it done if you actually did it, or edit/delete it.</div>`;}
   if(list.length){h+=list.map(s=>showCard(s)).join('');}
   else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':'No upcoming shows. Tap + New Show to start.'}</div>`;}
@@ -2185,6 +2243,8 @@ function showEditCosts(id){
   <div class="fg"><label class="fl">Number of Days</label><input class="fi" type="number" id="ec_days" step="1" min="1" value="${sh.numDays||1}" placeholder="1"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
   <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Booth Deposit Due By (optional)</label><input class="fi" type="date" id="ec_due" value="${sh.depositDue||''}"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Set this and the app warns you on Home starting 7 days out until the booth is paid.</div>
   <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
   <div class="fg"><label class="fl">Travel Type — tap one</label>
     <div style="display:flex;gap:8px">
@@ -2257,6 +2317,7 @@ function saveEditCosts(id){
   sh.location=v('ec_loc');
   const ndRaw=v('ec_days'); if(ndRaw!==''){ const nd=Math.max(1,parseInt(ndRaw,10)||1); if(nd!==sh.numDays) resizeShowDays(sh,nd); }
   sh.boothCost=parseFloat(v('ec_booth'))||0;
+  sh.depositDue=v('ec_due')||null;
   sh.miles=parseFloat(v('ec_miles'))||0;
   const tr=v('ec_trips'); sh.roundTrips = tr===''?null:(parseFloat(tr)||0);
   const gpr=v('ec_gasprice'); sh.gasPrice = gpr===''?null:(parseFloat(gpr)||0);
@@ -3260,16 +3321,41 @@ function showPackModal(shId){
   mOpen(`<div class="mh"><div class="mt">🎒 Pack for ${sh.name}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many are you bringing? Can't exceed master inventory.</div>
   ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">In stock: ${S.inventory[s.key]||0}</div></div>
-  <div class="cr-c"><button class="crb" onclick="pkA('${s.key}',-1)">−</button><input class="cri" type="number" id="pk_${s.key}" value="0" min="0" max="${S.inventory[s.key]||0}"><button class="crb" onclick="pkA('${s.key}',1)">+</button></div></div>`).join('')}
+  <div class="cr-c"><button class="crb" onclick="pkA('${s.key}',-1)">−</button><input class="cri" type="number" id="pk_${s.key}" value="0" min="0" max="${S.inventory[s.key]||0}" oninput="updPackLeft()"><button class="crb" onclick="pkA('${s.key}',1)">+</button></div></div>`).join('')}
+  <div id="pkLeft" style="font-size:11px;color:var(--muted);margin-top:10px;text-align:center"></div>
   <div style="display:flex;gap:10px;margin-top:12px">
-    <button class="btn btn-ghost" style="flex:0 0 auto" onclick="pkAll('${shId}')">Take All</button>
+    <button class="btn btn-ghost" style="flex:0 0 auto" onclick="pkAll('${shId}');updPackLeft()">Take All</button>
     <button class="btn btn-gold" style="flex:1" onclick="confirmPack('${shId}')">✅ Start Show</button>
   </div>`);
 }
-function pkA(k,d){const i=$$('pk_'+k);const m=S.inventory[k]||0;i.value=Math.max(0,Math.min(m,parseInt(i.value||0)+d));}
+function pkA(k,d){const i=$$('pk_'+k);const m=S.inventory[k]||0;i.value=Math.max(0,Math.min(m,parseInt(i.value||0)+d));updPackLeft();}
+function otherShowsNeedingStock(exceptId){
+  const today=_todayKey();
+  return (S.shows||[]).filter(sh=>{
+    if(sh.id===exceptId||sh.status==='completed'||isMissed(sh))return false;
+    if(sh.status==='active')return true;
+    if(!sh.startDate||!/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))return false;
+    const days=Math.round((new Date(sh.startDate+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
+    return days>=0&&days<=7;
+  });
+}
+function updPackLeft(){
+  const el=$$('pkLeft'); if(!el)return;
+  let taking=0; const left={};
+  SKUS.forEach(s=>{const v=parseInt(($$('pk_'+s.key)||{}).value)||0;taking+=v;left[s.key]=(S.inventory[s.key]||0)-v;});
+  const leftT=SKUS.reduce((t,s)=>t+Math.max(0,left[s.key]),0);
+  el.innerHTML=taking>0?`Garage after this pack: <strong style="color:${leftT<20?'var(--red)':'var(--text)'}">${leftT} units</strong> (${SKUS.map(s=>s.short+' '+Math.max(0,left[s.key])).join(' · ')})`:'';
+}
 function pkAll(shId){SKUS.forEach(s=>{const i=$$('pk_'+s.key);if(i)i.value=S.inventory[s.key]||0;});}
 function confirmPack(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  // Coverage check: warn when other shows this week still need garage stock
+  (()=>{})();
+  const others=otherShowsNeedingStock(shId);
+  if(others.length){
+    let taking=0,leftT=0; SKUS.forEach(s=>{const v=Math.min(parseInt(($$('pk_'+s.key)||{}).value)||0,S.inventory[s.key]||0);taking+=v;leftT+=(S.inventory[s.key]||0)-v;});
+    if(taking>0&&typeof confirm==='function'&&!confirm('Heads up: '+others.map(o=>o.name).join(', ')+' also '+(others.length>1?'need':'needs')+' stock this week. After this pack the garage has '+leftT+' units left. Pack anyway?'))return;
+  }
   const pk={};SKUS.forEach(s=>pk[s.key]=Math.min(parseInt($$('pk_'+s.key).value)||0,S.inventory[s.key]||0));
   SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)-pk[s.key]);
   sh.status='active';sh.packedInventory={...pk};sh.days[0].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
@@ -4270,7 +4356,8 @@ let sb=null,_cloudUser=null,_cloudTimer=null,_syncState='off';
 try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
 
 function syncLabel(st){return {off:'Not signed in',syncing:'Syncing…',synced:'Synced ✓',error:'Sync error — working offline'}[st]||'';}
-function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st);}
+function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st);const d=$$('syncDot');if(d){d.style.background=st==='synced'?'#00D26A':st==='syncing'?'#FFD700':st==='error'?'#FF4D4D':'#666';d.title='Cloud sync: '+(syncLabel(st)||'not signed in')+' — tap for details';}}
+try{ if(typeof window.addEventListener==='function'){ window.addEventListener('offline',()=>setSync('error')); window.addEventListener('online',()=>{ if(_cloudUser)cloudQueuePush(); }); } }catch(e){}
 
 async function cloudPull(){
   if(!sb||!_cloudUser)return null;
