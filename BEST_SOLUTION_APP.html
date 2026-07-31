@@ -212,6 +212,12 @@
     .pay-meta{font-size:10px;color:var(--muted)}
 
     ::-webkit-scrollbar{width:0;height:0}
+  .clps{border:1px solid var(--border);border-radius:12px;background:var(--card);margin-bottom:12px;padding:0 14px}
+.clps>summary{cursor:pointer;list-style:none;padding:13px 0;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:0.5px;display:flex;justify-content:space-between;align-items:center}
+.clps>summary::-webkit-details-marker{display:none}
+.clps>summary::after{content:'▸';color:var(--gold);font-size:14px}
+.clps[open]>summary::after{content:'▾'}
+.clps .card{border:none;background:none;padding-left:0;padding-right:0;margin-bottom:8px}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -2384,7 +2390,7 @@ function showCard(sh){
   const beHit=sh.status==='completed'&&t.gross>=be;
   return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
     <span class="sc-badge ${sh.status}"${missed?' style="background:var(--redbg);color:var(--red);border:1px solid var(--redbd)"':''}>${bdg}</span>
-    <div class="sc-name">${sh.name}</div>
+    <div class="sc-name">${sh.name}${sh.repOnlyShow?' <span style="font-size:11px;font-weight:800;color:#7EB8F7">👥 CREW-RUN</span>':''}</div>
     <div style="font-size:21px;font-weight:900;color:var(--gold);letter-spacing:.3px;margin:3px 0 4px;line-height:1.15">📅 ${dateBig}${sh.numDays>1?` · ${sh.numDays} days`:''}</div>
     <div class="sc-loc">${sh.location||''}</div>
     ${(()=>{const warn=[];if(sh.datesNeedConfirm)warn.push('Dates need confirmation');if(sh.hoursNeedConfirm)warn.push('Hours need confirmation');return warn.length?`<div onclick="event.stopPropagation()" style="margin-top:6px;padding:6px 8px;background:var(--redbg);border:1px solid var(--redbd);border-radius:6px;font-size:11px;color:#ffb3b3;font-weight:700">⚠️ ${warn.join(' · ')}</div>`:'';})()}
@@ -2780,6 +2786,46 @@ function dlFile(name,text,mime){
   }catch(e){ toast('Export failed'); }
 }
 function _slug(s){ return String(s||'show').replace(/[^a-z0-9]+/gi,'-').toLowerCase().replace(/^-|-$/g,''); }
+
+// ===== Accountant Package (one-tap year-end export) =====
+function exportAccountantPkg(){
+  const y=calcYTD(); const rows=[];
+  rows.push(['BEST SOLUTION — ACCOUNTANT PACKAGE','generated '+_todayKey()]);
+  rows.push([]);
+  rows.push(['SEASON SUMMARY (completed + active shows)']);
+  rows.push(['Money collected (incl. sales tax)',y.gross.toFixed(2)]);
+  rows.push(['Sales tax collected — OWED TO STATE',(y.salesTax||0).toFixed(2)]);
+  rows.push(['Revenue (collected minus sales tax)',(y.gross-(y.salesTax||0)).toFixed(2)]);
+  rows.push(['Cost of goods sold',y.cogs.toFixed(2)]);
+  rows.push(['Card processing fees (in expenses)',(y.cardFees||0).toFixed(2)]);
+  rows.push(['Total expenses (booth, gas, supplies, labor, fees, other)',y.expenses.toFixed(2)]);
+  rows.push(['Net profit',y.profit.toFixed(2)]);
+  rows.push(['Income tax reserve ('+Math.round((S.settings.tax||0)*100)+'%)',y.taxRes.toFixed(2)]);
+  rows.push(['Business miles',Math.round(y.miles)]);
+  rows.push(['IRS mileage deduction @ $'+(S.settings.irsRate||0.70)+'/mi',(y.miles*(S.settings.irsRate||0.70)).toFixed(2)]);
+  rows.push([]);
+  rows.push(['PER SHOW']);
+  rows.push(['Show','Start Date','Status','Collected','Sales Tax Owed','COGS','Booth (paid basis)','Gas (auto)','Card Fees','Rep Pay','Worker Pay','Supplies','Profit','Tax Reserve','Miles']);
+  (S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{
+    const t=calcShow(sh);
+    rows.push([sh.name,sh.startDate||'',sh.status,t.gross.toFixed(2),(t.salesTax||0).toFixed(2),t.cogs.toFixed(2),(t.booth||sh.boothCost||0).toFixed(2),(t.gasAuto||0).toFixed(2),(t.cardFees||0).toFixed(2),t.repPay.toFixed(2),t.workerPay.toFixed(2),(t.supplyCost||0).toFixed(2),t.profit.toFixed(2),t.taxRes.toFixed(2),Math.round(showMiles(sh))]);
+  });
+  rows.push([]);
+  rows.push(['BUSINESS EXPENSES (year-round ledger, not per-show)']);
+  rows.push(['Date','Category','Amount','Note']);
+  (S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
+  rows.push(['TOTAL','',(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
+  rows.push([]);
+  rows.push(['REP PAY']);
+  rows.push(['Rep','Earned','Paid','Balance']);
+  (S.reps||[]).filter(r=>!r.isSelf).forEach(r=>{const e=repEarned(r.id),p=repPaid(r.id);if(e>0||p>0)rows.push([r.name,e.toFixed(2),p.toFixed(2),(e-p).toFixed(2)]);});
+  rows.push([]);
+  rows.push(['NOTES']);
+  rows.push(['Sales tax is charged on card sales only and included in recorded card totals; the owed column strips it out.']);
+  rows.push(['Booth uses the higher of sticker cost or what was actually paid. Gas is the auto commute estimate unless hand-logged per day.']);
+  dlFile('best-solution-accountant-package-'+_stamp()+'.csv',_csvRows(rows),'text/csv');
+}
+
 function exportSeasonCSV(){
   const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Rep Pay','Worker Payouts','Net Profit','Tax Reserve']];
   (S.shows||[]).slice().sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
@@ -2899,9 +2945,11 @@ function rShow(){
     const conf=showConflicts(sh);
     if(conf.length)h+=`<div class="wb" style="margin-bottom:10px;background:rgba(255,140,0,0.12);border:1px solid rgba(255,140,0,0.45);color:#ffc266;font-weight:700">🚨 Schedule Conflict: multiple shows on this date.<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">Overlaps with ${conf.map(c=>c.name+' ('+(c.dates?c.dates.join(' – '):c.startDate)+')').join(', ')}. Assign reps or choose which show to attend.</div></div>`;
     return h;})()}
+  <details class="clps"><summary>⏰ Show Hours & Call Times</summary>
   ${(()=>{const dl=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
     const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
     return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
+  </details>
   ${preShowCalcHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
@@ -2927,6 +2975,7 @@ function rShow(){
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
   </div>
   ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
+  <details class="clps" ${sh.status!=='planned'&&(invUnresolved(sh).length||invNegativeSold(sh).length)?'open':''}><summary>📦 Inventory Reconciliation ${sh.status!=='planned'?invStatusMeta(invStatus(sh)).i:''}</summary>
   ${sh.status!=='planned'?(()=>{
     const st=invStatus(sh),meta=invStatusMeta(st),carry=invCarryIssues(sh),neg=invNegativeSold(sh),unres=invUnresolved(sh);
     let h=`<div class="card" style="margin-top:12px;border-color:${meta.c}">
@@ -2958,6 +3007,8 @@ function rShow(){
     if((sh.invLog||[]).length){ h+=`<details style="margin-top:8px"><summary style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;cursor:pointer">🧾 Change log (${sh.invLog.length})</summary><div style="margin-top:6px">${sh.invLog.slice(-15).reverse().map(e=>`<div style="font-size:10px;color:var(--muted);padding:2px 0">${(e.ts||'').replace('T',' ').slice(0,16)} · ${e.type} ${e.date||''} — ${((e.changes||[]).join(', ')).replace(/</g,'&lt;')}</div>`).join('')}</div></details>`; }
     return h+`</div>`;
   })():''}
+  </details>
+  <details class="clps"><summary>📋 Show Details — booth · miles · gas · tax</summary>
   <div class="card" style="margin-top:12px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">SHOW DETAILS</div>
@@ -2976,6 +3027,7 @@ function rShow(){
     ${t.booth>(sh.boothCost||0)?`<div class="sr"><span class="srl">Booth overpaid vs sticker</span><span class="srv red">-${fmt(t.booth-(sh.boothCost||0))}</span></div>`:''}
     <div class="sr"><span class="srl">Tax Rate</span><span class="srv">${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?'':' (global)'}</span></div>
   </div>
+  </details>
   <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700">💸 OTHER EXPENSES</div>
@@ -3052,6 +3104,7 @@ function rShow(){
       })()}
     </div>`;
   })()}
+  <details class="clps"><summary>🧴 Supplies Used ${fmt(showSupplyCost(sh))}</summary>
   ${(()=>{
     const auto=showAutoSupplyUnits(sh); const sc=showSupplyCost(sh);
     const autoNames=Object.keys(auto);
@@ -3071,6 +3124,7 @@ function rShow(){
       ${sc>0?`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`:'<div style="font-size:12px;color:var(--muted)">No supply cost yet.</div>'}
     </div>`;
   })()}
+  </details>
   ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
   <div style="height:10px"></div>`;
 }
@@ -3709,7 +3763,7 @@ function rCalendar(){
       onclick=` onclick="go('show','${shows[0].id}')"`;
     }
     h+=`<div class="${cls}"${onclick}><div class="cal-num">${day}${conflict?' <span style="color:var(--red);font-size:10px">⚠️</span>':''}</div>`;
-    shows.slice(0,2).forEach(s=>{h+=`<div class="cal-show-pill">${s.name}</div>`;});
+    shows.slice(0,2).forEach(s=>{h+=`<div class="cal-show-pill">${s.repOnlyShow?'👥 ':''}${s.name}</div>`;});
     if(shows.length>2)h+=`<div class="cal-show-pill">+${shows.length-2} more</div>`;
     h+='</div>';
   }
@@ -4217,6 +4271,7 @@ function rSettings(){
   <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Download spreadsheets (CSV) or print a PDF for taxes & records.</div>
   <div class="g2" style="gap:8px;margin-bottom:8px">
     <button class="btn btn-ghost btn-full" onclick="exportSeasonCSV()">📄 Season CSV</button>
+    <button class="btn btn-gold btn-full" onclick="exportAccountantPkg()">🧾 Accountant Package (year-end, one file)</button>
     <button class="btn btn-ghost btn-full" onclick="exportExpensesCSV()">📄 Expenses CSV</button>
     <button class="btn btn-ghost btn-full" onclick="exportRepCSV()">📄 Rep Pay CSV</button>
     <button class="btn btn-gold btn-full" onclick="printFullReport()">🖨️ Full Report (PDF)</button>
