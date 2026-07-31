@@ -1833,48 +1833,85 @@ function rSection(){
 // ===================================================
 // STOCK
 // ===================================================
+
+// ===== At-show stock (ported from Batman's app): live on-hand for active shows =====
+function showOnHand(sh){
+  const r={}; SKUS.forEach(s=>r[s.key]=0);
+  if(!sh||sh.status!=='active')return r;            // only active shows hold stock out of the garage
+  const days=sh.days||[];
+  for(let i=days.length-1;i>=0;i--){ const d=days[i]; if(!d)continue;
+    if(d.eveningCount){ SKUS.forEach(s=>r[s.key]=parseInt(d.eveningCount[s.key])||0); return r; }
+    if(d.morningCount){ const rk=d.restock||{}; SKUS.forEach(s=>r[s.key]=(parseInt(d.morningCount[s.key])||0)+(parseInt(rk[s.key])||0)); return r; }
+  }
+  if(sh.packedInventory)SKUS.forEach(s=>r[s.key]=parseInt(sh.packedInventory[s.key])||0);
+  return r;
+}
+function activeStockShows(){ return (S.shows||[]).filter(s=>s.status==='active'); }
+function atShowsInv(){ const r={}; SKUS.forEach(s=>r[s.key]=0); activeStockShows().forEach(sh=>{ const o=showOnHand(sh); SKUS.forEach(s=>r[s.key]+=(o[s.key]||0)); }); return r; }
+let stockView='garage';
+function setStockView(v){ stockView=v; rStock(); }
+
 function rStock(){
-  const cost=calcInvCost(S.inventory);const retail=calcInvRetail(S.inventory);
+  const garage=S.inventory, shows=atShowsInv();
+  const combined={}; SKUS.forEach(s=>combined[s.key]=(garage[s.key]||0)+(shows[s.key]||0));
+  const view=stockView||'garage';
+  const inv=view==='garage'?garage:view==='shows'?shows:combined;
+  const cost=calcInvCost(inv);const retail=calcInvRetail(inv);
+  const units=SKUS.reduce((t,s)=>t+(inv[s.key]||0),0);
+  const tabBtn=(k,icon,label)=>`<button class="btn ${view===k?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="setStockView('${k}')">${icon} ${label}</button>`;
+  const viewTitle=view==='garage'?'🏠 In The Garage':view==='shows'?'🎪 Out At Shows':'🌐 Everything (Garage + Shows)';
   pg('stock').innerHTML=`
-  <div class="sec-row"><div class="sec-title">📦 Master Inventory</div><button class="btn btn-gold btn-sm" onclick="showRestock()">+ Restock</button></div>
-  <div class="card g2" style="margin-bottom:12px">
-    <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:22px;font-weight:900">${fmt(cost)}</div></div>
-    <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(retail)}</div></div>
+  <div class="sec-row"><div class="sec-title">📦 Inventory</div><button class="btn btn-gold btn-sm" onclick="showRestock()">+ Restock</button></div>
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    ${tabBtn('garage','🏠','Garage')}
+    ${tabBtn('shows','🎪','At Shows')}
+    ${tabBtn('all','🌐','Everything')}
   </div>
-  <div style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock Between Shows</button>
+  <div class="card" style="margin-bottom:12px">
+    <div style="font-size:11px;color:var(--gold);text-transform:uppercase;font-weight:800;letter-spacing:0.5px;margin-bottom:8px">${viewTitle}</div>
+    <div class="g3">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Units</div><div style="font-size:22px;font-weight:900">${fmtN(units)}</div></div>
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:22px;font-weight:900">${fmt(cost)}</div></div>
+      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(retail)}</div></div>
+    </div>
   </div>
-  ${(()=>{
-    const packed=transferableShows().filter(s=>s.packedInventory&&Object.values(s.packedInventory).some(v=>(v||0)!==0));
-    if(!packed.length)return'';
-    return `<div class="card" style="margin-bottom:12px;border-color:rgba(79,195,247,0.3)">
-      <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 Packed To Shows — On-Hand At Booths</div>
-      ${packed.map(s=>`<div class="sr"><span class="srl">${s.name}${s.status==='active'?' 🔴':''}</span><span class="srv" style="font-size:11px;font-weight:600">${SKUS.filter(k=>(s.packedInventory[k.key]||0)!==0).map(k=>k.short+': '+(s.packedInventory[k.key]||0)).join(' · ')||'—'}</span></div>`).join('')}
-    </div>`;
-  })()}
-  ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
-    ${[...(S.transfers||[])].slice().reverse().slice(0,12).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}<span style="color:var(--muted)"> · ${tr.date||''}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
-  </div>`:''}
+  ${view==='shows'?(()=>{
+    const act=activeStockShows();
+    if(!act.length)return `<div class="card" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:12px">No active shows right now — everything is in the garage.</div>`;
+    return act.map(sh=>{const o=showOnHand(sh);const tot=SKUS.reduce((t,s)=>t+(o[s.key]||0),0);
+      return `<div class="card" style="margin-bottom:8px;border-color:rgba(79,195,247,0.3)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-weight:800;font-size:13px">🔴 ${sh.name}</span><span style="font-weight:900;color:var(--gold)">${tot} units</span></div>
+        <div style="font-size:12px;color:var(--muted)">${SKUS.filter(s=>(o[s.key]||0)>0).map(s=>s.short+': '+o[s.key]).join(' · ')||'nothing on hand'}</div>
+      </div>`;}).join('');
+  })():''}
   ${SKUS.map(s=>{
-    const q=S.inventory[s.key]||0;const val=q*s.cost;const margin=Math.round(((getP(s.key)-s.cost)/getP(s.key))*100);const low=q<5;
+    const g=garage[s.key]||0, sw=shows[s.key]||0;
+    const q=inv[s.key]||0;const val=q*getCost(s.key);const margin=Math.round(((getP(s.key)-getCost(s.key))/getP(s.key))*100);const low=(view==='garage'&&q<5);
     return`<div class="card ${low?'rb':''}">
       <div style="display:flex;align-items:center;gap:12px">
         <span style="font-size:30px">${s.emoji}</span>
         <div style="flex:1">
           <div style="font-weight:900;font-size:15px">${s.name} ${low?'<span class="chip red" style="font-size:10px">LOW STOCK</span>':''}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(s.cost)} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} on hand</div>
-          <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Cost ${fmt(getCost(s.key))} · Sell ${fmt(getP(s.key))} · ${margin}% margin · ${fmt(val)} on hand</div>
+          ${view==='all'?`<div style="font-size:11px;color:var(--blue);margin-top:2px">🏠 ${g} garage + 🎪 ${sw} at shows</div>`:''}
+          ${view==='garage'?`<div style="margin-top:10px;display:flex;align-items:center;gap:8px">
             <button class="crb" onclick="adjInv('${s.key}',-1)">−</button>
             <input class="cri" type="number" value="${q}" min="0" onchange="setInv('${s.key}',this.value)" onfocus="this.select()">
             <button class="crb" onclick="adjInv('${s.key}',1)">+</button>
-          </div>
+          </div>`:''}
         </div>
         <div style="text-align:right"><div style="font-size:28px;font-weight:900;color:var(--gold)">${q}</div><div style="font-size:10px;color:var(--muted)">units</div></div>
       </div>
     </div>`;
   }).join('')}
-  <div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>
+  ${view==='garage'?`<div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>`:''}
+  <div style="display:flex;gap:8px;margin:12px 0">
+    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock Between Shows</button>
+  </div>
+  ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
+    ${[...(S.transfers||[])].slice().reverse().slice(0,20).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}<span style="color:var(--muted)"> · ${tr.date||''}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
+  </div>`:''}
   <div style="height:10px"></div>`;
 }
 function adjInv(k,d){S.inventory[k]=Math.max(0,(S.inventory[k]||0)+d);saveS();toast(k+': '+(S.inventory[k])+' units');}
