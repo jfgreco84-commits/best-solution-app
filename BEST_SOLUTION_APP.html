@@ -1055,6 +1055,37 @@ function applyOneTimeUpdates(d){
     (d.shows||[]).forEach(sh=>(sh.days||[]).forEach(day=>{ if(!day.repPay)day.repPay={}; }));
     d._applied['day_pay_v1']=true;
   }
+
+  // ===== Jul 29 2026 — McHenry County Fair update =====
+  // Indoor booth in Building D. Invoice 6299 total $412 (up from the $400 outdoor estimate),
+  // final $82.40 charged to VISA per QuickBooks receipt. Hours confirmed by owner:
+  // Tue-Thu 10a-8p, Fri 10a-10p, Sat 10a-10p, Sun 10a-7p (Aug 4-9).
+  // TJ works the show: 35% commission, gas paid, guaranteed no less than $100/day.
+  if(!d._applied['mchenry_update_20260729']){
+    const mh=(d.shows||[]).find(sh=>(sh.name||'').toLowerCase().includes('mchenry'));
+    if(mh){
+      mh.boothCost=412;
+      mh.boothPayments=mh.boothPayments||[];
+      // Correct the bulk-assumed $400 entry to match invoice 6299: $329.60 earlier + $82.40 final
+      const bulk=mh.boothPayments.find(p=>(parseFloat(p.amount)||0)===400||p.note==='McHenry County Fair booth fee paid');
+      if(bulk){ bulk.amount=329.60; bulk.note='Booth fee earlier payment (invoice 6299)'; }
+      if(!mh.boothPayments.some(p=>(parseFloat(p.amount)||0)===82.40)){
+        mh.boothPayments.push({amount:82.40,date:'2026-06-12',note:'Indoor booth Building D upgrade, final charge invoice 6299 (VISA)'});
+      }
+      mh.startDate='2026-08-04';
+      resizeShowDays(mh,6);
+      const MH_HRS=[['10:00','20:00'],['10:00','20:00'],['10:00','20:00'],['10:00','22:00'],['10:00','22:00'],['10:00','19:00']];
+      MH_HRS.forEach((t,i)=>{ if(mh.days[i]){ mh.days[i].openTime=t[0]; mh.days[i].closeTime=t[1]; } });
+      if(mh.days[0]){ mh.openTime=mh.days[0].openTime; mh.closeTime=mh.days[0].closeTime; }
+      mh.hoursNeedConfirm=false; mh.datesNeedConfirm=false; mh.hoursVerified=true;
+      mh.repIds=mh.repIds||[];
+      if(!mh.repIds.includes('rep_tj'))mh.repIds.push('rep_tj');
+      mh.repPayMeta=mh.repPayMeta||{};
+      mh.repPayMeta['rep_tj']={method:(mh.repPayMeta['rep_tj']||{}).method||'',note:'35% commission, gas paid, min $100/day guaranteed'};
+      mh.notes='Indoor booth in BUILDING D. Booth $412 paid in full (invoice 6299). TJ working: 35% commission, gas paid, guaranteed no less than $100/day. Enter his Day Pay daily: 35% of the day, or $100 if that is higher, plus gas. Hours: Tue-Thu 10a-8p, Fri-Sat 10a-10p, Sun 10a-7p.';
+    }
+    d._applied['mchenry_update_20260729']=true;
+  }
 }
 
 function buildPlannedShow(e){
