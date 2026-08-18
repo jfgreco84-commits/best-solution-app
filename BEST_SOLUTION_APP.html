@@ -1086,6 +1086,78 @@ function applyOneTimeUpdates(d){
     }
     d._applied['mchenry_update_20260729']=true;
   }
+
+  // ===== Aug 18 2026 — two new shows booked =====
+  // 1) Whole Bead Show — Milwaukee Pop-up, Tue Oct 27 2026, DoubleTree by Hilton Downtown
+  //    Milwaukee (611 W Wisconsin Ave). Show 11a-4p, setup 9a-11a. $175 table fee PAID IN FULL
+  //    Aug 18 2026 via Square (The Whole Bead Show Inc, Nevada City CA). Hotel parking $20 flat.
+  // 2) 59th Annual Wonderful World of Weddings, Sat/Sun Jan 30-31 2027, Expo Center at Wisconsin
+  //    State Fair Park, West Allis. Booth #311, 10x10 CORNER. Invoice 27WWW311 from D3 Productions
+  //    LLC: $950 booth + $100 corner + $37.80 card fee = $1,087.80. $250 deposit paid Aug 18 2026
+  //    (Visa 9790); $418.90 due Sep 30 2026; $418.90 due Oct 31 2026.
+  if(!d._applied['shows_add_20260818']){
+    d.shows=d.shows||[];
+    const has=frag=>(d.shows||[]).some(sh=>(sh.name||'').toLowerCase().includes(frag));
+
+    // ---- Whole Bead Show — Milwaukee Pop-up (Oct 27 2026) ----
+    if(!has('whole bead')){
+      const wb=buildPlannedShow({
+        name:'Whole Bead Show — Milwaukee Pop-up',
+        location:'Milwaukee, WI',
+        startDate:'2026-10-27',
+        numDays:1,
+        boothCost:175,
+        miles:29,
+        boothPayments:[{amount:175,date:'2026-08-18',note:'Table fee paid in full — Square invoice, The Whole Bead Show Inc'}]
+      });
+      wb.confirmed=true;
+      if(wb.days[0]){ wb.days[0].openTime='11:00'; wb.days[0].closeTime='16:00'; }
+      wb.openTime='11:00'; wb.closeTime='16:00';
+      wb.hoursVerified=true; wb.hoursNeedConfirm=false; wb.datesNeedConfirm=false;
+      wb.showExpenses=[{id:'se_wbmil26_park',cat:'park',amount:20,desc:'Hotel parking, $20 flat rate',date:'2026-10-27'}];
+      wb.notes='WHOLE BEAD SHOW — MILWAUKEE POP-UP. Tue Oct 27 2026. Show 11am-4pm, setup 9am-11am. '
+        +'DoubleTree by Hilton Downtown Milwaukee, 611 W Wisconsin Ave, Milwaukee WI 53203. '
+        +'Table fee $175 PAID IN FULL Aug 18 2026 (Square — The Whole Bead Show Inc, 18160 Starduster Dr, Nevada City CA 95959). '
+        +'Parking: hotel $20 flat rate. Sales tax 7.9% on retail sales (Milwaukee city + county). '
+        +'REQUIRED: Vendor Information Form must be filled out BEFORE the show — the promoter reports it to the WI Dept of Revenue. '
+        +'One day, one round trip, ~29 mi each way from Waterford.';
+      d.shows.push(wb);
+    }
+
+    // ---- 59th Annual Wonderful World of Weddings (Jan 30-31 2027) ----
+    if(!has('wonderful world')){
+      const ww=buildPlannedShow({
+        name:'Wonderful World of Weddings',
+        location:'West Allis, WI',
+        startDate:'2027-01-30',
+        numDays:2,
+        boothCost:1087.80,
+        miles:24,
+        boothPayments:[{amount:250,date:'2026-08-18',note:'Deposit paid — Visa 9790, invoice 27WWW311'}]
+      });
+      ww.confirmed=true;
+      ww.depositDue='2026-09-30'; // next installment due date, $418.90
+      const WW_HRS=[['10:00','16:00'],['10:00','15:00']];
+      WW_HRS.forEach((t,i)=>{ if(ww.days[i]){ ww.days[i].openTime=t[0]; ww.days[i].closeTime=t[1]; } });
+      ww.openTime='10:00'; ww.closeTime='16:00';
+      ww.hoursVerified=true; ww.hoursNeedConfirm=false; ww.datesNeedConfirm=false;
+      ww.showExpenses=[{id:'se_www27_park',cat:'park',amount:26,desc:'On-site parking $13/car x 2 days',date:'2027-01-30'}];
+      ww.notes='59th ANNUAL WONDERFUL WORLD OF WEDDINGS. Sat Jan 30 2027 10am-4pm, Sun Jan 31 2027 10am-3pm. '
+        +'Exposition Center at Wisconsin State Fair Park, 8200 W Greenfield Ave, West Allis WI 53214 — enter Gate 4 on 84th St. '
+        +'BOOTH #311, 10x10 CORNER. Invoice 27WWW311 from D3 Productions LLC, N113W18750 Carnegie Dr, Germantown WI 53022, '
+        +'(262) 367-5500, admin@d3prod.com / amanda@d3prod.com. '
+        +'COST: $950 booth + $100 corner charge + $37.80 credit card processing fee = $1,087.80. '
+        +'PAID: $250 deposit Aug 18 2026 (Visa 9790). STILL OWED $837.80 in two payments: $418.90 due Sep 30 2026, $418.90 due Oct 31 2026. '
+        +'Paying the rest by CHECK drops the $37.80 card fee — they reissue the invoice after payment. '
+        +'Parking $13/car. About 2,000 attendees over the weekend. '
+        +'PAPERWORK: certificate of insurance required, plus WI Dept of Revenue S-240 form (top box only). '
+        +'DEADLINES: Wisconsin Expo service kit advance discount Dec 6 2026, State Fair Park exhibit services advance pricing Dec 17 2026. '
+        +'~24 mi each way from Waterford, home every night = 2 round trips.';
+      d.shows.push(ww);
+    }
+
+    d._applied['shows_add_20260818']=true;
+  }
 }
 
 function buildPlannedShow(e){
