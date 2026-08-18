@@ -1158,6 +1158,48 @@ function applyOneTimeUpdates(d){
 
     d._applied['shows_add_20260818']=true;
   }
+
+  // ===== Aug 18 2026 — Party on the Pavement (Racine) added as PENDING =====
+  // 23rd annual, Sat Sep 19 2026, noon-7pm. Only 7 selling hours. Retail/commercial booth $450
+  // (was $300 in 2025). NOT approved and NOT paid yet — application is due Aug 22 2026 and the
+  // Downtown Racine Corp says late/incomplete applications are rejected and space is limited.
+  // depositDue is set to the Aug 22 APPLICATION deadline so it fires in the deposit alert.
+  if(!d._applied['pop_racine_20260818']){
+    d.shows=d.shows||[];
+    if(!(d.shows||[]).some(sh=>/party on the pavement/i.test(sh.name||''))){
+      const pop=buildPlannedShow({
+        name:'Party on the Pavement',
+        location:'Racine, WI',
+        startDate:'2026-09-19',
+        numDays:1,
+        boothCost:450,
+        miles:24,
+        boothPayments:[]
+      });
+      pop.confirmed=false; // pending approval + payment
+      pop.depositDue='2026-08-22'; // application deadline, not a payment due date
+      if(pop.days[0]){ pop.days[0].openTime='12:00'; pop.days[0].closeTime='19:00'; }
+      pop.openTime='12:00'; pop.closeTime='19:00';
+      pop.hoursVerified=true; pop.hoursNeedConfirm=false; pop.datesNeedConfirm=false;
+      pop.showExpenses=[{id:'se_pop26_park',cat:'park',amount:4,desc:'Ramp parking, $4 all-day rate',date:'2026-09-19'}];
+      pop.notes='PARTY ON THE PAVEMENT (23rd annual) — Sat Sep 19 2026, 12:00pm-7:00pm. ONLY 7 SELLING HOURS. '
+        +'Downtown Racine: Main St from State St to 7th St, plus 6th St from Lake Ave to City Hall, 12+ blocks. '
+        +'Run by Downtown Racine Corporation. '
+        +'STATUS: PENDING — not approved, not paid. APPLICATION DUE AUG 22 2026. Late or incomplete applications are '
+        +'not accepted, space is limited, and applying does not guarantee a spot. '
+        +'BOOTH: $450 retail/commercial rate, up from $300 in 2025 (DRC raised fees for entertainment, insurance and operations). '
+        +'$450 over 7 hours is about $64/hour in booth rent alone before gas and parking. '
+        +'FREE BOOTH OPTION: if your group puts in 16+ volunteer hours at the event, the booth rental is free. '
+        +'Email eventsmanager@racinedowntown.com to set that up. '
+        +'TRAFFIC: about 23,000 attendees in 2025 (geofenced), $1,125,741 in direct downtown spending, ~$85 average per attendee. '
+        +'83% of 2025 vendors said sales or engagement met or beat expectations. '
+        +'PARKING $4 all day: Lake Ave Ramp (300 Lake Ave), Civic Centre Ramp (501 Lake Ave), McMynn Ramp (120 7th St), or Shoop (Main & State). '
+        +'RAIN OR SHINE, NO REFUNDS for vendors. '
+        +'~24 mi each way from Waterford, 1 round trip.';
+      d.shows.push(pop);
+    }
+    d._applied['pop_racine_20260818']=true;
+  }
 }
 
 function buildPlannedShow(e){
