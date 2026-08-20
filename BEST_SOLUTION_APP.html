@@ -4648,17 +4648,144 @@ function cloudCardHTML(){
 // INIT
 
 // ===================================================
-// BACKUP & EXPORT MODULE (bx*) — READ ONLY
-// Added 2026-08-20. This module NEVER writes to S, localStorage, or Supabase.
-// It only reads state, builds files in memory, and downloads them.
-// Built from commit BX_BUILD.commit. Bump BX_BUILD by hand when you cut a release.
+// BACKUP & EXPORT MODULE (bx*) — STRICTLY READ ONLY
+// Added 2026-08-20. Never writes S, localStorage, or Supabase.
+// Every exported figure is computed by bxView(snapshot), never from live S.
 // ===================================================
-const BX_BUILD={version:'v18',commit:'42daec5',builtOn:'2026-08-20'};
+// Build stamp. Two DIFFERENT commits are recorded on purpose:
+//   baseCommit    = production app BEFORE this feature. Preserved on backupBranch.
+//                   This is what you roll back to.
+//   featureCommit = commit that introduced this export module.
+//   featureBuild  = human build tag, bumped on every change to this module.
+// version tracks the PRODUCTION APP version, not this module.
+const BX_BUILD={
+  version:'v29',
+  baseCommit:'42daec5',
+  backupBranch:'backup/pre-export-2026-08-20',
+  featureCommit:'a90760e',
+  featureBuild:'export-2026-08-20b',
+  builtOn:'2026-08-20'
+};
 
 function bxNum(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
-function bxNow(){ const d=new Date(); const p=n=>String(n).padStart(2,'0');
+function bxNow(){ const d=new Date(), p=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes()); }
 function bxISO(){ return new Date().toISOString(); }
+function bxFingerprint(o){ // cheap stable hash so snapshot differences are visible
+  const s=JSON.stringify(o); let h=5381;
+  for(let i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))>>>0; }
+  return ('00000000'+h.toString(16)).slice(-8)+'/'+s.length;
+}
+// ---- Snapshot-bound calculation engine ------------------------------------
+// Every figure in every export file is derived through bxView(state). Nothing
+// here reads the live S, and no app calc helper is called, so the export is a
+// faithful picture of the SELECTED snapshot rather than of current memory.
+// SKUS / PMTS / SHOWS_2025 are build-time code constants, not mutable state.
+function bxView(st){
+  const A=st||{}, set=A.settings||{}, V={state:A,settings:set};
+  const N=bxNum;
+  V.price=k=>{ const p=A.prices&&A.prices[k]; return (p!=null&&p!=='')?N(p):((SKUS.find(s=>s.key===k)||{}).defP||0); };
+  V.cost =k=>{ const c=A.costs &&A.costs[k];  return (c!=null&&c!=='')?N(c):((SKUS.find(s=>s.key===k)||{}).cost||0); };
+  V.setting=(k,dflt)=>(set[k]!=null&&set[k]!=='')?N(set[k]):dflt;
+
+  V.dayUnitsLeft=d=>{ const r={}; SKUS.forEach(s=>{
+    const m=N((d.morningCount||{})[s.key]), rk=N((d.restock||{})[s.key]), e=N((d.eveningCount||{})[s.key]);
+    r[s.key]=Math.max(0,m+rk-e); }); return r; };
+  V.dayLost=d=>{ const r={}; SKUS.forEach(s=>r[s.key]=N((d.lost||{})[s.key])); return r; };
+  V.daySold=d=>{ const l=V.dayUnitsLeft(d),x=V.dayLost(d),r={};
+    SKUS.forEach(s=>r[s.key]=Math.max(0,l[s.key]-x[s.key])); return r; };
+  V.dayCogsUnits=d=>V.dayUnitsLeft(d);
+  V.dayHasCounts=d=>!!(d.morningCount&&d.eveningCount);
+  V.rev=(sold,P)=>SKUS.reduce((t,s)=>t+N(sold[s.key])*((P&&P[s.key]!=null)?N(P[s.key]):V.price(s.key)),0);
+  V.cogsOf=u=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.cost(s.key),0);
+  V.pmtTotal=p=>PMTS.reduce((t,m)=>t+N((p||{})[m.key]),0);
+
+  V.boothPaid=sh=>(sh.boothPayments||[]).reduce((t,p)=>t+N(p.amount),0);
+  V.boothBalance=sh=>Math.max(0,N(sh.boothCost)-V.boothPaid(sh));
+  V.roundTrips=sh=>(sh.roundTrips!=null&&sh.roundTrips!=='')?N(sh.roundTrips):(sh.numDays||1);
+  V.mpg=sh=>(sh.mpg!=null&&sh.mpg!=='')?N(sh.mpg):V.setting('mpg',17.5);
+  V.gasPrice=sh=>(sh.gasPrice!=null&&sh.gasPrice!=='')?N(sh.gasPrice):V.setting('gasPrice',3.50);
+  V.miles=sh=>N(sh.miles)*2*V.roundTrips(sh);
+  V.gas=sh=>{ if(sh.gasOverride!=null&&sh.gasOverride!=='')return N(sh.gasOverride);
+    const m=V.mpg(sh)||17.5; return N(sh.miles)*2*V.roundTrips(sh)/m*V.gasPrice(sh); };
+  V.taxRate=sh=>(sh.taxRate!=null&&sh.taxRate!=='')?N(sh.taxRate):V.setting('tax',0.28);
+  V.cardTaxRate=sh=>(sh&&sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?N(sh.cardTaxRate):V.setting('cardTax',0);
+  V.cardSales=sh=>{ let t=0; (sh.days||[]).forEach(d=>{ if(d.payments)PMTS.forEach(p=>{
+    if(p.commRate===COMM_CARD)t+=N(d.payments[p.key]); }); }); return t; };
+  V.actualRev=sh=>{ let a=0; (sh.days||[]).forEach(d=>{ if(d.payments)a+=V.pmtTotal(d.payments); }); return a; };
+  V.unitsSold=sh=>{ const u={}; SKUS.forEach(s=>u[s.key]=0);
+    (sh.days||[]).forEach(d=>{ if(V.dayHasCounts(d)){ const s2=V.daySold(d); SKUS.forEach(s=>u[s.key]+=N(s2[s.key])); } }); return u; };
+
+  V.showEndKey=sh=>{ const start=sh.startDate||''; if(!/^\d{4}-\d{2}-\d{2}$/.test(start))return start;
+    const d=new Date(start+'T12:00:00'); d.setDate(d.getDate()+((sh.numDays||1)-1));
+    return d.toISOString().split('T')[0]; };
+  V.isMissed=sh=>sh.status!=='completed'&&sh.status!=='active'&&V.showEndKey(sh)<bxTodayKey();
+  V.bagUnitCost=()=>V.setting('bagCost',0.20);
+  V.candyPerShow=()=>V.setting('candyPerShow',10);
+  V.paperPerShow=()=>V.setting('paperPerShow',20);
+  V.bagCount=sh=>{ const u=V.unitsSold(sh);
+    return Math.ceil(N(u['2oz'])/2)+N(u['8oz'])+N(u['16oz'])+N(u['32oz']); };
+  V.flatOverhead=sh=>V.isMissed(sh)?0:(V.candyPerShow()+V.paperPerShow());
+  V.autoSupplyUnits=sh=>{ const sold=V.unitsSold(sh), out={};
+    (A.supplies||[]).forEach(sup=>{ if(sup.autoSizes&&sup.autoSizes.length){ let q=0;
+      sup.autoSizes.forEach(k=>q+=N(sold[k])); if(q>0)out[sup.name]=(out[sup.name]||0)+q; } }); return out; };
+  V.supplyCost=sh=>{ let c=0; const auto=V.autoSupplyUnits(sh);
+    (A.supplies||[]).forEach(sup=>{ const q=auto[sup.name]||0; if(q>0)c+=q*N(sup.cost); });
+    (sh.supplyUse||[]).forEach(u=>{ const sup=(A.supplies||[]).find(s=>s.name===u.name);
+      c+=N(u.qty)*(sup?N(sup.cost):N(u.cost)); });
+    return c+V.bagCount(sh)*V.bagUnitCost()+V.flatOverhead(sh); };
+
+  V.repDayPay=(d,id)=>N((d&&d.repPay)?d.repPay[id]:null);
+  V.repShowDayPay=(sh,id)=>(sh.days||[]).reduce((t,d)=>t+V.repDayPay(d,id),0);
+  V.repLegacyDayPayout=(d,id)=>{ const v=(d&&d.repPayout)?d.repPayout[id]:null; return (v!=null&&v!=='')?N(v):null; };
+  V.repShowLegacy=(sh,id)=>(sh.days||[]).reduce((t,d)=>t+(V.repLegacyDayPayout(d,id)||0),0);
+  V.repShowPay=(sh,id)=>{ const dp=V.repShowDayPay(sh,id); if(dp>0)return dp;
+    const l=V.repShowLegacy(sh,id); if(l>0)return l;
+    const ov=sh.repPayout&&sh.repPayout[id]; return (ov!=null&&ov!=='')?N(ov):0; };
+  V.showRepIds=sh=>{ const ids={}; (sh.days||[]).forEach(d=>{
+      (d.repSales||[]).forEach(rs=>{ if(rs.repId)ids[rs.repId]=1; });
+      Object.keys(d.repPay||{}).forEach(k=>ids[k]=1);
+      Object.keys(d.repPayout||{}).forEach(k=>ids[k]=1); });
+    if(sh.repPayout)Object.keys(sh.repPayout).forEach(k=>ids[k]=1);
+    return Object.keys(ids); };
+  V.repPayTotal=sh=>V.showRepIds(sh).reduce((t,id)=>t+V.repShowPay(sh,id),0);
+  V.workerPayout=w=>!w?0:(w.type==='hourly'?N(w.hours)*N(w.rate):N(w.amount));
+  V.workerTotal=sh=>(sh.workers||[]).reduce((t,w)=>t+V.workerPayout(w),0);
+  V.repEarned=id=>(A.shows||[]).reduce((t,sh)=>t+V.repShowPay(sh,id),0);
+  V.repPaid=id=>{ const r=(A.reps||[]).find(x=>x.id===id); if(!r)return 0;
+    return (r.payments||[]).reduce((t,p)=>t+N(p.amount),0); };
+  V.repName=id=>((A.reps||[]).find(r=>r.id===id)||{}).name||id||'';
+
+  // Faithful port of calcShow(), reading only this snapshot
+  V.calcShow=sh=>{
+    let cogs=0,exp=0,potential=0,dayGas=0;
+    const booth=Math.max(N(sh.boothCost),V.boothPaid(sh));
+    exp+=booth;
+    (sh.days||[]).forEach(d=>{
+      if(V.dayHasCounts(d)){ potential+=V.rev(V.daySold(d),sh.prices||null); cogs+=V.cogsOf(V.dayCogsUnits(d)); }
+      if(d.expenses){ exp+=Object.values(d.expenses).reduce((a,b)=>a+N(b),0); dayGas+=N(d.expenses.gas); }
+    });
+    const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(V.gas(sh)*100)/100):0;
+    exp+=gasAuto;
+    exp+=(sh.showExpenses||[]).reduce((t,e)=>t+N(e.amount),0);
+    exp+=N(sh.lodging);
+    const supplyCost=V.supplyCost(sh); exp+=supplyCost;
+    const repPay=V.repPayTotal(sh); exp+=repPay;
+    const workerPay=V.workerTotal(sh); exp+=workerPay;
+    const cardFees=Math.round(V.cardSales(sh)*V.setting('sqFee',0)*100)/100; exp+=cardFees;
+    const gross=V.actualRev(sh);
+    const ctr=V.cardTaxRate(sh);
+    const salesTax=ctr>0?(Math.round(V.cardSales(sh)*ctr/(1+ctr)*100)/100):0;
+    const profit=gross-salesTax-cogs-exp;
+    const taxRes=Math.max(0,profit)*V.taxRate(sh);
+    return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,cardFees,salesTax,gasAuto,booth,potential,profit,taxRes};
+  };
+  return V;
+}
+function bxTodayKey(){ const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+function bxMoney(n){ if(n==null||!isFinite(n))n=0; const a=Math.abs(n);
+  const s='$'+a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','); return n<0?'-'+s:s; }
 
 // ---- CRC32 + store-only ZIP writer (no libraries) ----
 function bxCrc32(u8){
@@ -4713,13 +4840,37 @@ function bxDl(name,payload,mime){
   }catch(e){ toast('Download failed: '+e.message); }
 }
 
-// ---- Collect every stored copy (read only) ----
+// ---- Collect all three copies as independent, frozen snapshots ----
 let _bxSnap=null;
-async function bxCollect(){
-  const snap={ meta:{}, local:null, localRaw:null, cloud:null, cloudError:null, localBackups:[] };
-  try{ snap.localRaw=localStorage.getItem('dd_bs_v7')||null;
-       snap.local=snap.localRaw?JSON.parse(snap.localRaw):JSON.parse(JSON.stringify(S)); }
-  catch(e){ snap.local=JSON.parse(JSON.stringify(S)); }
+function bxDeep(o){ return o?JSON.parse(JSON.stringify(o)):null; }
+function bxSrcInfo(label,state,extra){
+  const info={label:label,present:!!state,state:state||null,updatedAt:(state&&state._updatedAt)||null,
+    fingerprint:state?bxFingerprint(state):null,counts:state?bxCounts(state):null,note:(extra&&extra.note)||''};
+  return info;
+}
+async function bxCollect(preferred){
+  const snap={sources:{},selected:null,meta:{},localBackups:[],cloudError:null};
+
+  // 1. in-memory state of THIS tab
+  let mem=null; try{ mem=bxDeep(S); }catch(e){}
+  snap.sources.memory=bxSrcInfo('In-memory (this browser tab)',mem,
+    {note:'What the app is using right now. Can be ahead of localStorage if a save is still queued.'});
+
+  // 2. localStorage as actually persisted on this device
+  let loc=null,rawLoc=null;
+  try{ rawLoc=localStorage.getItem('dd_bs_v7'); loc=rawLoc?JSON.parse(rawLoc):null; }catch(e){}
+  snap.sources.localStorage=bxSrcInfo('localStorage (saved on this device)',loc,
+    {note:'The saved copy on this phone or computer. This is the default export source.'});
+
+  // 3. Supabase cloud
+  let cloud=null;
+  if(typeof sb!=='undefined'&&sb&&typeof _cloudUser!=='undefined'&&_cloudUser){
+    try{ cloud=await cloudPull(); }catch(e){ snap.cloudError=String((e&&e.message)||e); }
+  }else{ snap.cloudError='not signed in to cloud sync'; }
+  snap.sources.cloud=bxSrcInfo('Supabase cloud',cloud,
+    {note:snap.cloudError?('Unavailable: '+snap.cloudError):'The copy shared between your devices.'});
+
+  // auto-backup slots kept by the app
   try{
     const seen={}; let keys=[];
     try{ Object.keys(localStorage).forEach(k=>{ if(!seen[k]){seen[k]=1;keys.push(k);} }); }catch(e){}
@@ -4730,19 +4881,37 @@ async function bxCollect(){
       snap.localBackups.push({key:k,savedAt:new Date(parseInt(k.replace('dd_bs_backup_',''),10)||0).toISOString(),raw:localStorage.getItem(k)});
     });
   }catch(e){}
-  if(typeof sb!=='undefined'&&sb&&typeof _cloudUser!=='undefined'&&_cloudUser){
-    try{ snap.cloud=await cloudPull(); }catch(e){ snap.cloudError=String(e&&e.message||e); }
-  }else{ snap.cloudError='not signed in to cloud sync'; }
-  const st=snap.local||{};
+
+  // choose the source to report from
+  const order=[preferred,'localStorage','memory','cloud'].filter(Boolean);
+  snap.selected=order.find(k=>snap.sources[k]&&snap.sources[k].present)||'memory';
+
+  // pairwise comparison so drift is explicit
+  const fp=k=>snap.sources[k].present?snap.sources[k].fingerprint:null;
+  const same=(a,b)=>(fp(a)&&fp(b))?(fp(a)===fp(b)):null;
+  snap.comparison={
+    memory_vs_localStorage:same('memory','localStorage'),
+    localStorage_vs_cloud:same('localStorage','cloud'),
+    memory_vs_cloud:same('memory','cloud'),
+    allThreeIdentical:(fp('memory')&&fp('localStorage')&&fp('cloud'))
+      ? (fp('memory')===fp('localStorage')&&fp('localStorage')===fp('cloud')) : null
+  };
+  const sel=snap.sources[snap.selected], st=sel.state||{};
   snap.meta={
-    appVersion:BX_BUILD.version, codeCommit:BX_BUILD.commit, codeBuiltOn:BX_BUILD.builtOn,
-    stateSchemaV:st.v, exportedAt:bxISO(),
-    localUpdatedAt:st._updatedAt||null,
-    cloudUpdatedAt:(snap.cloud&&snap.cloud._updatedAt)||null,
+    appVersion:BX_BUILD.version,
+    baseCommit:BX_BUILD.baseCommit, backupBranch:BX_BUILD.backupBranch,
+    featureCommit:BX_BUILD.featureCommit, featureBuild:BX_BUILD.featureBuild, codeBuiltOn:BX_BUILD.builtOn,
+    exportedAt:bxISO(),
+    exportSource:snap.selected, exportSourceLabel:sel.label,
+    exportSourceUpdatedAt:sel.updatedAt, exportSourceFingerprint:sel.fingerprint,
+    stateSchemaV:st.v,
+    memoryUpdatedAt:snap.sources.memory.updatedAt,
+    localStorageUpdatedAt:snap.sources.localStorage.updatedAt,
+    cloudUpdatedAt:snap.sources.cloud.updatedAt,
     cloudStatus:snap.cloudError?('unavailable: '+snap.cloudError):'read OK',
-    cloudMatchesLocal:(snap.cloud? JSON.stringify(snap.cloud)===JSON.stringify(st) : null),
+    comparison:snap.comparison,
     localBackupSlots:snap.localBackups.length,
-    counts:bxCounts(st)
+    counts:sel.counts||bxCounts(st)
   };
   _bxSnap=snap; return snap;
 }
@@ -4781,160 +4950,147 @@ function bxCounts(st){
   };
 }
 
-// ---- CSV builders (read only) ----
-function bxCsvFiles(st){
-  const F=[], shows=st.shows||[], reps=st.reps||[];
-  const repName=id=>((reps.find(r=>r.id===id)||{}).name)||id||'';
-  const calc=sh=>{ try{ return calcShow(sh); }catch(e){ return null; } };
+// ---- CSV builders. Every number comes from V (the snapshot view). ----
+function bxCsvFiles(st,meta){
+  const V=bxView(st), F=[], shows=st.shows||[], reps=st.reps||[];
+  const hdr=['# source: '+meta.exportSourceLabel+' | fingerprint: '+meta.exportSourceFingerprint+
+             ' | exported: '+meta.exportedAt+' | app '+meta.appVersion+' | build '+meta.featureBuild];
+  const put=(name,rows)=>F.push({name:name,text:_csvRows([hdr].concat(rows))});
 
-  // 1. shows
-  let r=[['show_id','name','location','start_date','days','status','confirmed','deposit_due','booth_cost','booth_paid','booth_balance','miles_one_way','round_trips','total_miles','gas_estimate','irs_deduction','gross','cogs','expenses','profit','tax_reserve','rep_pay','card_fees','sales_tax','notes']];
-  shows.forEach(sh=>{
-    const c=calc(sh);
-    const trips=(sh.roundTrips!=null&&sh.roundTrips!=='')?bxNum(sh.roundTrips):(sh.numDays||1);
-    const tm=bxNum(sh.miles)*2*trips;
-    const paid=(sh.boothPayments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-    r.push([sh.id,sh.name,sh.location||'',sh.startDate||'',sh.numDays||'',sh.status||'',sh.confirmed===false?'PENDING':'confirmed',sh.depositDue||'',
-      bxNum(sh.boothCost).toFixed(2),paid.toFixed(2),Math.max(0,bxNum(sh.boothCost)-paid).toFixed(2),
-      bxNum(sh.miles),trips,tm,(tm/((S.settings&&S.settings.mpg)||17.5)*((S.settings&&S.settings.gasPrice)||0)).toFixed(2),
-      (tm*((S.settings&&S.settings.irsRate)||0)).toFixed(2),
-      c?c.gross.toFixed(2):'',c?c.cogs.toFixed(2):'',c?c.expenses.toFixed(2):'',c?c.profit.toFixed(2):'',c?c.taxRes.toFixed(2):'',
-      c?c.repPay.toFixed(2):'',c?c.cardFees.toFixed(2):'',c?c.salesTax.toFixed(2):'',(sh.notes||'').replace(/\s+/g,' ')]);
-  });
-  F.push({name:'01_shows.csv',text:_csvRows(r)});
+  let r=[['show_id','name','location','start_date','days','status','confirmed','deposit_due','booth_cost','booth_paid','booth_balance','miles_one_way','round_trips','total_miles','mpg_used','gas_price_used','gas_estimate','irs_rate_used','irs_deduction','gross','cogs','expenses','profit','tax_reserve','rep_pay','worker_pay','supply_cost','card_fees','sales_tax','notes']];
+  shows.forEach(sh=>{ const c=V.calcShow(sh), tm=V.miles(sh);
+    r.push([sh.id,sh.name,sh.location||'',sh.startDate||'',sh.numDays||'',sh.status||'',
+      sh.confirmed===false?'PENDING':'confirmed',sh.depositDue||'',
+      bxNum(sh.boothCost).toFixed(2),V.boothPaid(sh).toFixed(2),V.boothBalance(sh).toFixed(2),
+      bxNum(sh.miles),V.roundTrips(sh),tm,V.mpg(sh),V.gasPrice(sh).toFixed(2),V.gas(sh).toFixed(2),
+      V.setting('irsRate',0),(tm*V.setting('irsRate',0)).toFixed(2),
+      c.gross.toFixed(2),c.cogs.toFixed(2),c.expenses.toFixed(2),c.profit.toFixed(2),c.taxRes.toFixed(2),
+      c.repPay.toFixed(2),c.workerPay.toFixed(2),c.supplyCost.toFixed(2),c.cardFees.toFixed(2),c.salesTax.toFixed(2),
+      (sh.notes||'').replace(/\s+/g,' ')]); });
+  put('01_shows.csv',r);
 
-  // 2. sales by day and payment method
   r=[['show_id','show_name','date','day_num','open','close','status'].concat(PMTS.map(p=>p.label),['day_total','has_counts'])];
   shows.forEach(sh=>(sh.days||[]).forEach(d=>{
-    const pm=PMTS.map(p=>bxNum((d.payments||{})[p.key]).toFixed(2));
-    const tot=PMTS.reduce((t,p)=>t+bxNum((d.payments||{})[p.key]),0);
-    r.push([sh.id,sh.name,d.date||'',d.dayNum||'',d.openTime||'',d.closeTime||'',d.status||''].concat(pm,[tot.toFixed(2),(d.morningCount&&d.eveningCount)?'yes':'NO']));
-  }));
-  F.push({name:'02_sales_by_day_payment.csv',text:_csvRows(r)});
+    r.push([sh.id,sh.name,d.date||'',d.dayNum||'',d.openTime||'',d.closeTime||'',d.status||'']
+      .concat(PMTS.map(p=>bxNum((d.payments||{})[p.key]).toFixed(2)),
+        [V.pmtTotal(d.payments).toFixed(2),V.dayHasCounts(d)?'yes':'NO'])); }));
+  put('02_sales_by_day_payment.csv',r);
 
-  // 3. units sold by product per day
-  r=[['show_id','show_name','date','sku','morning_count','evening_count','restock','lost','units_sold','unit_price','unit_cost','revenue','cogs']];
-  shows.forEach(sh=>(sh.days||[]).forEach(d=>{
-    if(!(d.morningCount&&d.eveningCount))return;
-    let sold={},left={};
-    try{ sold=daySold(d); left=dayCogsUnits(d); }catch(e){ return; }
-    SKUS.forEach(s=>{
-      const q=bxNum(sold[s.key]); if(!q&&!bxNum(left[s.key]))return;
-      const price=(sh.prices&&sh.prices[s.key]!=null)?bxNum(sh.prices[s.key]):getP(s.key);
-      r.push([sh.id,sh.name,d.date||'',s.key,bxNum((d.morningCount||{})[s.key]),bxNum((d.eveningCount||{})[s.key]),
-        bxNum((d.restock||{})[s.key]),bxNum((d.lost||{})[s.key]),q,price.toFixed(2),getCost(s.key).toFixed(2),
-        (q*price).toFixed(2),(bxNum(left[s.key])*getCost(s.key)).toFixed(2)]);
-    });
-  }));
-  F.push({name:'03_units_by_product_day.csv',text:_csvRows(r)});
+  r=[['show_id','show_name','date','sku','morning_count','restock','evening_count','lost','units_sold','unit_price','unit_cost','revenue','cogs']];
+  shows.forEach(sh=>(sh.days||[]).forEach(d=>{ if(!V.dayHasCounts(d))return;
+    const sold=V.daySold(d), left=V.dayCogsUnits(d);
+    SKUS.forEach(s=>{ const q=bxNum(sold[s.key]); if(!q&&!bxNum(left[s.key]))return;
+      const price=(sh.prices&&sh.prices[s.key]!=null)?bxNum(sh.prices[s.key]):V.price(s.key);
+      r.push([sh.id,sh.name,d.date||'',s.key,bxNum((d.morningCount||{})[s.key]),bxNum((d.restock||{})[s.key]),
+        bxNum((d.eveningCount||{})[s.key]),bxNum((d.lost||{})[s.key]),q,price.toFixed(2),V.cost(s.key).toFixed(2),
+        (q*price).toFixed(2),(bxNum(left[s.key])*V.cost(s.key)).toFixed(2)]); }); }));
+  put('03_units_by_product_day.csv',r);
 
-  // 4. rep sales
   r=[['show_id','show_name','date','rep_id','rep_name'].concat(PMTS.map(p=>p.label),['rep_sale_total'])];
   shows.forEach(sh=>(sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{
-    const tot=PMTS.reduce((t,p)=>t+bxNum(rs[p.key]),0);
-    r.push([sh.id,sh.name,d.date||'',rs.repId||'',repName(rs.repId)].concat(PMTS.map(p=>bxNum(rs[p.key]).toFixed(2)),[tot.toFixed(2)]));
-  })));
-  F.push({name:'04_rep_sales.csv',text:_csvRows(r)});
+    r.push([sh.id,sh.name,d.date||'',rs.repId||'',V.repName(rs.repId)]
+      .concat(PMTS.map(p=>bxNum(rs[p.key]).toFixed(2)),[V.pmtTotal(rs).toFixed(2)])); })));
+  put('04_rep_sales.csv',r);
 
-  // 5. rep pay earned vs paid
   r=[['rep_id','rep_name','is_self','active','total_earned','total_paid','still_owed']];
-  reps.forEach(rp=>{
-    let earned=0,paid=0;
-    try{ earned=repEarned(rp.id); }catch(e){}
-    try{ paid=repPaid(rp.id); }catch(e){ paid=(rp.payments||[]).reduce((a,p)=>a+bxNum(p.amount),0); }
-    r.push([rp.id,rp.name,rp.isSelf?'yes':'no',rp.active?'yes':'no',earned.toFixed(2),paid.toFixed(2),Math.max(0,earned-paid).toFixed(2)]);
-  });
-  F.push({name:'05_rep_pay_summary.csv',text:_csvRows(r)});
+  reps.forEach(rp=>{ const e=V.repEarned(rp.id), p=V.repPaid(rp.id);
+    r.push([rp.id,rp.name,rp.isSelf?'yes':'no',rp.active?'yes':'no',e.toFixed(2),p.toFixed(2),Math.max(0,e-p).toFixed(2)]); });
+  put('05_rep_pay_summary.csv',r);
 
-  // 6. rep payout records
   r=[['rep_id','rep_name','date','amount','method','note']];
   reps.forEach(rp=>(rp.payments||[]).forEach(p=>r.push([rp.id,rp.name,p.date||'',bxNum(p.amount).toFixed(2),p.method||'',p.note||''])));
   shows.forEach(sh=>(sh.days||[]).forEach(d=>Object.keys(d.repPay||{}).forEach(k=>{
-    const v=d.repPay[k]; const amt=(v&&typeof v==='object')?bxNum(v.amount):bxNum(v);
-    if(amt)r.push([k,repName(k),d.date||'',amt.toFixed(2),'day-pay','show: '+sh.name]);
-  })));
-  F.push({name:'06_rep_payouts.csv',text:_csvRows(r)});
+    const amt=V.repDayPay(d,k); if(amt)r.push([k,V.repName(k),d.date||'',amt.toFixed(2),'day-pay','show: '+sh.name]); })));
+  shows.forEach(sh=>(sh.workers||[]).forEach(w=>r.push([w.id||'',w.name||'',sh.startDate||'',V.workerPayout(w).toFixed(2),'worker-'+(w.type||''),'show: '+sh.name])));
+  put('06_rep_payouts.csv',r);
 
-  // 7. booth payments
   r=[['show_id','show_name','booth_cost','payment_date','amount','note','running_balance']];
-  shows.forEach(sh=>{
-    let run=bxNum(sh.boothCost);
+  shows.forEach(sh=>{ let run=bxNum(sh.boothCost);
     if(!(sh.boothPayments||[]).length){ r.push([sh.id,sh.name,run.toFixed(2),'','','NO PAYMENTS LOGGED',run.toFixed(2)]); return; }
     (sh.boothPayments||[]).forEach(p=>{ run-=bxNum(p.amount);
-      r.push([sh.id,sh.name,bxNum(sh.boothCost).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',run.toFixed(2)]); });
-  });
-  F.push({name:'07_booth_payments.csv',text:_csvRows(r)});
+      r.push([sh.id,sh.name,bxNum(sh.boothCost).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',run.toFixed(2)]); }); });
+  put('07_booth_payments.csv',r);
 
-  // 8. expenses (show-level, day-level, business-level)
   r=[['scope','show_id','show_name','date','category','amount','note']];
   shows.forEach(sh=>{
     (sh.showExpenses||[]).forEach(e=>r.push(['show',sh.id,sh.name,e.date||'',e.cat||'',bxNum(e.amount).toFixed(2),e.desc||'']));
-    (sh.days||[]).forEach(d=>Object.keys(d.expenses||{}).forEach(k=>{
-      const v=bxNum(d.expenses[k]); if(v)r.push(['day',sh.id,sh.name,d.date||'',k,v.toFixed(2),'']);
-    }));
+    (sh.days||[]).forEach(d=>Object.keys(d.expenses||{}).forEach(k=>{ const v=bxNum(d.expenses[k]);
+      if(v)r.push(['day',sh.id,sh.name,d.date||'',k,v.toFixed(2),'']); }));
     if(bxNum(sh.lodging))r.push(['show',sh.id,sh.name,sh.startDate||'','lodging',bxNum(sh.lodging).toFixed(2),'']);
+    const sc=V.supplyCost(sh); if(sc)r.push(['auto',sh.id,sh.name,sh.startDate||'','supplies+bags+overhead',sc.toFixed(2),'computed from snapshot settings']);
+    const c=V.calcShow(sh); if(c.gasAuto)r.push(['auto',sh.id,sh.name,sh.startDate||'','gas (estimated)',c.gasAuto.toFixed(2),'auto-added, no gas hand-logged']);
+    if(c.cardFees)r.push(['auto',sh.id,sh.name,sh.startDate||'','card processing fees',c.cardFees.toFixed(2),'rate '+V.setting('sqFee',0)]);
   });
   (st.otherExpenses||[]).forEach(e=>r.push(['business','','',e.date||'',e.category||'',bxNum(e.amount).toFixed(2),e.note||'']));
-  F.push({name:'08_expenses.csv',text:_csvRows(r)});
+  put('08_expenses.csv',r);
 
-  // 9. inventory
   r=[['sku','product','on_hand','unit_cost','sell_price','cost_value','retail_value','borrowed_from_batman']];
-  SKUS.forEach(s=>{
-    const q=bxNum((st.inventory||{})[s.key]);
-    r.push([s.key,s.name,q,getCost(s.key).toFixed(2),getP(s.key).toFixed(2),(q*getCost(s.key)).toFixed(2),(q*getP(s.key)).toFixed(2),bxNum((st.batmanBorrow||{})[s.key])]);
-  });
-  F.push({name:'09_inventory.csv',text:_csvRows(r)});
+  SKUS.forEach(s=>{ const q=bxNum((st.inventory||{})[s.key]);
+    r.push([s.key,s.name,q,V.cost(s.key).toFixed(2),V.price(s.key).toFixed(2),
+      (q*V.cost(s.key)).toFixed(2),(q*V.price(s.key)).toFixed(2),bxNum((st.batmanBorrow||{})[s.key])]); });
+  put('09_inventory.csv',r);
 
-  // 10. inventory adjustments: restocks, lost, transfers
   r=[['type','show_id','show_name','date','sku','qty','from','to','note']];
   shows.forEach(sh=>(sh.days||[]).forEach(d=>SKUS.forEach(s=>{
     const rs=bxNum((d.restock||{})[s.key]), ls=bxNum((d.lost||{})[s.key]);
     if(rs)r.push(['restock',sh.id,sh.name,d.date||'',s.key,rs,'','','mid-show restock']);
-    if(ls)r.push(['lost/damaged',sh.id,sh.name,d.date||'',s.key,ls,'','','counted in COGS']);
-  })));
+    if(ls)r.push(['lost/damaged',sh.id,sh.name,d.date||'',s.key,ls,'','','counted in COGS']); })));
   (st.transfers||[]).forEach(t=>r.push(['transfer','','',t.date||'',t.sku||'',bxNum(t.qty),t.fromName||'',t.toName||'',t.note||'']));
-  F.push({name:'10_inventory_adjustments.csv',text:_csvRows(r)});
+  put('10_inventory_adjustments.csv',r);
 
-  // 11. product debt
   r=[['supplier','original_balance','payment_date','amount','note','remaining']];
   const pd=st.productDebt||{}; let rem=bxNum(pd.originalBalance);
   if(!(pd.payments||[]).length)r.push([pd.supplier||'',rem.toFixed(2),'','','NO PAYMENTS LOGGED',rem.toFixed(2)]);
-  (pd.payments||[]).forEach(p=>{ rem-=bxNum(p.amount); r.push([pd.supplier||'',bxNum(pd.originalBalance).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',rem.toFixed(2)]); });
-  F.push({name:'11_product_debt.csv',text:_csvRows(r)});
+  (pd.payments||[]).forEach(p=>{ rem-=bxNum(p.amount);
+    r.push([pd.supplier||'',bxNum(pd.originalBalance).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',rem.toFixed(2)]); });
+  put('11_product_debt.csv',r);
 
-  // 12. supplies
-  r=[['id','name','qty_on_hand','low_threshold','unit']];
-  (st.supplies||[]).forEach(s=>r.push([s.id,s.name,bxNum(s.qty),bxNum(s.low),s.unit||'']));
-  F.push({name:'12_supplies.csv',text:_csvRows(r)});
+  r=[['id','name','qty_on_hand','low_threshold','unit','unit_cost']];
+  (st.supplies||[]).forEach(s=>r.push([s.id,s.name,bxNum(s.qty),bxNum(s.low),s.unit||'',bxNum(s.cost).toFixed(2)]));
+  put('12_supplies.csv',r);
 
-  // 13. notes, deadlines, applications
   r=[['show_id','show_name','start_date','confirmed','deposit_or_action_due','hours_verified','notes']];
   shows.forEach(sh=>{ if(!sh.notes&&!sh.depositDue)return;
-    r.push([sh.id,sh.name,sh.startDate||'',sh.confirmed===false?'PENDING':'confirmed',sh.depositDue||'',sh.hoursVerified?'yes':'no',(sh.notes||'').replace(/\s+/g,' ')]); });
-  F.push({name:'13_notes_and_deadlines.csv',text:_csvRows(r)});
+    r.push([sh.id,sh.name,sh.startDate||'',sh.confirmed===false?'PENDING':'confirmed',sh.depositDue||'',
+      sh.hoursVerified?'yes':'no',(sh.notes||'').replace(/\s+/g,' ')]); });
+  put('13_notes_and_deadlines.csv',r);
 
-  // 14. settings, prices, costs
-  r=[['setting','value']];
-  Object.keys(st.settings||{}).forEach(k=>r.push(['settings.'+k,st.settings[k]]));
-  SKUS.forEach(s=>{ r.push(['price.'+s.key,getP(s.key).toFixed(2)]); r.push(['cost.'+s.key,getCost(s.key).toFixed(2)]); });
-  r.push(['app_version',BX_BUILD.version]); r.push(['code_commit',BX_BUILD.commit]); r.push(['state_schema_v',st.v]);
-  F.push({name:'14_settings_prices_costs.csv',text:_csvRows(r)});
+  r=[['setting','value','source']];
+  Object.keys(st.settings||{}).forEach(k=>r.push(['settings.'+k,st.settings[k],'snapshot']));
+  SKUS.forEach(s=>{ r.push(['price.'+s.key,V.price(s.key).toFixed(2),(st.prices&&st.prices[s.key]!=null)?'snapshot':'SKUS default']);
+    r.push(['cost.'+s.key,V.cost(s.key).toFixed(2),(st.costs&&st.costs[s.key]!=null)?'snapshot':'SKUS default']); });
+  r.push(['app_version',BX_BUILD.version,'build stamp']);
+  r.push(['base_commit',BX_BUILD.baseCommit,'pre-feature production']);
+  r.push(['backup_branch',BX_BUILD.backupBranch,'rollback target']);
+  r.push(['feature_commit',BX_BUILD.featureCommit,'introduced export module']);
+  r.push(['feature_build',BX_BUILD.featureBuild,'module build tag']);
+  r.push(['state_schema_v',st.v,'snapshot']);
+  put('14_settings_prices_costs.csv',r);
 
-  // 15. 2025 season as stored
   if(typeof SHOWS_2025!=='undefined'){
     r=[['name','dates','location','days','gross','cogs','booth','other_expenses','stored_net','calculated_net','difference','note']];
-    SHOWS_2025.forEach(s=>{ const calcNet=s.gross-s.cogs-s.booth-s.otherExp;
-      r.push([s.name,s.dates,s.location,s.numDays,s.gross,s.cogs,s.booth,s.otherExp,s.net,calcNet,s.net-calcNet,s.note||'']); });
-    F.push({name:'15_season_2025.csv',text:_csvRows(r)});
+    SHOWS_2025.forEach(s=>{ const cn=s.gross-s.cogs-s.booth-s.otherExp;
+      r.push([s.name,s.dates,s.location,s.numDays,s.gross,s.cogs,s.booth,s.otherExp,s.net,cn,s.net-cn,s.note||'']); });
+    put('15_season_2025.csv',r);
   }
+
+  r=[['source','present','label','updated_at','fingerprint','shows','show_days','reps','selected_for_this_export']];
+  ['memory','localStorage','cloud'].forEach(k=>{ const s=(meta._sources||{})[k]||{};
+    r.push([k,s.present?'yes':'no',s.label||'',s.updatedAt||'',s.fingerprint||'',
+      (s.counts&&s.counts.shows)||'',(s.counts&&s.counts.showDays)||'',(s.counts&&s.counts.reps)||'',
+      k===meta.exportSource?'YES':'']); });
+  const cmp=meta.comparison||{};
+  Object.keys(cmp).forEach(k=>r.push(['comparison: '+k,cmp[k]===null?'unknown':(cmp[k]?'identical':'DIFFERENT'),'','','','','','','']));
+  put('16_snapshot_sources.csv',r);
   return F;
 }
 
-// ---- Diagnostics (read only, reports nothing it cannot prove from state) ----
+// ---- Diagnostics. All figures via V, so they describe the SELECTED snapshot. ----
 function bxDiagnose(st,snap){
-  const out=[], shows=st.shows||[], reps=st.reps||[];
+  const V=bxView(st), out=[], shows=st.shows||[], reps=st.reps||[];
   const add=(sev,code,title,items,advice)=>{ if(items.length)out.push({sev,code,title,count:items.length,items,advice}); };
   const nm=sh=>sh.name+(sh.startDate?' ('+sh.startDate+')':'');
+  const M=bxMoney;
 
   add('WARN','MISSING_BOOTH','Shows with no booth cost entered',
     shows.filter(sh=>!bxNum(sh.boothCost)).map(sh=>nm(sh)+' — status '+(sh.confirmed===false?'pending':'confirmed')),
@@ -4950,44 +5106,36 @@ function bxDiagnose(st,snap){
   add('INFO','MISSING_HOURS','Shows with missing daily hours',noHours,'Hours drive the TODAY board and pack planning.');
 
   add('WARN','UNPAID_BOOTH','Shows with an unpaid booth balance',
-    shows.filter(sh=>{ const paid=(sh.boothPayments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-      return bxNum(sh.boothCost)-paid>0.005; })
-      .map(sh=>{ const paid=(sh.boothPayments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-        return nm(sh)+' — owes '+fmt(bxNum(sh.boothCost)-paid)+(sh.depositDue?' by '+sh.depositDue:' (no due date set)'); }),
+    shows.filter(sh=>V.boothBalance(sh)>0.005).map(sh=>nm(sh)+' — owes '+M(V.boothBalance(sh))+
+      (sh.depositDue?' by '+sh.depositDue:' (no due date set)')),
     'Money still owed to promoters.');
 
   const noCogs=[];
-  shows.forEach(sh=>(sh.days||[]).forEach(d=>{
-    const took=PMTS.reduce((t,p)=>t+bxNum((d.payments||{})[p.key]),0);
-    if(took>0&&!(d.morningCount&&d.eveningCount))
-      noCogs.push(nm(sh)+' — '+(d.date||'day '+d.dayNum)+' collected '+fmt(took)+' with no morning/evening count');
-  }));
+  shows.forEach(sh=>(sh.days||[]).forEach(d=>{ const took=V.pmtTotal(d.payments);
+    if(took>0&&!V.dayHasCounts(d))
+      noCogs.push(nm(sh)+' — '+(d.date||'day '+d.dayNum)+' collected '+M(took)+' with no morning/evening count'); }));
   add('CRITICAL','SALES_NO_COGS','Sales recorded with no COGS',noCogs,
     'Revenue is counted but product cost is not, so profit on these days is overstated. COGS only computes when BOTH the morning and evening counts exist.');
 
   const repGaps=[];
-  shows.forEach(sh=>{
-    const sellers=new Set(); (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId)sellers.add(rs.repId); }));
-    sellers.forEach(id=>{
-      let payTotal=0; (sh.days||[]).forEach(d=>{ const v=(d.repPay||{})[id]; payTotal+=(v&&typeof v==='object')?bxNum(v.amount):bxNum(v); });
-      const legacy=(sh.repPayout&&bxNum(sh.repPayout[id]))||0;
-      if(payTotal+legacy<=0){ const rn=((reps.find(r=>r.id===id)||{}).name)||id;
-        repGaps.push(nm(sh)+' — '+rn+' rang up sales but has no pay recorded'); }
-    });
-  });
-  reps.forEach(rp=>{ let e=0,p=0; try{ e=repEarned(rp.id); p=repPaid(rp.id); }catch(err){}
-    if(e-p>0.005)repGaps.push('Rep balance: '+rp.name+' earned '+fmt(e)+', paid '+fmt(p)+', still owed '+fmt(e-p)); });
-  add('WARN','REP_PAY_GAP','Rep payouts not recorded or still owed',repGaps,'Labor cost missing from a show understates its true cost.');
+  shows.forEach(sh=>{ const sellers={};
+    (sh.days||[]).forEach(d=>(d.repSales||[]).forEach(rs=>{ if(rs.repId)sellers[rs.repId]=1; }));
+    Object.keys(sellers).forEach(id=>{ if(V.repShowPay(sh,id)<=0)
+      repGaps.push(nm(sh)+' — '+V.repName(id)+' rang up sales but has no pay recorded'); }); });
+  reps.forEach(rp=>{ const e=V.repEarned(rp.id), p=V.repPaid(rp.id);
+    if(e-p>0.005)repGaps.push('Rep balance: '+rp.name+' earned '+M(e)+', paid '+M(p)+', still owed '+M(e-p)); });
+  add('WARN','REP_PAY_GAP','Rep payouts not recorded or still owed',repGaps,
+    'Labor cost missing from a show understates its true cost.');
 
   const netMismatch=[];
   shows.forEach(sh=>{ if(sh.net==null&&sh.storedNet==null)return;
-    const stored=bxNum(sh.net!=null?sh.net:sh.storedNet); let c=null;
-    try{ c=calcShow(sh); }catch(e){ return; }
-    if(c&&Math.abs(stored-c.profit)>0.005)
-      netMismatch.push(nm(sh)+' — stored net '+fmt(stored)+' vs calculated '+fmt(c.profit)+' (off by '+fmt(stored-c.profit)+')'); });
+    const stored=bxNum(sh.net!=null?sh.net:sh.storedNet), c=V.calcShow(sh);
+    if(Math.abs(stored-c.profit)>0.005)
+      netMismatch.push(nm(sh)+' — stored net '+M(stored)+' vs calculated '+M(c.profit)+' (off by '+M(stored-c.profit)+')'); });
   if(typeof SHOWS_2025!=='undefined'){
-    SHOWS_2025.forEach(s=>{ const calcNet=s.gross-s.cogs-s.booth-s.otherExp;
-      if(s.net!==calcNet)netMismatch.push('2025: '+s.name+' '+s.dates+' — stored net '+fmt(s.net)+' vs gross minus costs '+fmt(calcNet)+' (off by '+fmt(s.net-calcNet)+')'); });
+    SHOWS_2025.forEach(s=>{ const cn=s.gross-s.cogs-s.booth-s.otherExp;
+      if(s.net!==cn)netMismatch.push('2025: '+s.name+' '+s.dates+' — stored net '+M(s.net)+
+        ' vs gross minus costs '+M(cn)+' (off by '+M(s.net-cn)+')'); });
   }
   add('CRITICAL','NET_MISMATCH','Stored net does not match calculated net',netMismatch,
     'For 2025 rows the stored net was carried over from the Excel workbook and does not equal gross minus COGS minus booth minus other.');
@@ -4998,136 +5146,195 @@ function bxDiagnose(st,snap){
   const byName={};
   shows.forEach(sh=>{ const k=(sh.name||'').toLowerCase().trim(); (byName[k]=byName[k]||[]).push(sh); });
   Object.keys(byName).forEach(k=>{ const g=byName[k]; if(g.length<2)return;
-    for(let i=0;i<g.length;i++)for(let j=i+1;j<g.length;j++){
-      const a=g[i],b=g[j]; if(!a.startDate||!b.startDate||a.startDate===b.startDate)continue;
-      const ae=new Date(a.startDate).getTime()+((a.numDays||1)-1)*864e5, bs=new Date(b.startDate).getTime();
-      const be=new Date(b.startDate).getTime()+((b.numDays||1)-1)*864e5, as=new Date(a.startDate).getTime();
-      if(as<=be&&bs<=ae)dupes.push('Overlapping dates: '+nm(a)+' and '+nm(b));
-    } });
+    for(let i=0;i<g.length;i++)for(let j=i+1;j<g.length;j++){ const a=g[i],b=g[j];
+      if(!a.startDate||!b.startDate||a.startDate===b.startDate)continue;
+      const as=new Date(a.startDate).getTime(), ae=as+((a.numDays||1)-1)*864e5;
+      const bs=new Date(b.startDate).getTime(), be=bs+((b.numDays||1)-1)*864e5;
+      if(as<=be&&bs<=ae)dupes.push('Overlapping dates: '+nm(a)+' and '+nm(b)); } });
   const clash={};
-  shows.forEach(sh=>{ if(sh.confirmed===false)return; const s=new Date(sh.startDate).getTime();
-    for(let i=0;i<(sh.numDays||1);i++){ const k=new Date(s+i*864e5).toISOString().slice(0,10);
+  shows.forEach(sh=>{ if(sh.confirmed===false)return; const s0=new Date(sh.startDate).getTime();
+    if(!isFinite(s0))return;
+    for(let i=0;i<(sh.numDays||1);i++){ const k=new Date(s0+i*864e5).toISOString().slice(0,10);
       (clash[k]=clash[k]||[]).push(sh.name); } });
   Object.keys(clash).sort().forEach(k=>{ if(clash[k].length>1)dupes.push('Two confirmed shows on '+k+': '+clash[k].join(' AND ')); });
-  add('WARN','DUPLICATE_SHOWS','Duplicate or conflicting show records',dupes,'Two confirmed shows on the same day cannot both be worked unless a rep covers one.');
+  add('WARN','DUPLICATE_SHOWS','Duplicate or conflicting show records',dupes,
+    'Two confirmed shows on the same day cannot both be worked unless a rep covers one.');
 
-  if(snap&&snap.cloud&&snap.meta&&snap.meta.cloudMatchesLocal===false){
-    const lc=(st.shows||[]).length, cc=((snap.cloud.shows)||[]).length;
-    out.push({sev:'WARN',code:'CLOUD_DRIFT',title:'Cloud copy differs from this device',count:1,
-      items:['local updated '+(st._updatedAt||'unknown')+' with '+lc+' shows; cloud updated '+(snap.cloud._updatedAt||'unknown')+' with '+cc+' shows'],
-      advice:'Not necessarily a problem, but the two copies are not identical right now.'});
+  if(snap&&snap.comparison){
+    const drift=[], c=snap.comparison, S_=snap.sources;
+    const describe=(a,b,v)=>{ if(v===false)drift.push(a+' and '+b+' are DIFFERENT — '+a+' updated '+
+      ((S_[a].updatedAt)||'unknown')+' with '+((S_[a].counts||{}).shows)+' shows; '+b+' updated '+
+      ((S_[b].updatedAt)||'unknown')+' with '+((S_[b].counts||{}).shows)+' shows'); };
+    describe('memory','localStorage',c.memory_vs_localStorage);
+    describe('localStorage','cloud',c.localStorage_vs_cloud);
+    describe('memory','cloud',c.memory_vs_cloud);
+    add('WARN','SNAPSHOT_DRIFT','The three stored copies do not match',drift,
+      'This report was built from "'+(snap.sources[snap.selected].label)+'". The other copies hold different data.');
   }
   return out;
 }
+function bxDiagCsv(diag,meta){
+  const r=[['# source: '+(meta?meta.exportSourceLabel:'')+' | fingerprint: '+(meta?meta.exportSourceFingerprint:'')],
+           ['severity','code','issue','detail']];
+  diag.forEach(d=>d.items.forEach(i=>r.push([d.sev,d.code,d.title,i])));
+  if(r.length===2)r.push(['OK','NONE','No issues found','']);
+  return _csvRows(r);
+}
 
-// ---- Human readable summary ----
-function bxSummary(st,meta,diag){
-  const L=[], line=s=>L.push(s), rule=()=>L.push('='.repeat(64));
-  const shows=st.shows||[];
+// ---- Human readable summary. Every figure via V. ----
+function bxSummary(st,meta,diag,snap){
+  const V=bxView(st), L=[], line=s=>L.push(s), rule=()=>L.push('='.repeat(66));
+  const shows=st.shows||[], M=bxMoney;
   rule(); line('BEST SOLUTION — COMPLETE BUSINESS DATA EXPORT'); line('Dot Dynasty LLC'); rule();
-  line('Exported          : '+meta.exportedAt);
-  line('App version       : '+meta.appVersion+'   code commit: '+meta.codeCommit+'   built: '+meta.codeBuiltOn);
-  line('State schema      : v'+meta.stateSchemaV);
-  line('Local last saved  : '+(meta.localUpdatedAt||'never'));
-  line('Cloud last synced : '+(meta.cloudUpdatedAt||'n/a')+'   ('+meta.cloudStatus+')');
-  line('Cloud == local    : '+(meta.cloudMatchesLocal===null?'unknown, cloud not read':(meta.cloudMatchesLocal?'yes':'NO, they differ')));
-  line('Local backup slots: '+meta.localBackupSlots);
+  line('Exported            : '+meta.exportedAt);
   line('');
-  rule(); line('RECORD COUNTS'); rule();
+  line('SOURCE OF THIS REPORT');
+  line('  Every figure below comes from : '+meta.exportSourceLabel);
+  line('  That copy last changed        : '+(meta.exportSourceUpdatedAt||'unknown'));
+  line('  Fingerprint                   : '+meta.exportSourceFingerprint);
+  line('');
+  line('BUILD');
+  line('  Production app version        : '+meta.appVersion);
+  line('  Backup commit (roll back here): '+meta.baseCommit+'  on branch '+meta.backupBranch);
+  line('  Export feature commit         : '+meta.featureCommit+'  build '+meta.featureBuild);
+  line('  State schema                  : v'+meta.stateSchemaV);
+  line('');
+  rule(); line('THE THREE STORED COPIES'); rule();
+  ['memory','localStorage','cloud'].forEach(k=>{
+    const s=(snap&&snap.sources[k])||{};
+    line('  '+(k===meta.exportSource?'>> ':'   ')+k.padEnd(14)+' '+(s.present?'present':'NOT AVAILABLE'));
+    if(s.present){ line('      '+s.label);
+      line('      updated '+(s.updatedAt||'unknown')+'   fingerprint '+s.fingerprint);
+      line('      '+((s.counts||{}).shows)+' shows, '+((s.counts||{}).showDays)+' show days, '+((s.counts||{}).reps)+' reps'); }
+    else if(s.note)line('      '+s.note);
+  });
+  line('');
+  const c=meta.comparison||{};
+  const say=v=>v===null?'unknown (a copy is missing)':(v?'identical':'DIFFERENT');
+  line('  memory vs localStorage : '+say(c.memory_vs_localStorage));
+  line('  localStorage vs cloud  : '+say(c.localStorage_vs_cloud));
+  line('  memory vs cloud        : '+say(c.memory_vs_cloud));
+  line('  all three identical    : '+say(c.allThreeIdentical));
+  line('  Local auto-backup slots: '+meta.localBackupSlots);
+  line('');
+  rule(); line('RECORD COUNTS  (of '+meta.exportSource+')'); rule();
   Object.keys(meta.counts).forEach(k=>line('  '+k.padEnd(24)+' '+meta.counts[k]));
   line('');
-  rule(); line('MONEY'); rule();
-  let booth=0,paid=0,gross=0,cogs=0,exp=0,profit=0,miles=0;
-  shows.forEach(sh=>{ booth+=bxNum(sh.boothCost);
-    paid+=(sh.boothPayments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-    const trips=(sh.roundTrips!=null&&sh.roundTrips!=='')?bxNum(sh.roundTrips):(sh.numDays||1);
-    miles+=bxNum(sh.miles)*2*trips;
-    try{ const c=calcShow(sh); gross+=c.gross; cogs+=c.cogs; exp+=c.expenses; profit+=c.profit; }catch(e){} });
-  line('  Booth committed        '+fmt(booth));
-  line('  Booth paid             '+fmt(paid));
-  line('  Booth still owed       '+fmt(Math.max(0,booth-paid)));
-  line('  Gross collected        '+fmt(gross));
-  line('  COGS                   '+fmt(cogs));
-  line('  Expenses               '+fmt(exp));
-  line('  Profit                 '+fmt(profit));
+  rule(); line('MONEY  (computed from '+meta.exportSource+')'); rule();
+  let booth=0,paid=0,gross=0,cogs=0,exp=0,profit=0,miles=0,repPay=0,taxRes=0;
+  shows.forEach(sh=>{ booth+=bxNum(sh.boothCost); paid+=V.boothPaid(sh); miles+=V.miles(sh);
+    const x=V.calcShow(sh); gross+=x.gross; cogs+=x.cogs; exp+=x.expenses; profit+=x.profit;
+    repPay+=x.repPay; taxRes+=x.taxRes; });
+  line('  Booth committed        '+M(booth));
+  line('  Booth paid             '+M(paid));
+  line('  Booth still owed       '+M(Math.max(0,booth-paid)));
+  line('  Gross collected        '+M(gross));
+  line('  COGS                   '+M(cogs));
+  line('  All expenses           '+M(exp));
+  line('  Rep pay inside that    '+M(repPay));
+  line('  Profit                 '+M(profit));
+  line('  Tax reserve            '+M(taxRes)+'   (rate '+(V.setting('tax',0.28)*100).toFixed(0)+'%)');
   line('  Total miles            '+miles.toFixed(0));
-  line('  IRS mileage deduction  '+fmt(miles*((st.settings||{}).irsRate||0)));
-  const pd=st.productDebt||{}; const pdPaid=(pd.payments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-  line('  Product debt to '+(pd.supplier||'supplier')+': '+fmt(bxNum(pd.originalBalance)-pdPaid)+' remaining of '+fmt(bxNum(pd.originalBalance)));
-  line('  Inventory at cost      '+fmt(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*getCost(s.key),0)));
-  line('  Inventory at retail    '+fmt(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*getP(s.key),0)));
+  line('  IRS mileage deduction  '+M(miles*V.setting('irsRate',0))+'   (rate $'+V.setting('irsRate',0)+'/mi)');
+  const pd=st.productDebt||{}, pdPaid=(pd.payments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
+  line('  Product debt remaining '+M(bxNum(pd.originalBalance)-pdPaid)+' of '+M(bxNum(pd.originalBalance))+' to '+(pd.supplier||'supplier'));
+  line('  Inventory at cost      '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.cost(s.key),0)));
+  line('  Inventory at retail    '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.price(s.key),0)));
+  line('');
+  rule(); line('PRICES AND COSTS IN THIS SNAPSHOT'); rule();
+  SKUS.forEach(s=>line('  '+s.name.padEnd(22)+' sell '+M(V.price(s.key)).padStart(9)+'   cost '+M(V.cost(s.key)).padStart(9)));
   line('');
   rule(); line('SHOWS'); rule();
   shows.slice().sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||'')).forEach(sh=>{
-    const p=(sh.boothPayments||[]).reduce((a,x)=>a+bxNum(x.amount),0);
-    const bal=bxNum(sh.boothCost)-p;
+    const bal=V.boothBalance(sh);
     line('  '+(sh.startDate||'????-??-??')+'  '+(sh.name||'').padEnd(34).slice(0,34)+' '+String(sh.numDays||1)+'d  '+
-      (sh.confirmed===false?'PENDING  ':'confirmed').padEnd(10)+' booth '+fmt(bxNum(sh.boothCost)).padStart(10)+
-      '  paid '+fmt(p).padStart(10)+(bal>0.005?'  OWES '+fmt(bal):''));
-  });
+      (sh.confirmed===false?'PENDING  ':'confirmed').padEnd(10)+' booth '+M(bxNum(sh.boothCost)).padStart(10)+
+      '  paid '+M(V.boothPaid(sh)).padStart(10)+(bal>0.005?'  OWES '+M(bal):'')); });
   line('');
   rule(); line('DIAGNOSTICS'); rule();
   if(!diag.length)line('  No issues found.');
   diag.forEach(d=>{ line(''); line('['+d.sev+'] '+d.title+'  ('+d.count+')');
     if(d.advice)line('  Why it matters: '+d.advice);
     d.items.slice(0,60).forEach(i=>line('    - '+i));
-    if(d.items.length>60)line('    ...and '+(d.items.length-60)+' more, see the diagnostics CSV.');
-  });
+    if(d.items.length>60)line('    ...and '+(d.items.length-60)+' more, see DIAGNOSTICS.csv'); });
   line(''); rule();
   line('This export is READ ONLY. Nothing in the app was changed to produce it.');
+  line('All figures were computed from the snapshot named above, not from live memory.');
   rule();
   return L.join('\r\n');
-}
-function bxDiagCsv(diag){
-  const r=[['severity','code','issue','detail']];
-  diag.forEach(d=>d.items.forEach(i=>r.push([d.sev,d.code,d.title,i])));
-  if(r.length===1)r.push(['OK','NONE','No issues found','']);
-  return _csvRows(r);
 }
 
 // ---- File assembly ----
 function bxBuildAll(snap){
-  const st=snap.local||{}, meta=snap.meta;
+  const sel=snap.sources[snap.selected], st=sel.state||{};
+  const meta=Object.assign({},snap.meta,{_sources:snap.sources});
   const diag=bxDiagnose(st,snap);
-  const csvs=bxCsvFiles(st);
-  const backup={ _bestSolutionBackup:true, _format:'full-restorable-v1', meta:meta,
-    state:st, cloudState:snap.cloud||null, cloudError:snap.cloudError||null,
+  const csvs=bxCsvFiles(st,meta);
+  const summary=bxSummary(st,meta,diag,snap);
+  const metaOut=Object.assign({},snap.meta);
+  const backup={ _bestSolutionBackup:true, _format:'full-restorable-v2',
+    meta:metaOut,
+    exportedFrom:snap.selected,
+    state:st,
+    allSources:{
+      memory:snap.sources.memory.state, localStorage:snap.sources.localStorage.state, cloud:snap.sources.cloud.state
+    },
+    sourceIndex:['memory','localStorage','cloud'].map(k=>({source:k,label:snap.sources[k].label,
+      present:snap.sources[k].present,updatedAt:snap.sources[k].updatedAt,
+      fingerprint:snap.sources[k].fingerprint,counts:snap.sources[k].counts,selected:k===snap.selected})),
+    comparison:snap.comparison,
     localBackupSlots:snap.localBackups.map(b=>({key:b.key,savedAt:b.savedAt})),
     season2025:(typeof SHOWS_2025!=='undefined')?SHOWS_2025:null };
   const files=[
     {name:'backup/best-solution-full-backup.json',text:JSON.stringify(backup,null,2)},
     {name:'backup/restorable-state-only.json',text:JSON.stringify(st,null,2)},
-    {name:'SUMMARY.txt',text:bxSummary(st,meta,diag)},
-    {name:'DIAGNOSTICS.csv',text:bxDiagCsv(diag)}
+    {name:'SUMMARY.txt',text:summary},
+    {name:'DIAGNOSTICS.csv',text:bxDiagCsv(diag,meta)},
+    {name:'READ-ME-FIRST.txt',text:
+      'BEST SOLUTION EXPORT\r\n\r\n'+
+      'Exported '+meta.exportedAt+'\r\n'+
+      'SOURCE OF EVERY NUMBER IN THIS EXPORT: '+meta.exportSourceLabel+'\r\n'+
+      'Fingerprint: '+meta.exportSourceFingerprint+'\r\n\r\n'+
+      'App version '+meta.appVersion+'\r\n'+
+      'Roll-back commit '+meta.baseCommit+' on branch '+meta.backupBranch+'\r\n'+
+      'Export feature commit '+meta.featureCommit+', build '+meta.featureBuild+'\r\n\r\n'+
+      'restorable-state-only.json is the file to use with Restore from File.\r\n'+
+      'best-solution-full-backup.json also carries the other two copies under allSources.\r\n'}
   ];
   csvs.forEach(f=>files.push({name:'csv/'+f.name,text:f.text}));
-  if(snap.cloud)files.push({name:'backup/cloud-copy.json',text:JSON.stringify(snap.cloud,null,2)});
+  ['memory','localStorage','cloud'].forEach(k=>{ const s=snap.sources[k];
+    if(s.present&&k!==snap.selected)files.push({name:'backup/other-copies/'+k+'.json',text:JSON.stringify(s.state,null,2)}); });
   snap.localBackups.forEach((b,i)=>files.push({name:'backup/auto-slot-'+(i+1)+'-'+b.savedAt.slice(0,10)+'.json',text:b.raw||''}));
-  return {files,diag,csvs,backup,meta,summary:files[2].text};
+  return {files,diag,csvs,backup,meta,summary};
 }
 
-// ---- Actions ----
-async function bxRun(){
-  toast('Reading local and cloud data…');
-  try{ await bxCollect(); bxShowModal(); }
+// ---- Actions & UI ----
+async function bxRun(preferred){
+  toast('Reading device and cloud copies…');
+  try{ await bxCollect(preferred); bxShowModal(); }
   catch(e){ toast('Export failed: '+e.message); }
 }
-function bxPack(){ if(!_bxSnap)return null; return bxBuildAll(_bxSnap); }
-function bxDlEverything(){ const p=bxPack(); if(!p)return;
-  bxDl('best-solution-export-'+bxNow()+'.zip',bxZip(p.files),'application/zip'); }
-function bxDlJson(){ const p=bxPack(); if(!p)return;
-  bxDl('best-solution-full-backup-'+bxNow()+'.json',JSON.stringify(p.backup,null,2),'application/json'); }
+function bxSelect(src){ if(!_bxSnap||!_bxSnap.sources[src]||!_bxSnap.sources[src].present){toast('That copy is not available');return;}
+  _bxSnap.selected=src;
+  const sel=_bxSnap.sources[src], st=sel.state||{};
+  _bxSnap.meta=Object.assign({},_bxSnap.meta,{exportSource:src,exportSourceLabel:sel.label,
+    exportSourceUpdatedAt:sel.updatedAt,exportSourceFingerprint:sel.fingerprint,
+    stateSchemaV:st.v,counts:sel.counts||bxCounts(st)});
+  bxShowModal(); toast('Now reporting from: '+sel.label);
+}
+function bxPack(){ return _bxSnap?bxBuildAll(_bxSnap):null; }
+function bxTag(){ return bxNow()+'-'+(_bxSnap?_bxSnap.selected:'x'); }
+function bxDlEverything(){ const p=bxPack(); if(!p)return; bxDl('best-solution-export-'+bxTag()+'.zip',bxZip(p.files),'application/zip'); }
+function bxDlJson(){ const p=bxPack(); if(!p)return; bxDl('best-solution-full-backup-'+bxTag()+'.json',JSON.stringify(p.backup,null,2),'application/json'); }
 function bxDlCsvZip(){ const p=bxPack(); if(!p)return;
-  bxDl('best-solution-csv-'+bxNow()+'.zip',bxZip(p.csvs.concat([{name:'DIAGNOSTICS.csv',text:bxDiagCsv(p.diag)}])),'application/zip'); }
-function bxDlSummary(){ const p=bxPack(); if(!p)return;
-  bxDl('best-solution-summary-'+bxNow()+'.txt',p.summary,'text/plain'); }
-function bxDlDiag(){ const p=bxPack(); if(!p)return;
-  bxDl('best-solution-diagnostics-'+bxNow()+'.csv',bxDiagCsv(p.diag),'text/csv'); }
+  bxDl('best-solution-csv-'+bxTag()+'.zip',bxZip(p.csvs.concat([{name:'DIAGNOSTICS.csv',text:bxDiagCsv(p.diag,p.meta)}])),'application/zip'); }
+function bxDlSummary(){ const p=bxPack(); if(!p)return; bxDl('best-solution-summary-'+bxTag()+'.txt',p.summary,'text/plain'); }
+function bxDlDiag(){ const p=bxPack(); if(!p)return; bxDl('best-solution-diagnostics-'+bxTag()+'.csv',bxDiagCsv(p.diag,p.meta),'text/csv'); }
 function bxViewSummary(){ const p=bxPack(); if(!p)return;
   mOpen('<div class="mh"><div class="mt">Export Summary</div><button class="mx" onclick="mClose()">&times;</button></div>'+
     '<textarea class="fi" style="min-height:340px;font-size:10px;font-family:monospace;white-space:pre" readonly onclick="this.select()">'+
     p.summary.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</textarea>'+
-    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxRun()">&larr; Back to export</button>'); }
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxShowModal()">&larr; Back to export</button>'); }
 
 function bxShowModal(){
   const snap=_bxSnap; if(!snap){ toast('Nothing collected'); return; }
@@ -5135,15 +5342,34 @@ function bxShowModal(){
   const sev=s=>p.diag.filter(d=>d.sev===s).reduce((t,d)=>t+d.count,0);
   const crit=sev('CRITICAL'), warn=sev('WARN'), info=sev('INFO');
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
-  const row=(k,v)=>'<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">'+k+'</span><strong>'+esc(v)+'</strong></div>';
+  const row=(k,v)=>'<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:2px 0"><span style="color:var(--muted)">'+k+'</span><strong style="text-align:right">'+esc(v)+'</strong></div>';
+  const cmp=m.comparison||{};
+  const badge=v=>v===null?'<span style="color:var(--muted)">n/a</span>':(v?'<span style="color:var(--green)">identical</span>':'<span style="color:var(--red);font-weight:900">DIFFERENT</span>');
+  const srcBtn=k=>{ const s=snap.sources[k], on=(k===snap.selected);
+    return '<button class="btn btn-xs '+(on?'btn-gold':'btn-ghost')+'" style="flex:1"'+
+      (s.present?'':' disabled style="flex:1;opacity:.4"')+' onclick="bxSelect(\''+k+'\')">'+
+      (on?'● ':'')+k+(s.present?'':' (none)')+'</button>'; };
   mOpen('<div class="mh"><div class="mt">📦 Export Complete Business Data</div><button class="mx" onclick="mClose()">&times;</button></div>'+
   '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Read only. Nothing in your app is changed by exporting.</div>'+
-  '<div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">EXPORT STAMP</div>'+
-    row('App version',m.appVersion)+row('Code commit',m.codeCommit)+row('Exported',m.exportedAt.replace('T',' ').slice(0,19))+
-    row('Local saved',(m.localUpdatedAt||'never').replace('T',' ').slice(0,19))+
-    row('Cloud synced',(m.cloudUpdatedAt||'n/a').toString().replace('T',' ').slice(0,19))+
-    row('Cloud status',m.cloudStatus)+
-    row('Cloud matches local',m.cloudMatchesLocal===null?'unknown':(m.cloudMatchesLocal?'yes':'NO'))+
+  '<div class="card '+(cmp.allThreeIdentical===false?'rb':'')+'" style="margin-bottom:10px">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">WHICH COPY TO EXPORT</div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:8px">'+srcBtn('memory')+srcBtn('localStorage')+srcBtn('cloud')+'</div>'+
+    '<div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:6px">Reporting from: '+esc(m.exportSourceLabel)+'</div>'+
+    row('This copy updated',(m.exportSourceUpdatedAt||'unknown').toString().replace('T',' ').slice(0,19))+
+    row('Fingerprint',m.exportSourceFingerprint)+
+    '<div style="height:6px"></div>'+
+    '<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">memory vs device</span>'+badge(cmp.memory_vs_localStorage)+'</div>'+
+    '<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">device vs cloud</span>'+badge(cmp.localStorage_vs_cloud)+'</div>'+
+    '<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">memory vs cloud</span>'+badge(cmp.memory_vs_cloud)+'</div>'+
+    (m.cloudStatus&&m.cloudStatus.indexOf('unavailable')===0?'<div style="font-size:10px;color:var(--muted);margin-top:6px">Cloud '+esc(m.cloudStatus)+'</div>':'')+
+  '</div>'+
+  '<div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">BUILD STAMP</div>'+
+    row('App version',m.appVersion)+
+    row('Backup commit',m.baseCommit)+
+    row('Backup branch',m.backupBranch)+
+    row('Export feature commit',m.featureCommit)+
+    row('Module build',m.featureBuild)+
+    row('Exported',m.exportedAt.replace('T',' ').slice(0,19))+
   '</div>'+
   '<div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">RECORD COUNTS</div>'+
     row('Shows',c.shows+'  ('+c.showsConfirmed+' confirmed, '+c.showsPending+' pending)')+
@@ -5164,7 +5390,7 @@ function bxShowModal(){
       :'<div style="font-size:12px;color:var(--green)">No issues found.</div>')+
   '</div>'+
   '<button class="btn btn-gold btn-full" onclick="bxDlEverything()">⬇️ Download EVERYTHING (.zip)</button>'+
-  '<div style="font-size:10px;color:var(--muted);margin:6px 0 12px">One zip: full JSON backup, all '+p.csvs.length+' CSVs, summary report, diagnostics.</div>'+
+  '<div style="font-size:10px;color:var(--muted);margin:6px 0 12px">One zip: full JSON backup (all three copies), '+p.csvs.length+' CSVs, summary, diagnostics.</div>'+
   '<div class="g2" style="gap:8px">'+
     '<button class="btn btn-ghost btn-full" onclick="bxDlJson()">🗄️ JSON backup</button>'+
     '<button class="btn btn-ghost btn-full" onclick="bxDlCsvZip()">📊 CSV pack (.zip)</button>'+
@@ -5174,12 +5400,12 @@ function bxShowModal(){
     '<button class="btn btn-ghost btn-full" onclick="bxDlDiag()">🩺 Diagnostics (.csv)</button>'+
   '</div>'+
   '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxViewSummary()">👁️ View summary on screen</button>'+
-  '<div style="font-size:10px;color:var(--muted);margin-top:10px">Restore path: the JSON backup contains a <code>state</code> object. To restore, use Restore from File in Settings with <code>restorable-state-only.json</code> from the zip.</div>');
+  '<div style="font-size:10px;color:var(--muted);margin-top:10px">To restore, use Restore from File in Settings with <code>restorable-state-only.json</code> from the zip.</div>');
 }
 function bxSettingsCard(){
   return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
   '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 ADMINISTRATIVE — FULL DATA EXPORT</div>'+
-  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Includes a diagnostic report. This is read only and changes nothing.</div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Compares all three stored copies, includes a diagnostic report. Read only, changes nothing.</div>'+
   '<button class="btn btn-gold btn-full" onclick="bxRun()">📦 Export Complete Business Data</button>'+
   '</div>';
 }
