@@ -4840,6 +4840,35 @@ function bxDl(name,payload,mime){
   }catch(e){ toast('Download failed: '+e.message); }
 }
 
+// ---- Cloud read with an honest, non-lossy result ----
+// The app's own cloudPull() returns null for BOTH "no row" and "Supabase error",
+// so it cannot tell an empty cloud from a failed read. This does its own
+// read-only SELECT (identical query) and reports which of the four it was.
+// status: 'ok' | 'empty' | 'error' | 'signed_out'
+async function bxCloudRead(){
+  const R=(status,state,message)=>({status:status,state:state,message:message});
+  if(typeof sb==='undefined'||!sb)
+    return R('signed_out',null,'cloud sync is not set up on this device');
+  if(typeof _cloudUser==='undefined'||!_cloudUser)
+    return R('signed_out',null,'not signed in to cloud sync');
+  let res;
+  try{
+    res=await sb.from('app_data').select('data_value').eq('data_key','bs_state').maybeSingle();
+  }catch(e){
+    return R('error',null,'cloud read failed: '+String((e&&e.message)||e));
+  }
+  if(!res)
+    return R('error',null,'cloud read failed: no response from Supabase');
+  if(res.error)
+    return R('error',null,'cloud read failed: '+String(res.error.message||res.error.code||JSON.stringify(res.error)));
+  const val=res.data?res.data.data_value:null;
+  if(val==null)
+    return R('empty',null,'no cloud state returned (nothing saved to the cloud for this account yet)');
+  if(typeof val!=='object'||!val.shows)
+    return R('empty',null,'no cloud state returned (the cloud row exists but holds no usable app data)');
+  return R('ok',val,'read OK');
+}
+
 // ---- Collect all three copies as independent, frozen snapshots ----
 let _bxSnap=null;
 function bxDeep(o){ return o?JSON.parse(JSON.stringify(o)):null; }
@@ -4862,13 +4891,14 @@ async function bxCollect(preferred){
   snap.sources.localStorage=bxSrcInfo('localStorage (saved on this device)',loc,
     {note:'The saved copy on this phone or computer. This is the default export source.'});
 
-  // 3. Supabase cloud
-  let cloud=null;
-  if(typeof sb!=='undefined'&&sb&&typeof _cloudUser!=='undefined'&&_cloudUser){
-    try{ cloud=await cloudPull(); }catch(e){ snap.cloudError=String((e&&e.message)||e); }
-  }else{ snap.cloudError='not signed in to cloud sync'; }
+  // 3. Supabase cloud — four distinct outcomes, never conflated
+  const cr=await bxCloudRead();
+  const cloud=cr.state;
+  snap.cloudRead=cr;
+  snap.cloudError=(cr.status==='ok')?null:cr.message;
   snap.sources.cloud=bxSrcInfo('Supabase cloud',cloud,
-    {note:snap.cloudError?('Unavailable: '+snap.cloudError):'The copy shared between your devices.'});
+    {note:(cr.status==='ok')?'The copy shared between your devices.':('Not captured: '+cr.message)});
+  snap.sources.cloud.status=cr.status;
 
   // auto-backup slots kept by the app
   try{
@@ -4908,7 +4938,12 @@ async function bxCollect(preferred){
     memoryUpdatedAt:snap.sources.memory.updatedAt,
     localStorageUpdatedAt:snap.sources.localStorage.updatedAt,
     cloudUpdatedAt:snap.sources.cloud.updatedAt,
-    cloudStatus:snap.cloudError?('unavailable: '+snap.cloudError):'read OK',
+    cloudStatus:(snap.cloudRead&&snap.cloudRead.status==='ok')?'read OK':('unavailable: '+((snap.cloudRead&&snap.cloudRead.message)||'unknown')),
+    cloudStatusCode:(snap.cloudRead&&snap.cloudRead.status)||'unknown',
+    capturedAllCopies:!!(snap.sources.memory.present&&snap.sources.localStorage.present&&snap.sources.cloud.present),
+    coverageNote:(snap.sources.cloud.present)
+      ?'All three copies were captured in this export.'
+      :'INCOMPLETE: the cloud copy was NOT captured. This export covers this device only, and any data that exists only in the cloud is not in this file.',
     comparison:snap.comparison,
     localBackupSlots:snap.localBackups.length,
     counts:sel.counts||bxCounts(st)
@@ -5081,6 +5116,8 @@ function bxCsvFiles(st,meta){
       k===meta.exportSource?'YES':'']); });
   const cmp=meta.comparison||{};
   Object.keys(cmp).forEach(k=>r.push(['comparison: '+k,cmp[k]===null?'unknown':(cmp[k]?'identical':'DIFFERENT'),'','','','','','','']));
+  r.push(['cloud status',meta.cloudStatusCode||'',meta.cloudStatus||'','','','','','','']);
+  r.push(['captured all copies',meta.capturedAllCopies?'yes':'NO',meta.coverageNote||'','','','','','','']);
   put('16_snapshot_sources.csv',r);
   return F;
 }
@@ -5160,6 +5197,17 @@ function bxDiagnose(st,snap){
   add('WARN','DUPLICATE_SHOWS','Duplicate or conflicting show records',dupes,
     'Two confirmed shows on the same day cannot both be worked unless a rep covers one.');
 
+  if(snap&&snap.cloudRead&&snap.cloudRead.status!=='ok'){
+    const cs=snap.cloudRead.status;
+    const sev=(cs==='error')?'CRITICAL':(cs==='empty'?'WARN':'INFO');
+    const why=(cs==='error')
+      ? 'Cloud sync is set up but the cloud copy could NOT be retrieved. Data may exist in the cloud that is not in this export. Do not treat this file as a complete backup until a cloud read succeeds.'
+      : (cs==='empty')
+      ? 'You are signed in but nothing is stored in the cloud yet, so there was no cloud copy to capture. This export covers this device only.'
+      : 'You are not signed in to cloud sync, so no cloud copy was captured. This export covers this device only.';
+    out.push({sev:sev,code:'CLOUD_NOT_CAPTURED',title:'Cloud copy was not captured — this export is device-only',
+      count:1,items:[snap.cloudRead.message],advice:why});
+  }
   if(snap&&snap.comparison){
     const drift=[], c=snap.comparison, S_=snap.sources;
     const describe=(a,b,v)=>{ if(v===false)drift.push(a+' and '+b+' are DIFFERENT — '+a+' updated '+
@@ -5188,6 +5236,17 @@ function bxSummary(st,meta,diag,snap){
   rule(); line('BEST SOLUTION — COMPLETE BUSINESS DATA EXPORT'); line('Dot Dynasty LLC'); rule();
   line('Exported            : '+meta.exportedAt);
   line('');
+  if(!meta.capturedAllCopies){
+    line('*'.repeat(66));
+    line('INCOMPLETE EXPORT — NOT ALL COPIES WERE CAPTURED');
+    line('  '+meta.coverageNote);
+    line('  Cloud status: '+meta.cloudStatus);
+    line('*'.repeat(66));
+    line('');
+  }else{
+    line('COVERAGE: all three copies captured (memory, device, cloud).');
+    line('');
+  }
   line('SOURCE OF THIS REPORT');
   line('  Every figure below comes from : '+meta.exportSourceLabel);
   line('  That copy last changed        : '+(meta.exportSourceUpdatedAt||'unknown'));
@@ -5273,6 +5332,10 @@ function bxBuildAll(snap){
   const summary=bxSummary(st,meta,diag,snap);
   const metaOut=Object.assign({},snap.meta);
   const backup={ _bestSolutionBackup:true, _format:'full-restorable-v2',
+    _capturedAllCopies:metaOut.capturedAllCopies,
+    _coverageNote:metaOut.coverageNote,
+    _cloudStatus:metaOut.cloudStatus,
+    _cloudStatusCode:metaOut.cloudStatusCode,
     meta:metaOut,
     exportedFrom:snap.selected,
     state:st,
@@ -5292,6 +5355,9 @@ function bxBuildAll(snap){
     {name:'DIAGNOSTICS.csv',text:bxDiagCsv(diag,meta)},
     {name:'READ-ME-FIRST.txt',text:
       'BEST SOLUTION EXPORT\r\n\r\n'+
+      (meta.capturedAllCopies
+        ? 'COVERAGE: all three copies captured (memory, device, cloud).\r\n\r\n'
+        : '*** INCOMPLETE EXPORT ***\r\n'+meta.coverageNote+'\r\nCloud status: '+meta.cloudStatus+'\r\n\r\n')+
       'Exported '+meta.exportedAt+'\r\n'+
       'SOURCE OF EVERY NUMBER IN THIS EXPORT: '+meta.exportSourceLabel+'\r\n'+
       'Fingerprint: '+meta.exportSourceFingerprint+'\r\n\r\n'+
@@ -5351,6 +5417,10 @@ function bxShowModal(){
       (on?'● ':'')+k+(s.present?'':' (none)')+'</button>'; };
   mOpen('<div class="mh"><div class="mt">📦 Export Complete Business Data</div><button class="mx" onclick="mClose()">&times;</button></div>'+
   '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Read only. Nothing in your app is changed by exporting.</div>'+
+  (m.capturedAllCopies?'':'<div class="card rb" style="margin-bottom:10px;padding:10px">'+
+    '<div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:4px">⚠️ INCOMPLETE — CLOUD COPY NOT CAPTURED</div>'+
+    '<div style="font-size:11px;color:var(--text)">'+esc(m.coverageNote)+'</div>'+
+    '<div style="font-size:10px;color:var(--muted);margin-top:4px">'+esc(m.cloudStatus)+'</div></div>')+
   '<div class="card '+(cmp.allThreeIdentical===false?'rb':'')+'" style="margin-bottom:10px">'+
     '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">WHICH COPY TO EXPORT</div>'+
     '<div style="display:flex;gap:6px;margin-bottom:8px">'+srcBtn('memory')+srcBtn('localStorage')+srcBtn('cloud')+'</div>'+
