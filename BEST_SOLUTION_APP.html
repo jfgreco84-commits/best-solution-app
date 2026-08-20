@@ -4658,12 +4658,15 @@ function cloudCardHTML(){
 //   featureCommit = commit that introduced this export module.
 //   featureBuild  = human build tag, bumped on every change to this module.
 // version tracks the PRODUCTION APP version, not this module.
+// NOTE: a ?v=NN on the page URL is only a browser cache-buster. It is NOT the
+// app version and does not have to match BX_BUILD.version. Bump the URL number
+// whenever you need a device to fetch a fresh copy; leave version alone.
 const BX_BUILD={
   version:'v29',
   baseCommit:'42daec5',
   backupBranch:'backup/pre-export-2026-08-20',
   featureCommit:'a90760e',
-  featureBuild:'export-2026-08-20b',
+  featureBuild:'export-2026-08-20c',
   builtOn:'2026-08-20'
 };
 
@@ -5412,8 +5415,11 @@ function bxShowModal(){
   const cmp=m.comparison||{};
   const badge=v=>v===null?'<span style="color:var(--muted)">n/a</span>':(v?'<span style="color:var(--green)">identical</span>':'<span style="color:var(--red);font-weight:900">DIFFERENT</span>');
   const srcBtn=k=>{ const s=snap.sources[k], on=(k===snap.selected);
-    return '<button class="btn btn-xs '+(on?'btn-gold':'btn-ghost')+'" style="flex:1"'+
-      (s.present?'':' disabled style="flex:1;opacity:.4"')+' onclick="bxSelect(\''+k+'\')">'+
+    // one style attribute only: a second one is ignored by the browser, so the
+    // dimming never applied to an unavailable copy
+    const st='flex:1'+(s.present?'':';opacity:.4');
+    return '<button class="btn btn-xs '+(on?'btn-gold':'btn-ghost')+'" style="'+st+'"'+
+      (s.present?'':' disabled')+' onclick="bxSelect(\''+k+'\')">'+
       (on?'● ':'')+k+(s.present?'':' (none)')+'</button>'; };
   mOpen('<div class="mh"><div class="mt">📦 Export Complete Business Data</div><button class="mx" onclick="mClose()">&times;</button></div>'+
   '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Read only. Nothing in your app is changed by exporting.</div>'+
