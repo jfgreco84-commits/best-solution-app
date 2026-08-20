@@ -277,6 +277,78 @@ const SKUS=[
   {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00}
 ];
 // COMM_CARD / COMM_CASH below are the TAX-base rates only (PMTS[].commRate). Do not repurpose for rep commission.
+// ===================================================
+// PHASE 2A — APP VERSION + EFFECTIVE-DATE COGS SCHEDULE
+// ===================================================
+// APP_VERSION is the PRODUCTION APP version. It advances only when app
+// behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
+// separate and must never be conflated with it. A ?v=NN on the page URL is
+// a browser cache-buster and is neither of these.
+const APP_VERSION='v30';
+
+// Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
+// that was in force on the date of the sale, not today's cost table.
+// Entries are ordered oldest first. effectiveFrom is inclusive.
+const COGS_SCHEDULE_DEFAULT=[
+  {id:'cogs_historical', effectiveFrom:'1900-01-01', effectiveTo:'2026-07-31',
+   label:'Historical (through Jul 31 2026)',
+   costs:{'32oz':6.00,'16oz':4.50,'8oz':4.00,'2oz':2.25,'c5s':3.00,'c5l':6.00}},
+  {id:'cogs_current_2026_08', effectiveFrom:'2026-08-01', effectiveTo:null,
+   label:'Current (from Aug 1 2026)',
+   costs:{'32oz':4.50,'16oz':3.75,'8oz':3.25,'2oz':2.00,'c5s':2.80,'c5l':5.84}}
+];
+function cogsSchedule(st){ const a=((st||(typeof S!=='undefined'?S:null))||{}).cogsHistory;
+  return (a&&a.length)?a:COGS_SCHEDULE_DEFAULT; }
+function cogsIsoKey(v){ return (typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v))?v:null; }
+// The schedule entry in force on a date. Null date = the newest entry.
+function cogsEntryOn(dateKey,st){
+  const sch=cogsSchedule(st); if(!sch.length)return null;
+  const k=cogsIsoKey(dateKey);
+  if(!k)return sch[sch.length-1];
+  let hit=null;
+  sch.forEach(e=>{ if(String(e.effectiveFrom||'')<=k)hit=e; });
+  return hit||sch[0];
+}
+function cogsIsLatestEntry(e,st){ const sch=cogsSchedule(st); return !!e&&e===sch[sch.length-1]; }
+
+// ---- COST PRECEDENCE (Phase 2A). Highest wins. ----
+//  1. per-show override   sh.costs[sku]                      (explicit, always wins)
+//  2. dated HISTORICAL schedule entry for that date          (a closed period)
+//  3. legacy editable cost table  S.costs[sku]               (governs the current period)
+//  4. newest schedule entry cost                             (when no cost table entry)
+//  5. SKUS built-in default cost                             (last resort)
+// A null date means "current", which skips step 2 and lands on 3/4/5.
+function getCostOn(k,dateKey,sh,st){
+  const state=st||(typeof S!=='undefined'?S:null)||{};
+  if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!==''){ const v=parseFloat(sh.costs[k]); if(isFinite(v))return v; }
+  const e=cogsEntryOn(dateKey,state);
+  if(e&&!cogsIsLatestEntry(e,state)&&e.costs&&e.costs[k]!=null)return parseFloat(e.costs[k])||0;
+  const c=state.costs&&state.costs[k];
+  if(c!=null&&c!=='')return parseFloat(c)||0;
+  if(e&&e.costs&&e.costs[k]!=null)return parseFloat(e.costs[k])||0;
+  return (SKUS.find(x=>x.key===k)||{}).cost||0;
+}
+// Which rule actually decided a cost — surfaced in exports so any figure is traceable.
+function costSourceOn(k,dateKey,sh,st){
+  const state=st||(typeof S!=='undefined'?S:null)||{};
+  if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!=='')return 'per-show override';
+  const e=cogsEntryOn(dateKey,state);
+  if(e&&!cogsIsLatestEntry(e,state)&&e.costs&&e.costs[k]!=null)return 'schedule: '+e.id;
+  const c=state.costs&&state.costs[k];
+  if(c!=null&&c!=='')return 'cost table (current)';
+  if(e&&e.costs&&e.costs[k]!=null)return 'schedule: '+e.id;
+  return 'SKUS default';
+}
+// ISO date of day index di of a show (start date + di days).
+function showDayKey(sh,di){
+  const st=cogsIsoKey(sh&&sh.startDate); if(!st)return null;
+  const d=new Date(st+'T12:00:00'); d.setDate(d.getDate()+(parseInt(di,10)||0));
+  return d.toISOString().slice(0,10);
+}
+function calcCOGSOn(units,dateKey,sh,st){
+  return SKUS.reduce((t,s)=>t+((units[s.key]||0)*getCostOn(s.key,dateKey,sh,st)),0);
+}
+
 const COMM_CARD = 0.30;
 const COMM_CASH = 0.35;
 // ----- Rep pay (Jul 2026 overhaul) -----
@@ -1200,6 +1272,20 @@ function applyOneTimeUpdates(d){
     }
     d._applied['pop_racine_20260818']=true;
   }
+
+  // ===== Phase 2A — seed the effective-date COGS schedule =====
+  // ADDITIVE ONLY. Writes exactly one new field, d.cogsHistory, and nothing else.
+  // Does not touch costs, prices, settings, inventory, shows, payments, expenses
+  // or notes. Idempotent: skipped once applied, and skipped if a schedule already
+  // exists, so a hand-edited schedule is never overwritten.
+  if(!d._applied['cogs_history_v1']){
+    if(!d.cogsHistory||!d.cogsHistory.length){
+      d.cogsHistory=JSON.parse(JSON.stringify(COGS_SCHEDULE_DEFAULT));
+      d.cogsHistoryMeta={seededBy:'phase2a',seededAt:'2026-08-20',appVersion:APP_VERSION,
+        note:'Unit costs changed 2026-08-01. Entries are ordered oldest first and effectiveFrom is inclusive.'};
+    }
+    d._applied['cogs_history_v1']=true;
+  }
 }
 
 function buildPlannedShow(e){
@@ -1253,7 +1339,10 @@ function pg(i){return $$('pg-'+i);}
 function fmt(n){if(n===null||n===undefined)return'$0.00';const a=Math.abs(n);const s='$'+a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');return n<0?'-'+s:s;}
 function fmtN(n){return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');}
 function getP(k){return(S.prices&&S.prices[k])||SKUS.find(s=>s.key===k).defP;}
-function getCost(k){const c=S&&S.costs&&S.costs[k];return(c!=null&&c!=='')?(parseFloat(c)||0):SKUS.find(s=>s.key===k).cost;}
+// Undated / current cost. Kept for every legacy caller. Now falls back to the
+// newest schedule entry before the SKUS default, so current inventory is valued
+// at today's costs even when the editable cost table has never been touched.
+function getCost(k){ return getCostOn(k,null,null,(typeof S!=='undefined'?S:null)); }
 function setCost(k,v){if(!S.costs)S.costs={};const n=(v===''||v==null)?null:(parseFloat(v)||0);S.costs[k]=(n==null?SKUS.find(s=>s.key===k).cost:Math.max(0,n));saveS();toast('✅ Cost updated');}
 function resetCosts(){S.costs={};saveS();toast('Costs reset to defaults');rSettings();}
 function eSku(){const r={};SKUS.forEach(s=>r[s.key]=0);return r;}
@@ -1277,8 +1366,9 @@ function calcShow(sh){
   // Booth: book what was actually PAID when it exceeds the sticker price (overpays are real money out)
   const booth=Math.max(sh.boothCost||0,(typeof boothPaid==='function')?boothPaid(sh):0);
   exp+=booth;
-  (sh.days||[]).forEach(d=>{
-    if(d.morningCount&&d.eveningCount){potential+=calcRev(daySold(d),sh.prices||null);cogs+=calcCOGS(dayCogsUnits(d));}
+  (sh.days||[]).forEach((d,di)=>{
+    // Phase 2A: COGS uses the cost schedule in force on THAT DAY, not today's table.
+    if(d.morningCount&&d.eveningCount){potential+=calcRev(daySold(d),sh.prices||null);cogs+=calcCOGSOn(dayCogsUnits(d),showDayKey(sh,di),sh);}
     if(d.expenses){exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);dayGas+=parseFloat(d.expenses.gas)||0;}
   });
   // Gas: auto-include the commute estimate once the show has begun, unless gas was hand-logged on any day
@@ -4662,12 +4752,15 @@ function cloudCardHTML(){
 // app version and does not have to match BX_BUILD.version. Bump the URL number
 // whenever you need a device to fetch a fresh copy; leave version alone.
 const BX_BUILD={
-  version:'v29',
+  version:(typeof APP_VERSION!=='undefined'?APP_VERSION:'v30'),
   baseCommit:'42daec5',
   backupBranch:'backup/pre-export-2026-08-20',
   featureCommit:'a90760e',
-  featureBuild:'export-2026-08-20c',
-  builtOn:'2026-08-20'
+  featureBuild:'export-2026-08-20d-phase2a',
+  builtOn:'2026-08-20',
+  phase:'2A',
+  phase2aBaseCommit:'d15efa7',
+  phase2aBackupBranch:'backup/pre-phase2a-2026-08-20'
 };
 
 function bxNum(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
@@ -4688,7 +4781,36 @@ function bxView(st){
   const A=st||{}, set=A.settings||{}, V={state:A,settings:set};
   const N=bxNum;
   V.price=k=>{ const p=A.prices&&A.prices[k]; return (p!=null&&p!=='')?N(p):((SKUS.find(s=>s.key===k)||{}).defP||0); };
-  V.cost =k=>{ const c=A.costs &&A.costs[k];  return (c!=null&&c!=='')?N(c):((SKUS.find(s=>s.key===k)||{}).cost||0); };
+  // Phase 2A: cost resolution is date-aware and reads ONLY this snapshot.
+  // Precedence: per-show override, dated historical schedule entry, snapshot cost
+  // table, newest schedule entry, SKUS default.
+  V.schedule=()=>(A.cogsHistory&&A.cogsHistory.length)?A.cogsHistory:COGS_SCHEDULE_DEFAULT;
+  V.entryOn=dateKey=>{ const sch=V.schedule(); if(!sch.length)return null;
+    const k=(typeof dateKey==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(dateKey))?dateKey:null;
+    if(!k)return sch[sch.length-1];
+    let hit=null; sch.forEach(e=>{ if(String(e.effectiveFrom||'')<=k)hit=e; });
+    return hit||sch[0]; };
+  V.isLatestEntry=e=>{ const sch=V.schedule(); return !!e&&e===sch[sch.length-1]; };
+  V.costOn=(k,dateKey,sh)=>{
+    if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!==''){ const v=parseFloat(sh.costs[k]); if(isFinite(v))return v; }
+    const e=V.entryOn(dateKey);
+    if(e&&!V.isLatestEntry(e)&&e.costs&&e.costs[k]!=null)return N(e.costs[k]);
+    const c=A.costs&&A.costs[k]; if(c!=null&&c!=='')return N(c);
+    if(e&&e.costs&&e.costs[k]!=null)return N(e.costs[k]);
+    return (SKUS.find(s=>s.key===k)||{}).cost||0; };
+  V.costSourceOn=(k,dateKey,sh)=>{
+    if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!=='')return 'per-show override';
+    const e=V.entryOn(dateKey);
+    if(e&&!V.isLatestEntry(e)&&e.costs&&e.costs[k]!=null)return 'schedule: '+e.id;
+    const c=A.costs&&A.costs[k]; if(c!=null&&c!=='')return 'cost table (current)';
+    if(e&&e.costs&&e.costs[k]!=null)return 'schedule: '+e.id;
+    return 'SKUS default'; };
+  V.dayKey=(sh,di)=>{ const st=sh&&sh.startDate;
+    if(!(typeof st==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(st)))return null;
+    const d=new Date(st+'T12:00:00'); d.setDate(d.getDate()+(parseInt(di,10)||0));
+    return d.toISOString().slice(0,10); };
+  // Undated / current cost (inventory valuation and anything without a date).
+  V.cost =k=>V.costOn(k,null,null);
   V.setting=(k,dflt)=>(set[k]!=null&&set[k]!=='')?N(set[k]):dflt;
 
   V.dayUnitsLeft=d=>{ const r={}; SKUS.forEach(s=>{
@@ -4700,7 +4822,8 @@ function bxView(st){
   V.dayCogsUnits=d=>V.dayUnitsLeft(d);
   V.dayHasCounts=d=>!!(d.morningCount&&d.eveningCount);
   V.rev=(sold,P)=>SKUS.reduce((t,s)=>t+N(sold[s.key])*((P&&P[s.key]!=null)?N(P[s.key]):V.price(s.key)),0);
-  V.cogsOf=u=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.cost(s.key),0);
+  V.cogsOf=u=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.cost(s.key),0); // undated
+  V.cogsOfOn=(u,dateKey,sh)=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.costOn(s.key,dateKey,sh),0);
   V.pmtTotal=p=>PMTS.reduce((t,m)=>t+N((p||{})[m.key]),0);
 
   V.boothPaid=sh=>(sh.boothPayments||[]).reduce((t,p)=>t+N(p.amount),0);
@@ -4764,8 +4887,8 @@ function bxView(st){
     let cogs=0,exp=0,potential=0,dayGas=0;
     const booth=Math.max(N(sh.boothCost),V.boothPaid(sh));
     exp+=booth;
-    (sh.days||[]).forEach(d=>{
-      if(V.dayHasCounts(d)){ potential+=V.rev(V.daySold(d),sh.prices||null); cogs+=V.cogsOf(V.dayCogsUnits(d)); }
+    (sh.days||[]).forEach((d,di)=>{
+      if(V.dayHasCounts(d)){ potential+=V.rev(V.daySold(d),sh.prices||null); cogs+=V.cogsOfOn(V.dayCogsUnits(d),V.dayKey(sh,di),sh); }
       if(d.expenses){ exp+=Object.values(d.expenses).reduce((a,b)=>a+N(b),0); dayGas+=N(d.expenses.gas); }
     });
     const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(V.gas(sh)*100)/100):0;
@@ -5112,6 +5235,29 @@ function bxCsvFiles(st,meta){
     put('15_season_2025.csv',r);
   }
 
+  // 17. effective-date COGS schedule as it stands in this snapshot
+  r=[['entry_id','label','effective_from','effective_to','is_latest','sku','unit_cost']];
+  (V.schedule()||[]).forEach((e,i,arr)=>{ SKUS.forEach(sk=>{
+    r.push([e.id||('entry'+i),e.label||'',e.effectiveFrom||'',e.effectiveTo||'(open)',
+      (i===arr.length-1)?'yes':'no',sk.key,bxNum((e.costs||{})[sk.key]).toFixed(2)]); }); });
+  r.push(['(cost table)','snapshot costs, governs the current period','','', 'n/a','','']);
+  SKUS.forEach(sk=>{ const c=(st.costs||{})[sk.key];
+    r.push(['(cost table)','S.costs','','','n/a',sk.key,(c!=null&&c!=='')?bxNum(c).toFixed(2):'(not set)']); });
+  put('17_cogs_schedule.csv',r);
+
+  // 18. which cost rule decided each unit, per show day
+  r=[['show_id','show_name','day_index','day_date','sku','unit_cost_used','cost_source','schedule_entry']];
+  shows.forEach(sh=>(sh.days||[]).forEach((d,di)=>{ if(!V.dayHasCounts(d))return;
+    const dk=V.dayKey(sh,di), e=V.entryOn(dk);
+    SKUS.forEach(sk=>r.push([sh.id,sh.name,di+1,dk||'(no date)',sk.key,
+      V.costOn(sk.key,dk,sh).toFixed(2),V.costSourceOn(sk.key,dk,sh),(e&&e.id)||''])); }));
+  if(r.length===1)r.push(['(none)','no show day has both counts, so no COGS was computed','','','','','','']);
+  put('18_cost_source_by_day.csv',r);
+
+  // 19. reconciliation preview, read only
+  if(meta._recon)F.push({name:'19_reconciliation_preview.csv',
+    text:_csvRows([hdr]) +'\r\n'+ bxReconCsv(meta._recon)});
+
   r=[['source','present','label','updated_at','fingerprint','shows','show_days','reps','selected_for_this_export']];
   ['memory','localStorage','cloud'].forEach(k=>{ const s=(meta._sources||{})[k]||{};
     r.push([k,s.present?'yes':'no',s.label||'',s.updatedAt||'',s.fingerprint||'',
@@ -5126,7 +5272,7 @@ function bxCsvFiles(st,meta){
 }
 
 // ---- Diagnostics. All figures via V, so they describe the SELECTED snapshot. ----
-function bxDiagnose(st,snap){
+function bxDiagnose(st,snap,meta){
   const V=bxView(st), out=[], shows=st.shows||[], reps=st.reps||[];
   const add=(sev,code,title,items,advice)=>{ if(items.length)out.push({sev,code,title,count:items.length,items,advice}); };
   const nm=sh=>sh.name+(sh.startDate?' ('+sh.startDate+')':'');
@@ -5199,6 +5345,24 @@ function bxDiagnose(st,snap){
   Object.keys(clash).sort().forEach(k=>{ if(clash[k].length>1)dupes.push('Two confirmed shows on '+k+': '+clash[k].join(' AND ')); });
   add('WARN','DUPLICATE_SHOWS','Duplicate or conflicting show records',dupes,
     'Two confirmed shows on the same day cannot both be worked unless a rep covers one.');
+
+  const schedDrift=[];
+  const sch=V.schedule(), latest=sch[sch.length-1];
+  SKUS.forEach(sk=>{ const t=(st.costs||{})[sk.key];
+    if(t!=null&&t!==''&&latest&&latest.costs&&latest.costs[sk.key]!=null&&
+       Math.abs(bxNum(t)-bxNum(latest.costs[sk.key]))>0.0001)
+      schedDrift.push(sk.name+': cost table '+M(bxNum(t))+' vs newest schedule entry '+M(bxNum(latest.costs[sk.key]))); });
+  add('INFO','COGS_TABLE_DRIFT','Editable cost table differs from the newest schedule entry',schedDrift,
+    'Not an error. The cost table governs the current period by design, so it wins. Listed so the difference is visible rather than silent.');
+
+  if(snap&&snap.comparison&&meta&&meta._recon&&meta._recon.available){
+    const R=meta._recon, items=[];
+    R.onlyInLocal.forEach(x=>items.push('Only on this device, not in the cloud: '+x.label));
+    R.onlyInCloud.forEach(x=>items.push('Only in the cloud, not on this device: '+x.label));
+    R.conflicts.forEach(x=>items.push('Field conflict: '+x.label+' ('+x.diffs.map(d=>d.field).join(', ')+')'));
+    add('WARN','RECON_PENDING','Local and cloud copies are not reconciled',items,
+      'Preview only. Phase 2A deliberately has no apply, sync, repair, restore or push action. Nothing was written.');
+  }
 
   if(snap&&snap.cloudRead&&snap.cloudRead.status!=='ok'){
     const cs=snap.cloudRead.status;
@@ -5303,8 +5467,26 @@ function bxSummary(st,meta,diag,snap){
   line('  Inventory at cost      '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.cost(s.key),0)));
   line('  Inventory at retail    '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.price(s.key),0)));
   line('');
-  rule(); line('PRICES AND COSTS IN THIS SNAPSHOT'); rule();
-  SKUS.forEach(s=>line('  '+s.name.padEnd(22)+' sell '+M(V.price(s.key)).padStart(9)+'   cost '+M(V.cost(s.key)).padStart(9)));
+  rule(); line('PRICES AND CURRENT COSTS IN THIS SNAPSHOT'); rule();
+  SKUS.forEach(s=>line('  '+s.name.padEnd(22)+' sell '+M(V.price(s.key)).padStart(9)+'   cost '+M(V.cost(s.key)).padStart(9)+
+    '   ['+V.costSourceOn(s.key,null,null)+']'));
+  line('');
+  rule(); line('EFFECTIVE-DATE COGS SCHEDULE'); rule();
+  line('  COGS is computed with the costs that were in force on the date of the sale,');
+  line('  not with today\'s cost table. Schedule source: '+((st.cogsHistory&&st.cogsHistory.length)?'this snapshot':'built-in default'));
+  line('');
+  (V.schedule()||[]).forEach((e,i,arr)=>{
+    line('  '+(e.label||e.id)+(i===arr.length-1?'   [LATEST]':''));
+    line('      effective '+(e.effectiveFrom||'?')+' through '+(e.effectiveTo||'open ended'));
+    SKUS.forEach(sk=>line('        '+sk.name.padEnd(22)+M(bxNum((e.costs||{})[sk.key]))));
+    line('');
+  });
+  line('  COST PRECEDENCE, highest first:');
+  line('    1. per-show override on the show record');
+  line('    2. a closed historical schedule period matching the sale date');
+  line('    3. the editable cost table in this snapshot (governs the current period)');
+  line('    4. the newest schedule entry');
+  line('    5. the built-in product default');
   line('');
   rule(); line('SHOWS'); rule();
   shows.slice().sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||'')).forEach(sh=>{
@@ -5312,6 +5494,26 @@ function bxSummary(st,meta,diag,snap){
     line('  '+(sh.startDate||'????-??-??')+'  '+(sh.name||'').padEnd(34).slice(0,34)+' '+String(sh.numDays||1)+'d  '+
       (sh.confirmed===false?'PENDING  ':'confirmed').padEnd(10)+' booth '+M(bxNum(sh.boothCost)).padStart(10)+
       '  paid '+M(V.boothPaid(sh)).padStart(10)+(bal>0.005?'  OWES '+M(bal):'')); });
+  line('');
+  rule(); line('RECONCILIATION PREVIEW (READ ONLY)'); rule();
+  if(!meta._recon||!meta._recon.available){
+    line('  Not available: '+((meta._recon&&meta._recon.reason)||'unknown'));
+  }else{
+    const R=meta._recon;
+    line('  Base for the proposal : localStorage');
+    line('  Only in localStorage  : '+R.onlyInLocal.length+' show(s)');
+    R.onlyInLocal.forEach(x=>line('      '+x.label));
+    line('  Only in cloud         : '+R.onlyInCloud.length+' show(s)');
+    R.onlyInCloud.forEach(x=>line('      '+x.label));
+    line('  Field-level conflicts : '+R.conflicts.length+' show(s)');
+    line('  Identical shows       : '+R.identical.length);
+    line('  Would add             : '+R.proposal.wouldAdd.length);
+    line('  Would change          : '+R.proposal.wouldChange.length);
+    line('  Would preserve        : '+R.proposal.wouldPreserve.length);
+    line('  Would remove          : 0 (reconciliation never deletes)');
+    line('  Writes performed      : '+R.writesPerformed+'   NOTHING WAS WRITTEN');
+    line('  Full detail is in RECONCILIATION-PREVIEW.txt and 19_reconciliation_preview.csv');
+  }
   line('');
   rule(); line('DIAGNOSTICS'); rule();
   if(!diag.length)line('  No issues found.');
@@ -5329,8 +5531,9 @@ function bxSummary(st,meta,diag,snap){
 // ---- File assembly ----
 function bxBuildAll(snap){
   const sel=snap.sources[snap.selected], st=sel.state||{};
-  const meta=Object.assign({},snap.meta,{_sources:snap.sources});
-  const diag=bxDiagnose(st,snap);
+  const recon=bxReconcile(snap);
+  const meta=Object.assign({},snap.meta,{_sources:snap.sources,_recon:recon});
+  const diag=bxDiagnose(st,snap,meta);
   const csvs=bxCsvFiles(st,meta);
   const summary=bxSummary(st,meta,diag,snap);
   const metaOut=Object.assign({},snap.meta);
@@ -5349,6 +5552,12 @@ function bxBuildAll(snap){
       present:snap.sources[k].present,updatedAt:snap.sources[k].updatedAt,
       fingerprint:snap.sources[k].fingerprint,counts:snap.sources[k].counts,selected:k===snap.selected})),
     comparison:snap.comparison,
+    cogsSchedule:(st.cogsHistory&&st.cogsHistory.length)?st.cogsHistory:COGS_SCHEDULE_DEFAULT,
+    cogsScheduleMeta:st.cogsHistoryMeta||null,
+    cogsScheduleSource:(st.cogsHistory&&st.cogsHistory.length)?'snapshot':'built-in default',
+    costTable:st.costs||null,
+    reconciliationPreview:recon,
+    _phase:'2A — preview and proof only. No apply, sync, repair, restore or push action exists.',
     localBackupSlots:snap.localBackups.map(b=>({key:b.key,savedAt:b.savedAt})),
     season2025:(typeof SHOWS_2025!=='undefined')?SHOWS_2025:null };
   const files=[
@@ -5356,6 +5565,7 @@ function bxBuildAll(snap){
     {name:'backup/restorable-state-only.json',text:JSON.stringify(st,null,2)},
     {name:'SUMMARY.txt',text:summary},
     {name:'DIAGNOSTICS.csv',text:bxDiagCsv(diag,meta)},
+    {name:'RECONCILIATION-PREVIEW.txt',text:bxReconReport(recon,meta)},
     {name:'READ-ME-FIRST.txt',text:
       'BEST SOLUTION EXPORT\r\n\r\n'+
       (meta.capturedAllCopies
@@ -5374,7 +5584,211 @@ function bxBuildAll(snap){
   ['memory','localStorage','cloud'].forEach(k=>{ const s=snap.sources[k];
     if(s.present&&k!==snap.selected)files.push({name:'backup/other-copies/'+k+'.json',text:JSON.stringify(s.state,null,2)}); });
   snap.localBackups.forEach((b,i)=>files.push({name:'backup/auto-slot-'+(i+1)+'-'+b.savedAt.slice(0,10)+'.json',text:b.raw||''}));
-  return {files,diag,csvs,backup,meta,summary};
+  return {files,diag,csvs,backup,meta,summary,recon};
+}
+
+// ===================================================
+// PHASE 2A — RECONCILIATION PREVIEW (STRICTLY READ ONLY)
+// Compares localStorage against the Supabase cloud copy and reports what a
+// reconciliation WOULD do. It writes nothing to either side. There is no
+// apply, sync, repair, restore or push action in this phase, by design.
+// ===================================================
+function bxShowKey(sh){ return ((sh&&sh.name)||'').toLowerCase().trim()+'|'+((sh&&sh.startDate)||''); }
+function bxShowLabel(sh){ return ((sh&&sh.name)||'(unnamed)')+(sh&&sh.startDate?' ('+sh.startDate+')':''); }
+
+// Fields compared show by show. Deliberately excludes derived values.
+const BX_SHOW_FIELDS=['name','location','startDate','numDays','status','confirmed','depositDue',
+  'boothCost','miles','roundTrips','mpg','gasPrice','gasOverride','taxRate','cardTaxRate','lodging','notes'];
+
+function bxCountRecords(st){
+  const shows=(st&&st.shows)||[]; let days=0,bp=0,se=0;
+  shows.forEach(sh=>{ days+=(sh.days||[]).length; bp+=(sh.boothPayments||[]).length; se+=(sh.showExpenses||[]).length; });
+  return {shows:shows.length,showDays:days,boothPayments:bp,showExpenses:se,reps:((st&&st.reps)||[]).length};
+}
+
+function bxReconcile(snap){
+  const L=(snap.sources.localStorage&&snap.sources.localStorage.state)||null;
+  const C=(snap.sources.cloud&&snap.sources.cloud.state)||null;
+  const out={
+    available:!!(L&&C),
+    reason:!L?'no localStorage copy available':(!C?('cloud copy not captured: '+((snap.cloudRead&&snap.cloudRead.message)||'unknown')):''),
+    base:'localStorage',
+    fingerprints:{localStorage:(snap.sources.localStorage||{}).fingerprint||null,
+                  cloud:(snap.sources.cloud||{}).fingerprint||null,
+                  memory:(snap.sources.memory||{}).fingerprint||null},
+    updatedAt:{localStorage:(snap.sources.localStorage||{}).updatedAt||null,
+               cloud:(snap.sources.cloud||{}).updatedAt||null,
+               memory:(snap.sources.memory||{}).updatedAt||null},
+    counts:{localStorage:L?bxCountRecords(L):null, cloud:C?bxCountRecords(C):null},
+    onlyInLocal:[], onlyInCloud:[], conflicts:[], identical:[],
+    migrationsOnlyInLocal:[], migrationsOnlyInCloud:[],
+    repsOnlyInLocal:[], repsOnlyInCloud:[],
+    settingsDiffs:[], inventoryDiffs:[], costTableDiffs:[], scheduleDiffs:[],
+    proposal:{wouldAdd:[],wouldChange:[],wouldPreserve:[],wouldRemove:[]},
+    writesPerformed:0
+  };
+  if(!out.available)return out;
+
+  const lMap={}, cMap={};
+  (L.shows||[]).forEach(sh=>lMap[bxShowKey(sh)]=sh);
+  (C.shows||[]).forEach(sh=>cMap[bxShowKey(sh)]=sh);
+
+  Object.keys(lMap).forEach(k=>{
+    const a=lMap[k], b=cMap[k];
+    if(!b){
+      out.onlyInLocal.push({key:k,label:bxShowLabel(a),id:a.id,startDate:a.startDate||'',
+        days:(a.days||[]).length,boothCost:bxNum(a.boothCost),
+        boothPayments:(a.boothPayments||[]).length,showExpenses:(a.showExpenses||[]).length,
+        confirmed:a.confirmed!==false});
+      return;
+    }
+    const diffs=[];
+    BX_SHOW_FIELDS.forEach(f=>{
+      const av=a[f]===undefined?null:a[f], bv=b[f]===undefined?null:b[f];
+      if(JSON.stringify(av)!==JSON.stringify(bv))
+        diffs.push({field:f,local:av,cloud:bv});
+    });
+    const ad=(a.days||[]).length, bd=(b.days||[]).length;
+    if(ad!==bd)diffs.push({field:'days.length',local:ad,cloud:bd});
+    const ap=(a.boothPayments||[]).reduce((t,p)=>t+bxNum(p.amount),0);
+    const bp=(b.boothPayments||[]).reduce((t,p)=>t+bxNum(p.amount),0);
+    if(Math.abs(ap-bp)>0.005)diffs.push({field:'boothPayments.total',local:ap,cloud:bp});
+    if((a.boothPayments||[]).length!==(b.boothPayments||[]).length)
+      diffs.push({field:'boothPayments.count',local:(a.boothPayments||[]).length,cloud:(b.boothPayments||[]).length});
+    if((a.showExpenses||[]).length!==(b.showExpenses||[]).length)
+      diffs.push({field:'showExpenses.count',local:(a.showExpenses||[]).length,cloud:(b.showExpenses||[]).length});
+    if(diffs.length)out.conflicts.push({key:k,label:bxShowLabel(a),id:a.id,diffs:diffs});
+    else out.identical.push({key:k,label:bxShowLabel(a)});
+  });
+  Object.keys(cMap).forEach(k=>{ if(!lMap[k]){ const b=cMap[k];
+    out.onlyInCloud.push({key:k,label:bxShowLabel(b),id:b.id,startDate:b.startDate||'',
+      days:(b.days||[]).length,boothCost:bxNum(b.boothCost)}); } });
+
+  const lm=Object.keys(L._applied||{}), cm=Object.keys(C._applied||{});
+  out.migrationsOnlyInLocal=lm.filter(k=>!(C._applied||{})[k]);
+  out.migrationsOnlyInCloud=cm.filter(k=>!(L._applied||{})[k]);
+
+  const lr={}, cr={};
+  (L.reps||[]).forEach(r=>lr[r.id]=r); (C.reps||[]).forEach(r=>cr[r.id]=r);
+  out.repsOnlyInLocal=Object.keys(lr).filter(id=>!cr[id]).map(id=>lr[id].name+' ('+id+')');
+  out.repsOnlyInCloud=Object.keys(cr).filter(id=>!lr[id]).map(id=>cr[id].name+' ('+id+')');
+
+  const keys=k=>Object.keys(k||{});
+  const cmp=(a,b,label,bucket)=>{
+    const all={}; keys(a).forEach(k=>all[k]=1); keys(b).forEach(k=>all[k]=1);
+    Object.keys(all).sort().forEach(k=>{
+      const av=(a||{})[k], bv=(b||{})[k];
+      if(JSON.stringify(av===undefined?null:av)!==JSON.stringify(bv===undefined?null:bv))
+        bucket.push({field:label+'.'+k,local:av===undefined?null:av,cloud:bv===undefined?null:bv});
+    });
+  };
+  cmp(L.settings,C.settings,'settings',out.settingsDiffs);
+  cmp(L.inventory,C.inventory,'inventory',out.inventoryDiffs);
+  cmp(L.costs,C.costs,'costs',out.costTableDiffs);
+  if(JSON.stringify(L.cogsHistory||null)!==JSON.stringify(C.cogsHistory||null))
+    out.scheduleDiffs.push({field:'cogsHistory',local:(L.cogsHistory||[]).length+' entries',cloud:(C.cogsHistory||[]).length+' entries'});
+
+  // PROPOSAL ONLY. Nothing here is executed in Phase 2A.
+  out.onlyInLocal.forEach(x=>out.proposal.wouldAdd.push(
+    'ADD to cloud: '+x.label+'  ('+x.days+' days, booth '+bxMoney(x.boothCost)+', '+x.boothPayments+' payments)'));
+  out.conflicts.forEach(x=>out.proposal.wouldChange.push(
+    'CHANGE in cloud: '+x.label+'  ('+x.diffs.length+' field'+(x.diffs.length===1?'':'s')+': '+x.diffs.map(d=>d.field).join(', ')+')'));
+  out.identical.forEach(x=>out.proposal.wouldPreserve.push('PRESERVE unchanged: '+x.label));
+  out.onlyInCloud.forEach(x=>out.proposal.wouldPreserve.push(
+    'PRESERVE cloud-only record, NOT deleted: '+x.label));
+  out.migrationsOnlyInLocal.forEach(k=>out.proposal.wouldAdd.push('ADD migration marker to cloud: '+k));
+  out.repsOnlyInLocal.forEach(r=>out.proposal.wouldAdd.push('ADD rep to cloud: '+r));
+  out.settingsDiffs.concat(out.costTableDiffs,out.inventoryDiffs,out.scheduleDiffs)
+    .forEach(d=>out.proposal.wouldChange.push('CHANGE in cloud: '+d.field+'  local='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud)));
+  return out;
+}
+
+function bxReconReport(rec,meta){
+  const L=[], line=s=>L.push(s), rule=()=>L.push('='.repeat(66));
+  rule(); line('BEST SOLUTION — RECONCILIATION PREVIEW (READ ONLY)'); rule();
+  line('Generated      : '+(meta?meta.exportedAt:''));
+  line('App version    : '+(meta?meta.appVersion:'')+'   module build: '+(meta?meta.featureBuild:''));
+  line('');
+  line('NOTHING WAS WRITTEN. This is a preview of what a reconciliation would do.');
+  line('Phase 2A has no apply, sync, repair, restore or push-to-cloud action.');
+  line('Writes performed this run: '+rec.writesPerformed);
+  line('');
+  if(!rec.available){ line('Comparison unavailable: '+rec.reason); rule(); return L.join('\r\n'); }
+  rule(); line('SOURCE FINGERPRINTS'); rule();
+  ['memory','localStorage','cloud'].forEach(k=>
+    line('  '+k.padEnd(14)+' '+String(rec.fingerprints[k]||'n/a').padEnd(22)+' updated '+(rec.updatedAt[k]||'unknown')));
+  line('');
+  rule(); line('RECORD COUNTS'); rule();
+  const c=rec.counts;
+  line('  '+'metric'.padEnd(18)+'localStorage'.padStart(14)+'cloud'.padStart(10)+'difference'.padStart(13));
+  ['shows','showDays','boothPayments','showExpenses','reps'].forEach(k=>{
+    const a=c.localStorage[k], b=c.cloud[k];
+    line('  '+k.padEnd(18)+String(a).padStart(14)+String(b).padStart(10)+String(a-b>=0?'+'+(a-b):(a-b)).padStart(13));
+  });
+  line('');
+  rule(); line('RECORDS ONLY IN LOCALSTORAGE  ('+rec.onlyInLocal.length+')'); rule();
+  if(!rec.onlyInLocal.length)line('  none');
+  rec.onlyInLocal.forEach(x=>{ line('  '+x.label);
+    line('      '+x.days+' days, booth '+bxMoney(x.boothCost)+', '+x.boothPayments+' booth payments, '+x.showExpenses+' show expenses'); });
+  line('');
+  rule(); line('RECORDS ONLY IN CLOUD  ('+rec.onlyInCloud.length+')'); rule();
+  if(!rec.onlyInCloud.length)line('  none');
+  rec.onlyInCloud.forEach(x=>line('  '+x.label+'   ('+x.days+' days)'));
+  line('');
+  rule(); line('FIELD-LEVEL CONFLICTS  ('+rec.conflicts.length+' shows)'); rule();
+  if(!rec.conflicts.length)line('  none');
+  rec.conflicts.forEach(x=>{ line('  '+x.label);
+    x.diffs.forEach(d=>line('      '+String(d.field).padEnd(22)+' local='+JSON.stringify(d.local)+'   cloud='+JSON.stringify(d.cloud))); });
+  line('');
+  const other=[['Settings',rec.settingsDiffs],['Cost table',rec.costTableDiffs],
+               ['Inventory',rec.inventoryDiffs],['COGS schedule',rec.scheduleDiffs]];
+  rule(); line('OTHER DIFFERENCES'); rule();
+  other.forEach(([n,arr])=>{ line('  '+n+': '+(arr.length?arr.length+' difference(s)':'identical'));
+    arr.forEach(d=>line('      '+d.field+'  local='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud))); });
+  line('  Migration markers only in localStorage: '+(rec.migrationsOnlyInLocal.join(', ')||'none'));
+  line('  Migration markers only in cloud:        '+(rec.migrationsOnlyInCloud.join(', ')||'none'));
+  line('  Reps only in localStorage:              '+(rec.repsOnlyInLocal.join(', ')||'none'));
+  line('  Reps only in cloud:                     '+(rec.repsOnlyInCloud.join(', ')||'none'));
+  line('');
+  rule(); line('PROPOSED RESULT IF LOCALSTORAGE IS THE OPERATIONAL BASE'); rule();
+  line('  This is a proposal. It has NOT been applied.');
+  line('');
+  line('  WOULD ADD ('+rec.proposal.wouldAdd.length+')');
+  if(!rec.proposal.wouldAdd.length)line('    none');
+  rec.proposal.wouldAdd.forEach(x=>line('    '+x));
+  line('');
+  line('  WOULD CHANGE ('+rec.proposal.wouldChange.length+')');
+  if(!rec.proposal.wouldChange.length)line('    none');
+  rec.proposal.wouldChange.forEach(x=>line('    '+x));
+  line('');
+  line('  WOULD PRESERVE ('+rec.proposal.wouldPreserve.length+')');
+  if(!rec.proposal.wouldPreserve.length)line('    none');
+  rec.proposal.wouldPreserve.forEach(x=>line('    '+x));
+  line('');
+  line('  WOULD REMOVE ('+rec.proposal.wouldRemove.length+')');
+  line('    none — reconciliation never deletes. Cloud-only records are preserved.');
+  line('');
+  rule();
+  line('END OF PREVIEW. No data was modified in localStorage, in memory, or in the cloud.');
+  rule();
+  return L.join('\r\n');
+}
+
+function bxReconCsv(rec){
+  const r=[['category','record','field','local_value','cloud_value','proposed_action']];
+  if(!rec.available){ r.push(['unavailable',rec.reason,'','','','']); return _csvRows(r); }
+  rec.onlyInLocal.forEach(x=>r.push(['only_in_localStorage',x.label,'','present','MISSING','would add to cloud']));
+  rec.onlyInCloud.forEach(x=>r.push(['only_in_cloud',x.label,'','MISSING','present','would preserve, never delete']));
+  rec.conflicts.forEach(x=>x.diffs.forEach(d=>
+    r.push(['field_conflict',x.label,d.field,JSON.stringify(d.local),JSON.stringify(d.cloud),'would take localStorage value'])));
+  rec.settingsDiffs.concat(rec.costTableDiffs,rec.inventoryDiffs,rec.scheduleDiffs).forEach(d=>
+    r.push(['global_difference','(state)',d.field,JSON.stringify(d.local),JSON.stringify(d.cloud),'would take localStorage value']));
+  rec.migrationsOnlyInLocal.forEach(k=>r.push(['migration_marker',k,'','present','MISSING','would add to cloud']));
+  rec.migrationsOnlyInCloud.forEach(k=>r.push(['migration_marker',k,'','MISSING','present','would preserve']));
+  rec.repsOnlyInLocal.forEach(x=>r.push(['rep_only_local',x,'','present','MISSING','would add to cloud']));
+  rec.repsOnlyInCloud.forEach(x=>r.push(['rep_only_cloud',x,'','MISSING','present','would preserve']));
+  rec.identical.forEach(x=>r.push(['identical',x.label,'','same','same','would preserve unchanged']));
+  return _csvRows(r);
 }
 
 // ---- Actions & UI ----
@@ -5399,6 +5813,15 @@ function bxDlCsvZip(){ const p=bxPack(); if(!p)return;
   bxDl('best-solution-csv-'+bxTag()+'.zip',bxZip(p.csvs.concat([{name:'DIAGNOSTICS.csv',text:bxDiagCsv(p.diag,p.meta)}])),'application/zip'); }
 function bxDlSummary(){ const p=bxPack(); if(!p)return; bxDl('best-solution-summary-'+bxTag()+'.txt',p.summary,'text/plain'); }
 function bxDlDiag(){ const p=bxPack(); if(!p)return; bxDl('best-solution-diagnostics-'+bxTag()+'.csv',bxDiagCsv(p.diag,p.meta),'text/csv'); }
+function bxDlRecon(){ const p=bxPack(); if(!p)return;
+  bxDl('best-solution-reconciliation-preview-'+bxTag()+'.txt',bxReconReport(p.recon,p.meta),'text/plain'); }
+function bxViewRecon(){ const p=bxPack(); if(!p)return;
+  mOpen('<div class="mh"><div class="mt">Reconciliation Preview</div><button class="mx" onclick="mClose()">&times;</button></div>'+
+    '<div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:8px">READ ONLY. Nothing was written to this device or the cloud.</div>'+
+    '<textarea class="fi" style="min-height:340px;font-size:10px;font-family:monospace;white-space:pre" readonly onclick="this.select()">'+
+    bxReconReport(p.recon,p.meta).replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</textarea>'+
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxDlRecon()">Download this report</button>'+
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxShowModal()">&larr; Back to export</button>'); }
 function bxViewSummary(){ const p=bxPack(); if(!p)return;
   mOpen('<div class="mh"><div class="mt">Export Summary</div><button class="mx" onclick="mClose()">&times;</button></div>'+
     '<textarea class="fi" style="min-height:340px;font-size:10px;font-family:monospace;white-space:pre" readonly onclick="this.select()">'+
@@ -5465,6 +5888,25 @@ function bxShowModal(){
       (d.sev==='CRITICAL'?'var(--red)':d.sev==='WARN'?'var(--gold)':'var(--muted)')+'">'+d.sev+'</strong> '+esc(d.title)+' <span style="color:var(--muted)">('+d.count+')</span></div>').join('')
       :'<div style="font-size:12px;color:var(--green)">No issues found.</div>')+
   '</div>'+
+  (function(){ const R=p.recon;
+    if(!R||!R.available)return '<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">RECONCILIATION PREVIEW</div>'+
+      '<div style="font-size:12px;color:var(--muted)">Not available: '+esc((R&&R.reason)||'unknown')+'</div></div>';
+    const n=(R.onlyInLocal.length+R.onlyInCloud.length+R.conflicts.length);
+    return '<div class="card '+(n?'':'grb')+'" style="margin-bottom:12px">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">RECONCILIATION PREVIEW (READ ONLY)</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+      '<div class="sbox" style="flex:1"><div class="sl">Only on device</div><div class="sv sm w">'+R.onlyInLocal.length+'</div></div>'+
+      '<div class="sbox" style="flex:1"><div class="sl">Only in cloud</div><div class="sv sm w">'+R.onlyInCloud.length+'</div></div>'+
+      '<div class="sbox" style="flex:1"><div class="sl">Conflicts</div><div class="sv sm w">'+R.conflicts.length+'</div></div></div>'+
+    (R.onlyInLocal.length?'<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Missing from cloud: '+
+      esc(R.onlyInLocal.map(x=>x.label).join(' · '))+'</div>':'')+
+    '<div style="font-size:11px;padding:4px 0"><strong>Would add</strong> '+R.proposal.wouldAdd.length+
+      ' &nbsp;<strong>change</strong> '+R.proposal.wouldChange.length+
+      ' &nbsp;<strong>preserve</strong> '+R.proposal.wouldPreserve.length+
+      ' &nbsp;<strong>remove</strong> 0</div>'+
+    '<div style="font-size:10px;color:var(--gold);font-weight:700;margin-top:4px">PREVIEW ONLY. Phase 2A has no apply, sync, repair, restore or push action. Writes performed: '+R.writesPerformed+'</div>'+
+    '<button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px" onclick="bxViewRecon()">View reconciliation preview</button>'+
+    '</div>'; })()+
   '<button class="btn btn-gold btn-full" onclick="bxDlEverything()">⬇️ Download EVERYTHING (.zip)</button>'+
   '<div style="font-size:10px;color:var(--muted);margin:6px 0 12px">One zip: full JSON backup (all three copies), '+p.csvs.length+' CSVs, summary, diagnostics.</div>'+
   '<div class="g2" style="gap:8px">'+
@@ -5475,13 +5917,16 @@ function bxShowModal(){
     '<button class="btn btn-ghost btn-full" onclick="bxDlSummary()">📄 Summary (.txt)</button>'+
     '<button class="btn btn-ghost btn-full" onclick="bxDlDiag()">🩺 Diagnostics (.csv)</button>'+
   '</div>'+
-  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxViewSummary()">👁️ View summary on screen</button>'+
+  '<div class="g2" style="gap:8px;margin-top:8px">'+
+    '<button class="btn btn-ghost btn-full" onclick="bxDlRecon()">🔀 Reconciliation (.txt)</button>'+
+    '<button class="btn btn-ghost btn-full" onclick="bxViewSummary()">👁️ View summary</button>'+
+  '</div>'+
   '<div style="font-size:10px;color:var(--muted);margin-top:10px">To restore, use Restore from File in Settings with <code>restorable-state-only.json</code> from the zip.</div>');
 }
 function bxSettingsCard(){
   return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
   '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 ADMINISTRATIVE — FULL DATA EXPORT</div>'+
-  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Compares all three stored copies, includes a diagnostic report. Read only, changes nothing.</div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Includes the effective-date COGS schedule, a diagnostic report, and a read-only reconciliation preview of this device against the cloud. Changes nothing.</div>'+
   '<button class="btn btn-gold btn-full" onclick="bxRun()">📦 Export Complete Business Data</button>'+
   '</div>';
 }
