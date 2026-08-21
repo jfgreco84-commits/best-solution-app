@@ -5410,6 +5410,12 @@ function bxDiagnose(st,snap,meta){
     R.conflicts.forEach(x=>items.push('Field conflict: '+x.label+' ('+x.diffs.map(d=>d.field).join(', ')+')'));
     add('WARN','RECON_PENDING','Local and cloud copies are not reconciled',items,
       'Preview only. Phase 2A deliberately has no apply, sync, repair, restore or push action. Nothing was written.');
+    add('CRITICAL','RECON_AMBIGUOUS','Records that cannot be matched safely',
+      (R.ambiguous||[]).map(x=>(x.label||x.id||'(record)')+' — '+x.reason),
+      'More than one record could be the same show, or an id appears twice. These are never matched automatically and must be resolved by a person before any future merge.');
+    add('WARN','RECON_FALLBACK_MATCH','Matched on name and date, not on a stable id',
+      (R.fallbackMatches||[]).map(x=>x.label+' (local id '+(x.localId||'none')+', cloud id '+(x.cloudId||'none')+')'),
+      'One side is missing a show id, so the match rests on a normalised name and start date. It is not id-verified and authorises nothing on its own.');
   }
 
   if(snap&&snap.cloudRead&&snap.cloudRead.status!=='ok'){
