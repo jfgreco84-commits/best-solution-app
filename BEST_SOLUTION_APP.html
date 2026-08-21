@@ -284,7 +284,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v30';
+const APP_VERSION='v31';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -1418,9 +1418,10 @@ function pg(i){return $$('pg-'+i);}
 function fmt(n){if(n===null||n===undefined)return'$0.00';const a=Math.abs(n);const s='$'+a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');return n<0?'-'+s:s;}
 function fmtN(n){return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');}
 function getP(k){return(S.prices&&S.prices[k])||SKUS.find(s=>s.key===k).defP;}
-// Undated / current cost. Kept for every legacy caller. Now falls back to the
-// newest schedule entry before the SKUS default, so current inventory is valued
-// at today's costs even when the editable cost table has never been touched.
+// Undated / current cost. Kept for every legacy caller. An undated lookup resolves
+// through the AUTHORITATIVE dated schedule to the current open-ended period, so
+// current inventory is valued at today's scheduled costs. The legacy cost table is
+// consulted only when no valid dated schedule is available.
 function getCost(k){ return getCostOn(k,null,null,(typeof S!=='undefined'?S:null)); }
 function setCost(k,v){if(!S.costs)S.costs={};const n=(v===''||v==null)?null:(parseFloat(v)||0);S.costs[k]=(n==null?SKUS.find(s=>s.key===k).cost:Math.max(0,n));saveS();toast('✅ Cost updated');}
 function resetCosts(){S.costs={};saveS();toast('Costs reset to defaults');rSettings();}
@@ -4868,18 +4869,22 @@ function bxView(st){
   const N=bxNum;
   V.price=k=>{ const p=A.prices&&A.prices[k]; return (p!=null&&p!=='')?N(p):((SKUS.find(s=>s.key===k)||{}).defP||0); };
   // Phase 2A: cost resolution is date-aware and reads ONLY this snapshot.
-  // Precedence: per-show override, dated historical schedule entry, snapshot cost
-  // table, newest schedule entry, SKUS default.
+  // Precedence, highest first:
+  //   1. per-show override
+  //   2. the valid dated schedule entry covering the sale date  <- AUTHORITATIVE,
+  //      for the closed historical periods AND the current open-ended period
+  //   3. FALLBACK: the legacy snapshot cost table, only when no valid schedule exists
+  //   4. FINAL FALLBACK: the SKUS built-in default
   V.schedule=()=>(A.cogsHistory&&A.cogsHistory.length)?A.cogsHistory:null;
   V.scheduleValidation=()=>cogsValidate(V.schedule());
   V.entryOn=dateKey=>cogsEntryOn(dateKey,A);
   V.isLatestEntry=e=>{ const sch=V.schedule(); return !!e&&!!sch&&e===sch[sch.length-1]; };
   V.costOn=(k,dateKey,sh)=>getCostOn(k,dateKey,sh,A);
   V.costSourceOn=(k,dateKey,sh)=>costSourceOn(k,dateKey,sh,A);
-  V.dayKey=(sh,di)=>{ const st=sh&&sh.startDate;
-    if(!(typeof st==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(st)))return null;
-    const d=new Date(st+'T12:00:00'); d.setDate(d.getDate()+(parseInt(di,10)||0));
-    return d.toISOString().slice(0,10); };
+  // Same strict calendar gate as the app engine. A shape-only test here would let
+  // an impossible startDate such as 2026-02-31 produce a day key in the export
+  // while the app resolved it to nothing, so the two engines would disagree.
+  V.dayKey=(sh,di)=>showDayKey(sh,di);
   // Undated / current cost (inventory valuation and anything without a date).
   V.cost =k=>V.costOn(k,null,null);
   V.setting=(k,dflt)=>(set[k]!=null&&set[k]!=='')?N(set[k]):dflt;
@@ -5311,7 +5316,7 @@ function bxCsvFiles(st,meta){
   (V.schedule()||[]).forEach((e,i,arr)=>{ SKUS.forEach(sk=>{
     r.push([e.id||('entry'+i),e.label||'',e.effectiveFrom||'',e.effectiveTo||'(open)',
       (i===arr.length-1)?'yes':'no',sk.key,bxNum((e.costs||{})[sk.key]).toFixed(2)]); }); });
-  r.push(['(cost table)','snapshot costs, governs the current period','','', 'n/a','','']);
+  r.push(['(cost table)','snapshot legacy cost table, FALLBACK ONLY when no valid dated schedule is available','','', 'n/a','','']);
   SKUS.forEach(sk=>{ const c=(st.costs||{})[sk.key];
     r.push(['(cost table)','S.costs','','','n/a',sk.key,(c!=null&&c!=='')?bxNum(c).toFixed(2):'(not set)']); });
   put('17_cogs_schedule.csv',r);
@@ -5433,8 +5438,8 @@ function bxDiagnose(st,snap,meta){
   SKUS.forEach(sk=>{ const t=(st.costs||{})[sk.key];
     if(t!=null&&t!==''&&latest&&latest.costs&&latest.costs[sk.key]!=null&&
        Math.abs(bxNum(t)-bxNum(latest.costs[sk.key]))>0.0001)
-      schedDrift.push(sk.name+': cost table '+M(bxNum(t))+' vs newest schedule entry '+M(bxNum(latest.costs[sk.key]))); });
-  add('WARN','COGS_TABLE_STALE','Cost table no longer matches the newest schedule entry',schedDrift,
+      schedDrift.push(sk.name+': cost table '+M(bxNum(t))+' vs current schedule period '+M(bxNum(latest.costs[sk.key]))); });
+  add('WARN','COGS_TABLE_STALE','Cost table no longer matches the current schedule period',schedDrift,
     'The schedule is authoritative, so the table is not used for calculation. It should still be kept in step, and the staged cost-change flow does that automatically.');
 
   if(snap&&snap.comparison&&meta&&meta._recon&&meta._recon.available){
@@ -5570,11 +5575,17 @@ function bxSummary(st,meta,diag,snap){
     line('');
   });
   line('  COST PRECEDENCE, highest first:');
-  line('    1. per-show override on the show record');
-  line('    2. a closed historical schedule period matching the sale date');
-  line('    3. the editable cost table in this snapshot (governs the current period)');
-  line('    4. the newest schedule entry');
-  line('    5. the built-in product default');
+  line('    1. a valid per-show cost override on the show record');
+  line('    2. the valid dated COGS schedule entry covering the sale date.');
+  line('       This is the AUTHORITATIVE rule, and it applies to BOTH the closed');
+  line('       historical periods AND the current open-ended period.');
+  line('    3. FALLBACK ONLY: the legacy flat cost table, used solely when no valid');
+  line('       dated schedule is available. It never overrides a valid schedule.');
+  line('    4. FINAL FALLBACK: the built-in product default.');
+  line('');
+  line('  Any figure resolved by rule 3 or 4 is labelled FALLBACK in the cost-source');
+  line('  columns, and a critical diagnostic is raised. The schedule is never bypassed');
+  line('  silently.');
   line('');
   rule(); line('SHOWS'); rule();
   shows.slice().sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||'')).forEach(sh=>{
@@ -5880,8 +5891,27 @@ function bxReconcile(snap){
   cmp(L.settings,C.settings,'settings',out.settingsDiffs);
   cmp(L.inventory,C.inventory,'inventory',out.inventoryDiffs);
   cmp(L.costs,C.costs,'costs',out.costTableDiffs);
-  if(JSON.stringify(L.cogsHistory||null)!==JSON.stringify(C.cogsHistory||null))
-    out.scheduleDiffs.push({field:'cogsHistory',local:(L.cogsHistory||[]).length+' entries',cloud:(C.cogsHistory||[]).length+' entries'});
+  // The three COGS-history fields travel together: the schedule, the metadata that
+  // records how it was seeded, and the audit log of every change to it. Comparing
+  // only cogsHistory would report a device that has a schedule and a cloud that has
+  // none as a one-field difference, silently dropping the metadata and the audit
+  // trail from the proposal. Each is compared to full depth and described in a way
+  // that says which side actually holds it.
+  const COGS_STATE_FIELDS=['cogsHistory','cogsHistoryMeta','cogsAudit'];
+  const cogsDesc=v=>{
+    if(v==null)return 'absent';
+    if(Array.isArray(v))return v.length?(v.length+' entr'+(v.length===1?'y':'ies')):'present, empty';
+    if(typeof v==='object')return Object.keys(v).length?('present, '+Object.keys(v).length+' field'+(Object.keys(v).length===1?'':'s')):'present, empty';
+    return String(v);
+  };
+  COGS_STATE_FIELDS.forEach(f=>{
+    const lv=(L[f]===undefined?null:L[f]), cv=(C[f]===undefined?null:C[f]);
+    if(JSON.stringify(lv)===JSON.stringify(cv))return;
+    const detail=[]; bxDeepDiff(lv,cv,f,detail);
+    out.scheduleDiffs.push({field:f,local:cogsDesc(lv),cloud:cogsDesc(cv),
+      onlyOnDevice:(lv!=null&&cv==null), onlyInCloud:(cv!=null&&lv==null),
+      detail:detail});
+  });
 
   // PROPOSAL ONLY. Nothing here is executed in Phase 2A.
   out.onlyInLocal.forEach(x=>out.proposal.wouldAdd.push(
@@ -5902,8 +5932,16 @@ function bxReconcile(snap){
     'PRESERVE cloud-only record, NOT deleted: '+x.label));
   out.migrationsOnlyInLocal.forEach(k=>out.proposal.wouldAdd.push('ADD migration marker to cloud: '+k));
   out.repsOnlyInLocal.forEach(r=>out.proposal.wouldAdd.push('ADD rep to cloud: '+r));
-  out.settingsDiffs.concat(out.costTableDiffs,out.inventoryDiffs,out.scheduleDiffs)
+  out.settingsDiffs.concat(out.costTableDiffs,out.inventoryDiffs)
     .forEach(d=>out.proposal.wouldChange.push('CHANGE in cloud: '+d.field+'  local='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud)));
+  // A COGS-history field the device has and the cloud lacks is an ADD, not a CHANGE.
+  // One the cloud has and the device lacks is PRESERVED, never deleted.
+  out.scheduleDiffs.forEach(d=>{
+    const where='  device='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud);
+    if(d.onlyOnDevice)out.proposal.wouldAdd.push('ADD to cloud: '+d.field+' (device-side only)'+where);
+    else if(d.onlyInCloud)out.proposal.wouldPreserve.push('PRESERVE cloud-only '+d.field+', NOT deleted'+where);
+    else out.proposal.wouldChange.push('CHANGE in cloud: '+d.field+where);
+  });
   return out;
 }
 
@@ -5973,10 +6011,19 @@ function bxReconReport(rec,meta){
     x.diffs.forEach(d=>line('      '+String(d.field).padEnd(34)+' local='+JSON.stringify(d.local)+'   cloud='+JSON.stringify(d.cloud))); });
   line('');
   const other=[['Settings',rec.settingsDiffs],['Cost table',rec.costTableDiffs],
-               ['Inventory',rec.inventoryDiffs],['COGS schedule',rec.scheduleDiffs]];
+               ['Inventory',rec.inventoryDiffs]];
   rule(); line('OTHER DIFFERENCES'); rule();
   other.forEach(([n,arr])=>{ line('  '+n+': '+(arr.length?arr.length+' difference(s)':'identical'));
     arr.forEach(d=>line('      '+d.field+'  local='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud))); });
+  line('  COGS history (cogsHistory, cogsHistoryMeta, cogsAudit): '+
+    ((rec.scheduleDiffs||[]).length?(rec.scheduleDiffs.length+' difference(s)'):'identical'));
+  (rec.scheduleDiffs||[]).forEach(d=>{
+    line('      '+String(d.field).padEnd(18)+' device='+d.local+'   cloud='+d.cloud+
+      (d.onlyOnDevice?'   [DEVICE-SIDE ONLY, would be ADDED to the cloud]':
+       (d.onlyInCloud?'   [CLOUD-ONLY, preserved, never deleted]':'   [differs on both sides]')));
+    (d.detail||[]).slice(0,12).forEach(x=>line('          '+String(x.field).padEnd(30)+
+      ' device='+JSON.stringify(x.local)+'   cloud='+JSON.stringify(x.cloud)));
+    if((d.detail||[]).length>12)line('          ... and '+(d.detail.length-12)+' more nested difference(s)'); });
   line('  Migration markers only in localStorage: '+(rec.migrationsOnlyInLocal.join(', ')||'none'));
   line('  Migration markers only in cloud:        '+(rec.migrationsOnlyInCloud.join(', ')||'none'));
   line('  Reps only in localStorage:              '+(rec.repsOnlyInLocal.join(', ')||'none'));
