@@ -434,8 +434,34 @@ R.section('=== 11. PHASE 2B AND ID MATCHING ARE UNCHANGED ===');
   chk('the manifest still names three shows',w.ctx.P2B_MANIFEST.shows.length,3);
   chk('the expected addition count is still 8',w.ctx.P2B_EXPECTED_ADDITIONS,8);
   chk('the confirmation phrase is unchanged',w.ctx.P2B_PHRASE,'ADD 8 ITEMS TO CLOUD');
-  chk('the precondition device fingerprint is untouched by this branch',
-    w.ctx.P2B_PRECOND.deviceFp,'50dfbbf5/86918');
+  // The guard must not MUTATE the Phase 2B preconditions. Freezing a literal
+  // fingerprint here would instead assert that the MANIFEST never changes,
+  // which is not this suite's business: the manifest owns that value and is
+  // legitimately re-pinned whenever the canonical device is re-established.
+  // So snapshot the preconditions, exercise the guard end to end, and require
+  // them to come back byte-identical.
+  const precondBefore=JSON.stringify(w.ctx.P2B_PRECOND);
+  const manifestBefore=JSON.stringify(w.ctx.P2B_MANIFEST);
+  {
+    const st=w.ctx.loadS();
+    w.ctx.mrgLedgerReconcile(st);
+    const inc=JSON.parse(JSON.stringify(st));
+    inc.shows=inc.shows.filter(sh=>!THREE.some(t=>key(w,sh)===w.ctx.mrgShowKey(t[0],t[1])));
+    delete inc._applied['shows_add_20260818'];
+    delete inc._applied['pop_racine_20260818'];
+    w.ctx.mrgWithheldMarkers(inc,st);
+    w.ctx.mrgInheritSeedMarkers(inc,st);
+    w.store['dd_bs_v7']=JSON.stringify(inc);
+    w.ctx.loadS();
+  }
+  chk('a full guard cycle does not mutate P2B_PRECOND',
+    JSON.stringify(w.ctx.P2B_PRECOND),precondBefore);
+  chk('a full guard cycle does not mutate P2B_MANIFEST',
+    JSON.stringify(w.ctx.P2B_MANIFEST),manifestBefore);
+  chk('the precondition device fingerprint is well formed',
+    /^[0-9a-f]{8}\/\d+$/.test(w.ctx.P2B_PRECOND.deviceFp),true);
+  chk('the precondition cloud fingerprint is well formed',
+    /^[0-9a-f]{8}\/\d+$/.test(w.ctx.P2B_PRECOND.cloudFp),true);
   chk('the manifest name still uses the em dash',
     w.ctx.P2B_MANIFEST.shows.some(s=>s.name.indexOf('—')>=0),true);
 
@@ -508,12 +534,16 @@ R.section('=== 14. SAFARI LEDGER POISONING IS REPAIRED (blocker 2, req D) ===');
   // It then adopts a document carrying the CANONICAL ids. The present record
   // is the authority: the ledger must be repaired, and the superseded ids must
   // stop being restorable anywhere.
-  const SUP={'Whole Bead Show — Milwaukee Pop-up':'sh_auto_wholebeadshowmilwauk_178726411239739',
-             'Wonderful World of Weddings':'sh_auto_wonderfulworldofwedd_1787264112397189',
-             'Party on the Pavement':'sh_auto_partyonthepavement_1787264112399590'};
-  const CAN={'Whole Bead Show — Milwaukee Pop-up':'sh_auto_wholebeadshowmilwauk_1787088971124554',
+  // STALE is a non-canonical generation left in a secondary storage's ledger.
+  // CAN is the canonical set carried by the physically identified Home Screen
+  // copy (minted 2026-08-20T22:20:15Z). The specific values are fixtures; what
+  // matters is that the ledger is repaired to whatever the DOCUMENT holds.
+  const SUP={'Whole Bead Show — Milwaukee Pop-up':'sh_auto_wholebeadshowmilwauk_1787088971124554',
              'Wonderful World of Weddings':'sh_auto_wonderfulworldofwedd_1787088971124589',
              'Party on the Pavement':'sh_auto_partyonthepavement_1787088971125819'};
+  const CAN={'Whole Bead Show — Milwaukee Pop-up':'sh_auto_wholebeadshowmilwauk_1787264415031803',
+             'Wonderful World of Weddings':'sh_auto_wonderfulworldofwedd_1787264415031379',
+             'Party on the Pavement':'sh_auto_partyonthepavement_1787264415032841'};
   const safari=browser();
   safari.store['dd_bs_seedlog_v1']='';
   // poison the ledger with the superseded identities
@@ -532,7 +562,7 @@ R.section('=== 14. SAFARI LEDGER POISONING IS REPAIRED (blocker 2, req D) ===');
   chk('the ledger now holds the CANONICAL ids',
     THREE.every(t=>led1[safari.ctx.mrgShowKey(t[0],t[1])].id===CAN[t[0]]),true);
   chk('no superseded id survives anywhere in the ledger',
-    Object.keys(led1).filter(k=>/1787264112/.test(led1[k].id)).length,0);
+    Object.keys(led1).filter(k=>/1787088971|1787264112/.test(led1[k].id)).length,0);
   chk('the present records were NOT altered',
     incoming.shows.map(sh=>sh.id).sort(),Object.keys(CAN).map(n=>CAN[n]).sort());
   chk('still three rows, no duplicate',incoming.shows.length,3);

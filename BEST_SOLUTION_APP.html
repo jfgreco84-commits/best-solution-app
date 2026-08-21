@@ -699,10 +699,12 @@ function mrgLogRead(){ const l=mrgLedgerRead().log; return Array.isArray(l)?l:[]
    present record's id - never the other way round. A stale ledger must never
    override an explicit id on a record that is already there.
 
-   That rule is what de-poisons a secondary browser. The Safari storage holds
-   ledger entries pointing at the superseded 1787264112 ids. The moment it
-   adopts a document carrying the canonical 1787088971 ids, those entries are
-   repaired, and the superseded ids stop being restorable anywhere. */
+   That rule is what de-poisons a secondary browser. The 2026-08-20 replay left
+   three id generations across separate storages: 1787088971... (Aug 18),
+   1787264112... (Aug 20 22:15) and 1787264415... (Aug 20 22:20, the physically
+   identified Home Screen copy). Whichever storage holds a stale ledger entry
+   has it repaired the moment it adopts a document carrying a different id, so
+   a superseded id stops being restorable anywhere. */
 function mrgLedgerReconcile(d){
   const led=mrgLedgerRead();
   const res={added:0,repaired:0,repairs:[]};
@@ -6746,9 +6748,9 @@ const P2B_MANIFEST={
   shows:[
     // The stored record uses an EM DASH, not a comma. Written as an escape so the
     // runtime value cannot drift through copy-paste or editor normalisation.
-    {id:'sh_auto_wholebeadshowmilwauk_178726411239739', name:'Whole Bead Show \u2014 Milwaukee Pop-up', startDate:'2026-10-27'},
-    {id:'sh_auto_wonderfulworldofwedd_1787264112397189', name:'Wonderful World of Weddings', startDate:'2027-01-30'},
-    {id:'sh_auto_partyonthepavement_1787264112399590', name:'Party on the Pavement', startDate:'2026-09-19'}
+    {id:'sh_auto_wholebeadshowmilwauk_1787264415031803', name:'Whole Bead Show \u2014 Milwaukee Pop-up', startDate:'2026-10-27'},
+    {id:'sh_auto_wonderfulworldofwedd_1787264415031379', name:'Wonderful World of Weddings', startDate:'2027-01-30'},
+    {id:'sh_auto_partyonthepavement_1787264415032841', name:'Party on the Pavement', startDate:'2026-09-19'}
   ],
   markers:['shows_add_20260818','pop_racine_20260818','cogs_history_v1'],
   fields:['cogsHistory','cogsHistoryMeta']
@@ -6757,8 +6759,26 @@ const P2B_EXPECTED_ADDITIONS=P2B_MANIFEST.shows.length+P2B_MANIFEST.markers.leng
 const P2B_PHRASE='ADD 8 ITEMS TO CLOUD';
 const P2B_EXPECT_SHOWS=35, P2B_EXPECT_DAYS=75;
 // Independently verified starting state. These are preconditions, not guesses.
+//
+// Re-pinned 2026-08-21 to the PHYSICALLY IDENTIFIED Home Screen copy. The owner
+// closed every app, opened the Best Solution Home Screen icon, and exported from
+// that exact install; it reports fingerprint bb3ca777/86919 and carries the show
+// ids minted 2026-08-20T22:20:15Z. That is the copy that will run Phase 2B, so
+// that is the copy this manifest authorises.
+//
+// The 2026-08-20 migration replay produced THREE id generations across separate
+// browser storages: 1787088971... (2026-08-18T21:36:11Z), 1787264112...
+// (2026-08-20T22:15:12Z) and 1787264415... (2026-08-20T22:20:15Z). The cloud
+// holds NONE of them, so no existing cloud identity is being displaced; the
+// authorised set is simply whichever copy performs the write.
+//
+// Every value below was extracted programmatically from the owner's own export
+// (ZIP SHA-256 08d482d0...0bf5e2fa, saved state SHA-256 86e08f47...cf27a3f1),
+// never typed from a message. Each id was required to appear exactly once in
+// that state and to be absent from the cloud copy. The proposal is unchanged in
+// shape: still 8 additions, 0 changes, 0 deletions, 0 blocked, 0 needing review.
 const P2B_PRECOND={
-  deviceFp:'50dfbbf5/86918', cloudFp:'67c10862/80102',
+  deviceFp:'bb3ca777/86919', cloudFp:'67c10862/80102',
   device:{shows:35,days:75}, cloud:{shows:32,days:71}
 };
 let _p2b=null;          // the staged operation. Null means nothing is staged.
