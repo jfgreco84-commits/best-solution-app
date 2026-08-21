@@ -39,6 +39,11 @@ function clearLog(w){
   w.store['dd_bs_seedlog_v1']=JSON.stringify(o);
 }
 
+const days=st=>(st.shows||[]).reduce((n,sh)=>n+((sh.days||[]).length),0);
+const key=(w,sh)=>w.ctx.mrgShowKey(sh.name,sh.startDate);
+const canon=o=>JSON.stringify((function c(x){return Array.isArray(x)?x.map(c):
+  (x&&typeof x==='object'?Object.keys(x).sort().reduce((r,k)=>(r[k]=c(x[k]),r),{}):x);})(o));
+
 // A "browser storage copy": its own localStorage, its own booted app.
 function browser(){
   const w=boot();
@@ -78,10 +83,18 @@ R.section('=== 2. NEVER A SECOND ROW FOR THE SAME NAME + START DATE ===');
   chk('dash variant of the same name is refused',
     w.ctx.mrgPushShow(d,show('party  on   the pavement','2026-09-19','sh_c'),'m'),'duplicate-blocked');
   chk('still one row after the variant',d.shows.length,1);
-  chk('same name on a different date IS allowed',
-    w.ctx.mrgPushShow(d,show('Party on the Pavement','2027-09-18','sh_d'),'m'),'created');
+  // A same-name row at another date is the SAME event with a corrected date -
+  // later migrations move seeded dates. Creating here would duplicate it at the
+  // stale date. Only migrations reach this funnel; the UI add path does not.
+  chk('same name on a different date is ALSO refused',
+    w.ctx.mrgPushShow(d,show('Party on the Pavement','2027-09-18','sh_d'),'m'),'duplicate-blocked');
+  chk('still one row',d.shows.length,1);
+  chk('the surviving row keeps its own date',d.shows[0].startDate,'2026-09-19');
+  chk('a genuinely different name IS allowed',
+    w.ctx.mrgPushShow(d,show('Some Other Fair','2027-09-18','sh_e'),'m'),'created');
   chk('two rows now',d.shows.length,2);
-  chk('the refusal was recorded',w.ctx.mrgLogRead().filter(x=>x.action==='duplicate-blocked').length,2);
+  chk('the refusals were recorded',
+    w.ctx.mrgLogRead().filter(x=>/duplicate-blocked/.test(x.action)).length,3);
   chk('and nothing was written into the state document',
     Object.keys(d).filter(k=>k.indexOf('_mrg')===0).length,0);
 }
@@ -151,29 +164,32 @@ R.section('=== 5. THE 2026-08-20 INCIDENT, REPLAYED END TO END ===');
   SEEDED.forEach(m=>aState._applied[m]=true);
   A.store['dd_bs_v7']=JSON.stringify(aState);
   A.store['dd_bs_seedlog_v1']='';            // start this copy's ledger empty
-  A.ctx.mrgLedgerBackfill(aState);
+  A.ctx.mrgLedgerReconcile(aState);
   chk('A: the ledger learned all four identities',
     Object.keys(JSON.parse(A.store['dd_bs_seedlog_v1']).entries).length,4);
 
   // A adopts the cloud copy. WITHOUT marker inheritance the three shows would
   // vanish and then be re-seeded under fresh ids. WITH it, no re-seed is tried.
   const incoming=cloudDoc();
+  // The incoming document does NOT contain the three shows, so the two markers
+  // that seed them must be WITHHELD. Inheriting them would gate the migrations
+  // shut and the three records would simply be gone from the adopted state.
+  const withheld=A.ctx.mrgWithheldMarkers(incoming,aState).map(x=>x.marker).sort();
+  chk('A: the two Aug 18 seed markers are WITHHELD',withheld,
+    ['pop_racine_20260818','shows_add_20260818']);
   const inherited=A.ctx.mrgInheritSeedMarkers(incoming,aState);
-  chk('A: the two Aug 18 seed markers are carried across',
-    inherited.slice().sort(),['pop_racine_20260818','shows_add_20260818']);
-  chk('A: the adopted document now carries shows_add_20260818',!!incoming._applied['shows_add_20260818'],true);
-  chk('A: the adopted document now carries pop_racine_20260818',!!incoming._applied['pop_racine_20260818'],true);
-  chk('A: the inheritance is recorded in the ledger log',
-    A.ctx.mrgLogRead().some(x=>x.action==='markers-inherited'),true);
+  chk('A: neither Aug 18 marker was taken',inherited.filter(m=>/20260818/.test(m)),[]);
+  chk('A: the adopted document still lacks shows_add_20260818',!!incoming._applied['shows_add_20260818'],false);
+  chk('A: the adopted document still lacks pop_racine_20260818',!!incoming._applied['pop_racine_20260818'],false);
+  chk('A: the withholding is recorded in the ledger log',
+    A.ctx.mrgLogRead().some(x=>x.action==='marker-withheld'),true);
   chk('A: and NOT on the state document',
     Object.keys(incoming).filter(k=>k.indexOf('_mrg')===0).length,0);
+  chk('A: a marker whose records ARE present is still inherited',
+    A.ctx.mrgWithheldMarkers(incoming,aState).every(x=>/20260818/.test(x.marker)),true);
 
-  // The seeds are now gated shut, so applyOneTimeUpdates re-creates nothing.
-  chk('A: no re-seed would be attempted',
-    SEEDED.every(m=>incoming._applied[m]===true),true);
-
-  // Belt and braces: even if a seed DID run against the adopted document, the
-  // ledger refuses to mint a second identity for any of the three.
+  // The seeds therefore run, and the ledger hands each one back the id this
+  // device already held rather than letting it mint a new one.
   THREE.forEach((t,i)=>{
     chk('A: replay of "'+t[0].slice(0,22)+'" keeps the original id',
       A.ctx.mrgPushShow(incoming,show(t[0],t[1],'sh_replay_'+i),'shows_add_20260818'),'identity-restored');
@@ -190,10 +206,10 @@ R.section('=== 5. THE 2026-08-20 INCIDENT, REPLAYED END TO END ===');
   const bFresh={v:7,shows:THREE.map((t,i)=>show(t[0],t[1],'sh_B_first_'+i)),_applied:{}};
   SEEDED.forEach(m=>bFresh._applied[m]=true);
   B.store['dd_bs_seedlog_v1']='';            // B's ledger is its own, and empty
-  B.ctx.mrgLedgerBackfill(bFresh);
+  B.ctx.mrgLedgerReconcile(bFresh);
   const bIncoming=cloudDoc();
   B.ctx.mrgInheritSeedMarkers(bIncoming,bFresh);
-  chk('B: markers inherited independently of A',!!bIncoming._applied['shows_add_20260818'],true);
+  chk('B: the Aug 18 markers are withheld here too',!!bIncoming._applied['shows_add_20260818'],false);
   THREE.forEach((t,i)=>{
     chk('B: replay of "'+t[0].slice(0,22)+'" keeps B\'s own id',
       B.ctx.mrgPushShow(bIncoming,show(t[0],t[1],'sh_B_second_'+i),'shows_add_20260818'),'identity-restored');
@@ -216,16 +232,18 @@ R.section('=== 6. MARKER INHERITANCE IS NARROW AND ONE-WAY ===');
   const w=browser();
   const cur={_applied:{shows_add_20260818:true,cogs_history_v1:true,real_prices_v1:true,
     jun2026_expense_fix_v4:true}};
-  const inc={_applied:{}};
+  // the incoming document DOES carry both records the marker seeds
+  const inc={_applied:{},shows:[show('Whole Bead Show — Milwaukee Pop-up','2026-10-27','a'),
+    show('Wonderful World of Weddings','2027-01-30','b')]};
   const took=w.ctx.mrgInheritSeedMarkers(inc,cur);
   chk('only show-seeding markers are inherited',took,['shows_add_20260818']);
   chk('cogs_history_v1 is NOT inherited',!!inc._applied['cogs_history_v1'],false);
   chk('a data-fix marker is NOT inherited',!!inc._applied['real_prices_v1'],false);
   chk('another data-fix marker is NOT inherited',!!inc._applied['jun2026_expense_fix_v4'],false);
 
-  const inc2={_applied:{shows_add_20260818:true}};
+  const inc2={_applied:{shows_add_20260818:true},shows:[]};
   chk('an already-present marker is not re-taken',w.ctx.mrgInheritSeedMarkers(inc2,{_applied:{}}),[]);
-  chk('a null current state is safe',w.ctx.mrgInheritSeedMarkers({_applied:{}},null),[]);
+  chk('a null current state is safe',w.ctx.mrgInheritSeedMarkers({_applied:{},shows:[]},null),[]);
   chk('a null incoming document is safe',w.ctx.mrgInheritSeedMarkers(null,cur),[]);
   chk('inheritance never removes a marker from the source',!!cur._applied['cogs_history_v1'],true);
 }
@@ -289,40 +307,56 @@ R.section('=== 7b. A SURVIVING LEDGER MUST NOT STOP A FROM-SCRATCH BUILD ===');
 // -------------------------------- 8. full adopt-then-reload, through loadS()
 R.section('=== 8. ADOPT A MARKER-LESS CLOUD COPY, THEN RELOAD ===');
 {
+  // BLOCKER 1 REGRESSION. An earlier version of this section asserted
+  // after.shows.length === shrunk - it validated the LOSS of the three shows.
+  // Inheriting a marker whose records are absent suppresses the migration and
+  // the records never come back. The requirement is the opposite: the records
+  // must be restored, under their canonical ids.
   const w=browser();
   const first=w.ctx.loadS();
+  const before=first.shows.length, beforeDays=days(first);
   const originalIds={};
   THREE.forEach(t=>{
-    const sh=first.shows.find(x=>w.ctx.mrgShowKey(x.name,x.startDate)===w.ctx.mrgShowKey(t[0],t[1]));
+    const sh=first.shows.find(x=>key(w,x)===w.ctx.mrgShowKey(t[0],t[1]));
     originalIds[t[0]]=sh&&sh.id;
   });
   chk('the three shows exist before adoption',Object.values(originalIds).every(Boolean),true);
 
-  // Build the adopted document the way the real cloud row looks: same shows
-  // MINUS the three, and without the two Aug 18 markers.
+  // The adopted document looks like the real cloud row: the same shows MINUS
+  // the three, and without the two Aug 18 markers.
   const adopted=JSON.parse(JSON.stringify(first));
   adopted.shows=adopted.shows.filter(sh=>
-    !THREE.some(t=>w.ctx.mrgShowKey(sh.name,sh.startDate)===w.ctx.mrgShowKey(t[0],t[1])));
+    !THREE.some(t=>key(w,sh)===w.ctx.mrgShowKey(t[0],t[1])));
   delete adopted._applied['shows_add_20260818'];
   delete adopted._applied['pop_racine_20260818'];
-  const shrunk=adopted.shows.length;
 
-  // Layer 1 runs, then the document lands and loadS() re-runs the migrations.
-  w.ctx.mrgInheritSeedMarkers(adopted,first);
+  const withheld=w.ctx.mrgWithheldMarkers(adopted,first).map(x=>x.marker).sort();
+  chk('both Aug 18 markers are WITHHELD, not inherited',withheld,
+    ['pop_racine_20260818','shows_add_20260818']);
+  const took=w.ctx.mrgInheritSeedMarkers(adopted,first);
+  chk('and neither was taken',took.filter(m=>/20260818/.test(m)).length,0);
+
   w.store['dd_bs_v7']=JSON.stringify(adopted);
   const after=w.ctx.loadS();
 
-  chk('the markers were restored before the migrations ran',
-    !!after._applied['shows_add_20260818']&&!!after._applied['pop_racine_20260818'],true);
-  chk('no show was re-created',after.shows.length,shrunk);
-  const afterKeys=after.shows.map(sh=>w.ctx.mrgShowKey(sh.name,sh.startDate));
-  chk('no duplicate name+date after the reload',afterKeys.length,new Set(afterKeys).size);
-  const afterIds=after.shows.map(sh=>sh.id);
-  chk('no duplicate id after the reload',afterIds.length,new Set(afterIds).size);
-  chk('no new sh_auto_ id was minted for any of the three',
-    THREE.every(t=>!after.shows.some(sh=>
-      w.ctx.mrgShowKey(sh.name,sh.startDate)===w.ctx.mrgShowKey(t[0],t[1])
-      && sh.id!==originalIds[t[0]])),true);
+  chk('the full show count is restored',after.shows.length,before);
+  chk('the full day count is restored',days(after),beforeDays);
+  chk('every one of the three came back',
+    THREE.every(t=>after.shows.some(sh=>key(w,sh)===w.ctx.mrgShowKey(t[0],t[1]))),true);
+  chk('each under its CANONICAL id, not a new one',
+    THREE.every(t=>{const sh=after.shows.find(x=>key(w,x)===w.ctx.mrgShowKey(t[0],t[1]));
+      return sh&&sh.id===originalIds[t[0]];}),true);
+  const ak=after.shows.map(sh=>key(w,sh));
+  chk('no duplicate name+date',ak.length,new Set(ak).size);
+  const ai=after.shows.map(sh=>sh.id);
+  chk('no duplicate id',ai.length,new Set(ai).size);
+  chk('no business field was lost from any of the three',
+    THREE.every(t=>{
+      const a=first.shows.find(x=>key(w,x)===w.ctx.mrgShowKey(t[0],t[1]));
+      const b=after.shows.find(x=>key(w,x)===w.ctx.mrgShowKey(t[0],t[1]));
+      return canon(a)===canon(b);}),true);
+  chk('the guard added no field to the state',
+    Object.keys(after).filter(x=>x.indexOf('_mrg')===0).length,0);
 }
 
 // ------------------------- 9. the same, WITHOUT layer 1 - layer 2 must hold
@@ -330,17 +364,17 @@ R.section('=== 9. LAYER 2 ALONE, WITH LAYER 1 DELIBERATELY SKIPPED ===');
 {
   const w=browser();
   const first=w.ctx.loadS();
+  const before=first.shows.length, beforeDays=days(first);
   const originalIds9={};
   THREE.forEach(t=>{
-    const sh=first.shows.find(x=>w.ctx.mrgShowKey(x.name,x.startDate)===w.ctx.mrgShowKey(t[0],t[1]));
+    const sh=first.shows.find(x=>key(w,x)===w.ctx.mrgShowKey(t[0],t[1]));
     originalIds9[t[0]]=sh&&sh.id;
   });
   const adopted=JSON.parse(JSON.stringify(first));
   adopted.shows=adopted.shows.filter(sh=>
-    !THREE.some(t=>w.ctx.mrgShowKey(sh.name,sh.startDate)===w.ctx.mrgShowKey(t[0],t[1])));
+    !THREE.some(t=>key(w,sh)===w.ctx.mrgShowKey(t[0],t[1])));
   delete adopted._applied['shows_add_20260818'];
   delete adopted._applied['pop_racine_20260818'];
-  const shrunk=adopted.shows.length;
 
   // No mrgInheritSeedMarkers call at all. The seeds WILL run this time.
   clearLog(w);
@@ -348,20 +382,20 @@ R.section('=== 9. LAYER 2 ALONE, WITH LAYER 1 DELIBERATELY SKIPPED ===');
   const after=w.ctx.loadS();
 
   chk('the seeds did run',!!after._applied['shows_add_20260818'],true);
-  chk('the three came back',after.shows.length,shrunk+3);
+  chk('the full show count is restored',after.shows.length,before);
+  chk('the full day count is restored',days(after),beforeDays);
   const restored=w.ctx.mrgLogRead().filter(x=>x.action==='identity-restored');
   chk('three identities were restored',restored.length,3);
-  chk('each restoration kept the id this device already held',
+  chk('each kept the id this device already held',
     restored.every(r=>typeof r.keptId==='string'&&r.keptId.indexOf('sh_auto_')===0),true);
   chk('and each discarded a freshly minted one',
     restored.every(r=>r.discardedId&&r.discardedId!==r.keptId),true);
   chk('every restored id matches the pre-adoption id',
-    THREE.every(t=>{const sh=after.shows.find(x=>
-      w.ctx.mrgShowKey(x.name,x.startDate)===w.ctx.mrgShowKey(t[0],t[1]));
+    THREE.every(t=>{const sh=after.shows.find(x=>key(w,x)===w.ctx.mrgShowKey(t[0],t[1]));
       return sh&&sh.id===originalIds9[t[0]];}),true);
   const ids=after.shows.map(sh=>sh.id);
   chk('no duplicate id',ids.length,new Set(ids).size);
-  const kk=after.shows.map(sh=>w.ctx.mrgShowKey(sh.name,sh.startDate));
+  const kk=after.shows.map(sh=>key(w,sh));
   chk('no duplicate name+date',kk.length,new Set(kk).size);
 }
 
@@ -415,6 +449,177 @@ R.section('=== 11. PHASE 2B AND ID MATCHING ARE UNCHANGED ===');
   const c={shows:[{id:'sh_1',name:'Alpha',startDate:'2026-01-01'}]};
   const m2=w.ctx.bxMatchShows(a,c);
   chk('a shared id still matches',m2.pairs.length,1);
+}
+
+// ================= REQUIRED REGRESSIONS FROM INDEPENDENT REVIEW =================
+
+R.section('=== 12. THE MARKER->RECORDS TABLE MUST NOT DRIFT (req E) ===');
+{
+  // Rebuild MRG_SEED_RECORDS from a clean run of the real migrations and
+  // compare. If a migration gains or loses a seeded show, this fails.
+  const w=browser();
+  const real=w.ctx.mrgPushShow, seen={};
+  w.ctx.mrgPushShow=function(d,sh,marker){
+    const r=real(d,sh,marker);
+    if(r==='created'||r==='identity-restored')
+      (seen[marker]=seen[marker]||[]).push(w.ctx.mrgNormName(sh.name));
+    return r;
+  };
+  w.store['dd_bs_v7']=''; w.store['dd_bs_seedlog_v1']='';
+  w.ctx.loadS();
+  w.ctx.mrgPushShow=real;
+  const declared=w.ctx.MRG_SEED_RECORDS;
+  Object.keys(declared).forEach(m=>{
+    chk('declared records match the migration: '+m,
+      (seen[m]||[]).slice().sort(),declared[m].slice().sort());
+  });
+  chk('no migration seeds shows without a declared entry',
+    Object.keys(seen).filter(m=>!declared[m]),[]);
+}
+
+R.section('=== 13. INHERITANCE REQUIRES EVERY SEEDED RECORD (req E) ===');
+{
+  const w=browser();
+  const cur={_applied:{shows_add_20260818:true}};
+  const both=[show('Whole Bead Show — Milwaukee Pop-up','2026-10-27','a'),
+              show('Wonderful World of Weddings','2027-01-30','b')];
+  chk('both records present -> inherited',
+    w.ctx.mrgInheritSeedMarkers({_applied:{},shows:both.slice()},cur),['shows_add_20260818']);
+  chk('one record missing -> WITHHELD',
+    w.ctx.mrgInheritSeedMarkers({_applied:{},shows:[both[0]]},cur),[]);
+  chk('no records at all -> WITHHELD',
+    w.ctx.mrgInheritSeedMarkers({_applied:{},shows:[]},cur),[]);
+  const why=w.ctx.mrgWithheldMarkers({_applied:{},shows:[both[0]]},cur);
+  chk('the reason names the missing record',why[0]&&why[0].missing,['wonderful world of weddings']);
+
+  // Matching is by NAME, not name+date: later migrations move seeded dates.
+  chk('a moved start date still counts as present',
+    w.ctx.mrgInheritSeedMarkers({_applied:{},shows:[
+      show('Whole Bead Show — Milwaukee Pop-up','2099-01-01','a'),
+      show('Wonderful World of Weddings','2099-01-02','b')]},cur),['shows_add_20260818']);
+  chk('st_martins seeds Aug 30 but is matched at its corrected Sep 06 date',
+    w.ctx.mrgInheritSeedMarkers({_applied:{},shows:[show('St. Martins Fair','2026-09-06','x')]},
+      {_applied:{st_martins_20260518:true}}),['st_martins_20260518']);
+}
+
+R.section('=== 14. SAFARI LEDGER POISONING IS REPAIRED (blocker 2, req D) ===');
+{
+  // The secondary storage holds ledger entries pointing at the SUPERSEDED ids.
+  // It then adopts a document carrying the CANONICAL ids. The present record
+  // is the authority: the ledger must be repaired, and the superseded ids must
+  // stop being restorable anywhere.
+  const SUP={'Whole Bead Show — Milwaukee Pop-up':'sh_auto_wholebeadshowmilwauk_178726411239739',
+             'Wonderful World of Weddings':'sh_auto_wonderfulworldofwedd_1787264112397189',
+             'Party on the Pavement':'sh_auto_partyonthepavement_1787264112399590'};
+  const CAN={'Whole Bead Show — Milwaukee Pop-up':'sh_auto_wholebeadshowmilwauk_1787088971124554',
+             'Wonderful World of Weddings':'sh_auto_wonderfulworldofwedd_1787088971124589',
+             'Party on the Pavement':'sh_auto_partyonthepavement_1787088971125819'};
+  const safari=browser();
+  safari.store['dd_bs_seedlog_v1']='';
+  // poison the ledger with the superseded identities
+  const poisoned={shows:THREE.map(t=>show(t[0],t[1],SUP[t[0]])),_applied:{}};
+  safari.ctx.mrgLedgerReconcile(poisoned);
+  const led0=JSON.parse(safari.store['dd_bs_seedlog_v1']).entries;
+  chk('the ledger starts poisoned',
+    THREE.every(t=>led0[safari.ctx.mrgShowKey(t[0],t[1])].id===SUP[t[0]]),true);
+
+  // adopt a document carrying the canonical ids
+  clearLog(safari);
+  const incoming={shows:THREE.map(t=>show(t[0],t[1],CAN[t[0]])),_applied:{}};
+  const res=safari.ctx.mrgLedgerReconcile(incoming);
+  chk('three ledger entries were repaired',res.repaired,3);
+  const led1=JSON.parse(safari.store['dd_bs_seedlog_v1']).entries;
+  chk('the ledger now holds the CANONICAL ids',
+    THREE.every(t=>led1[safari.ctx.mrgShowKey(t[0],t[1])].id===CAN[t[0]]),true);
+  chk('no superseded id survives anywhere in the ledger',
+    Object.keys(led1).filter(k=>/1787264112/.test(led1[k].id)).length,0);
+  chk('the present records were NOT altered',
+    incoming.shows.map(sh=>sh.id).sort(),Object.keys(CAN).map(n=>CAN[n]).sort());
+  chk('still three rows, no duplicate',incoming.shows.length,3);
+  chk('the repair is logged outside the state document',
+    safari.ctx.mrgLogRead().filter(x=>x.action==='ledger-repaired').length,3);
+  chk('and nothing was written into the state document',
+    Object.keys(incoming).filter(k=>k.indexOf('_mrg')===0).length,0);
+
+  // A stale ledger must never override an explicit id on a present record.
+  const doc2={shows:[show('Whole Bead Show — Milwaukee Pop-up','2026-10-27',CAN['Whole Bead Show — Milwaukee Pop-up'])],_applied:{}};
+  safari.ctx.mrgLedgerReconcile(doc2);
+  chk('a present record keeps its explicit id',doc2.shows[0].id,CAN['Whole Bead Show — Milwaukee Pop-up']);
+
+  // And the superseded id can no longer be restored by a later seed.
+  const gone={shows:[],_applied:{}};
+  safari.ctx.mrgPushShow(gone,show('Whole Bead Show — Milwaukee Pop-up','2026-10-27','sh_fresh'),'shows_add_20260818');
+  chk('a later restore hands back the canonical id, not the superseded one',
+    gone.shows[0].id,CAN['Whole Bead Show — Milwaukee Pop-up']);
+}
+
+R.section('=== 15. NO NEW STATE FIELD, ANYWHERE (req F) ===');
+{
+  const w=browser();
+  const d=w.ctx.loadS();
+  const BASE=['v','reps','costs','shows','prices','freight','_applied','settings','supplies',
+    'inventory','transfers','_updatedAt','productDebt','batmanBorrow','otherExpenses',
+    'cogsHistory','cogsHistoryMeta'];
+  // _updatedAt only exists once saveS() has run, so assert containment rather
+  // than equality: no key may appear that is not in the known set.
+  chk('no top-level key outside the known set',Object.keys(d).filter(k=>BASE.indexOf(k)<0),[]);
+  chk('no _mrg field on the state',Object.keys(d).filter(k=>k.indexOf('_mrg')===0),[]);
+  chk('no show carries a guard field',
+    d.shows.every(sh=>Object.keys(sh).every(k=>k.indexOf('_mrg')!==0)),true);
+  // and after an adoption cycle too
+  const ad=JSON.parse(JSON.stringify(d));
+  ad.shows=ad.shows.filter(sh=>!THREE.some(t=>key(w,sh)===w.ctx.mrgShowKey(t[0],t[1])));
+  delete ad._applied['shows_add_20260818']; delete ad._applied['pop_racine_20260818'];
+  w.ctx.mrgInheritSeedMarkers(ad,d);
+  w.store['dd_bs_v7']=JSON.stringify(ad);
+  const after=w.ctx.loadS();
+  chk('still no key outside the known set after adoption',
+    Object.keys(after).filter(k=>BASE.indexOf(k)<0),[]);
+  chk('and no field was dropped either',
+    Object.keys(d).filter(k=>Object.keys(after).indexOf(k)<0),[]);
+}
+
+R.section('=== 16. SEEDED IDS ARE UNIQUE EVEN ON A COLLISION ===');
+{
+  // buildPlannedShow truncates the name to 20 chars, so the six
+  // "Rustic Fox - Carol Stream (...)" shows share a prefix and are separated
+  // only by Date.now() plus a 0-999 random. Seeded in the same millisecond,
+  // they collide intermittently - which is exactly what Phase 2B quarantines.
+  const w=browser();
+  w.store['dd_bs_seedlog_v1']='';
+  const d={shows:[show('Existing Fair','2026-01-01','sh_auto_dup_123')],_applied:{}};
+  clearLog(w);
+  chk('a colliding id is still created',
+    w.ctx.mrgPushShow(d,show('Another Fair','2026-02-02','sh_auto_dup_123'),'m'),'created');
+  chk('two rows',d.shows.length,2);
+  chk('but the second id was made unique',d.shows[1].id,'sh_auto_dup_1231');
+  chk('no duplicate id',d.shows.map(x=>x.id).length,new Set(d.shows.map(x=>x.id)).size);
+  chk('the collision was logged',
+    w.ctx.mrgLogRead().filter(x=>x.action==='id-collision-avoided').length,1);
+
+  // three-way collision
+  chk('a third collision also resolves',
+    w.ctx.mrgPushShow(d,show('Third Fair','2026-03-03','sh_auto_dup_123'),'m'),'created');
+  chk('and gets its own id',d.shows[2].id,'sh_auto_dup_1232');
+  const ids=d.shows.map(x=>x.id);
+  chk('all three ids distinct',ids.length,new Set(ids).size);
+
+  // an id claimed in the ledger for a DIFFERENT show is also avoided
+  w.ctx.mrgLedgerReconcile(d);            // now sh_auto_dup_123 is claimed too
+  const d2={shows:[],_applied:{}};
+  chk('an id already claimed in the ledger is avoided',
+    w.ctx.mrgPushShow(d2,show('Fourth Fair','2026-04-04','sh_auto_dup_123'),'m'),'created');
+  chk('  by taking a free variant',d2.shows[0].id!=='sh_auto_dup_123',true);
+
+  // repeated clean builds must never produce a duplicate id
+  let bad=0;
+  for(let i=0;i<25;i++){
+    const b=browser(); b.store['dd_bs_v7']=''; b.store['dd_bs_seedlog_v1']='';
+    const st=b.ctx.loadS();
+    const x=st.shows.map(sh=>sh.id);
+    if(x.length!==new Set(x).size)bad++;
+  }
+  chk('25 clean builds, zero duplicate ids',bad,0);
 }
 
 R.done();

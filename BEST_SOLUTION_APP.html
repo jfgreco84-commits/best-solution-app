@@ -567,9 +567,14 @@ function loadS(){
    of the problem:
 
      Layer 1 - mrgInheritSeedMarkers(): when a cloud document replaces local
-       state, the show-seeding markers this device already satisfied are
-       carried across onto the incoming document BEFORE loadS() can run.
-       The replay is then never attempted. This is the primary fix.
+       state, a show-seeding marker this device already satisfied is carried
+       across onto the incoming document BEFORE loadS() can run, but ONLY
+       when that document already contains every record the marker's
+       migration seeds, matched by normalized name. If any is missing the
+       marker is withheld, the migration runs, and Layer 2 restores the
+       canonical id. Inheriting unconditionally would suppress the migration
+       and leave those records absent from the adopted state, which is record
+       loss rather than protection.
 
      Layer 2 - mrgPushShow(): the single funnel every migration uses to add
        a show. It refuses outright to create a row whose normalized name +
@@ -593,13 +598,46 @@ function loadS(){
 const MRG_LEDGER_KEY='dd_bs_seedlog_v1';
 
 /* Markers for the migrations that CREATE show records carrying a random
-   sh_auto_ id. Only these are inherited across a cloud adoption. Migrations
-   that merely fix or shape existing data are deliberately NOT inherited:
-   the adopted document may genuinely still need them, and re-running them
-   mints no identities, so replay there is harmless. */
-const MRG_SEED_MARKERS=['shows_20260518v2','rustic_fox_20260518','holiday_markets_v1',
-  'st_martins_20260518','hours_and_shows_v1','rf_holiday_20260518',
-  'pewaukee_beach_20260626','shows_add_20260818','pop_racine_20260818'];
+   sh_auto_ id, mapped to the NORMALIZED NAMES of the records each one seeds.
+   Migrations that merely fix or shape existing data are absent from this
+   table and are never inherited: the adopted document may genuinely still
+   need them, and re-running them mints no identities.
+
+   A marker is inherited only when the incoming document already contains a
+   record for EVERY name listed here. If any is missing, the marker is
+   withheld, its migration runs, and mrgPushShow() restores the canonical id
+   from the ledger. Inheriting unconditionally would suppress the migration
+   and leave the missing records absent from the adopted state - which is
+   record loss, not protection.
+
+   These are matched by name alone, never name + start date. Later migrations
+   legitimately MOVE seeded dates: st_martins_20260518 seeds Aug 30 2026 but
+   fix_all_startdates_v1 moves it to Sep 06, and two holiday_markets_v1 dates
+   move as well. Keying this check on name + date would report those records
+   as missing, re-run their migrations, and create duplicates at the seeded
+   dates. The name is the identity that survives a date correction.
+
+   tests/replay-guard.test.js section 12 rebuilds this table from a clean run
+   of the real migrations and fails if it drifts. */
+const MRG_SEED_RECORDS={
+  'shows_20260518v2':['milwaukee polish fest','waukesha county fair','cranberry fest',
+    'mchenry county fair','maxwell street days jun','maxwell street days jul',
+    'maxwell street days aug','maxwell street days sep','burgoo fest','baraboo christmas market'],
+  'rustic_fox_20260518':['rustic fox carol stream may','rustic fox carol stream jun',
+    'rustic fox carol stream jul','rustic fox carol stream aug','rustic fox carol stream sep',
+    'rustic fox carol stream oct','fox found north aurora may','fox found north aurora jun',
+    'fox found north aurora jul','fox found north aurora aug','fox found north aurora sep',
+    'fox found north aurora oct'],
+  'holiday_markets_v1':['sip sleigh carol stream','sip sleigh north aurora',
+    'kris kringle carol stream','kris kringle north aurora'],
+  'st_martins_20260518':['st martins fair'],
+  'hours_and_shows_v1':['washington county fair','sheboygan county fair'],
+  'rf_holiday_20260518':[],          // creates nothing; its records come from rustic_fox_20260518
+  'pewaukee_beach_20260626':['pewaukee beach party'],
+  'shows_add_20260818':['whole bead show milwaukee pop up','wonderful world of weddings'],
+  'pop_racine_20260818':['party on the pavement']
+};
+const MRG_SEED_MARKERS=Object.keys(MRG_SEED_RECORDS);
 
 /* Normalized show name. Folds the dash variants that differ between a typed
    record and a pasted one (en dash, em dash, non-breaking hyphen, minus),
@@ -615,6 +653,10 @@ function mrgShowKey(name,startDate){
   return mrgNormName(name)+'|'+String(startDate==null?'':startDate).trim();
 }
 function mrgKeyOf(sh){ return sh?mrgShowKey(sh.name,sh.startDate):''; }
+function mrgNamesIn(doc){
+  const n={}; ((doc&&doc.shows)||[]).forEach(sh=>{ const x=mrgNormName(sh&&sh.name); if(x)n[x]=1; });
+  return n;
+}
 
 /* The ledger lives OUTSIDE dd_bs_v7 on purpose: adoptCloud replaces that key
    wholesale, so anything stored inside it cannot survive an adoption. Every
@@ -648,23 +690,40 @@ function mrgLog(entry){
 }
 function mrgLogRead(){ const l=mrgLedgerRead().log; return Array.isArray(l)?l:[]; }
 
-/* Record the identity of every show currently in the document, so a device
-   that was already carrying these records before this guard shipped is
-   protected on its very first load. Never overwrites an existing entry:
-   the FIRST identity this device saw for a key is the one it defends. */
-function mrgLedgerBackfill(d){
+/* Bring the ledger into line with the document that is actually loaded.
+   Runs before any migration, so the ledger always describes the state the
+   seeds are about to see.
+
+   A record PRESENT in the document, carrying an explicit stable id, is the
+   authority for this storage. If the ledger disagrees it is repaired to the
+   present record's id - never the other way round. A stale ledger must never
+   override an explicit id on a record that is already there.
+
+   That rule is what de-poisons a secondary browser. The Safari storage holds
+   ledger entries pointing at the superseded 1787264112 ids. The moment it
+   adopts a document carrying the canonical 1787088971 ids, those entries are
+   repaired, and the superseded ids stop being restorable anywhere. */
+function mrgLedgerReconcile(d){
   const led=mrgLedgerRead();
-  let added=0;
+  const res={added:0,repaired:0,repairs:[]};
   (d&&d.shows||[]).forEach(sh=>{
     if(!sh||!sh.id||!sh.name||!sh.startDate)return;
     const k=mrgKeyOf(sh);
     if(!k||k==='|')return;
-    if(led.entries[k])return;
-    led.entries[k]={id:sh.id,createdAt:sh.createdAt||null,marker:'backfill'};
-    added++;
+    const cur=led.entries[k];
+    if(!cur){
+      led.entries[k]={id:sh.id,createdAt:sh.createdAt||null,marker:'observed'};
+      res.added++;
+    }else if(cur.id!==sh.id){
+      res.repairs.push({key:k,was:cur.id,now:sh.id});
+      led.entries[k]={id:sh.id,createdAt:sh.createdAt||cur.createdAt||null,marker:'repaired'};
+      res.repaired++;
+    }
   });
-  if(added)mrgLedgerWrite(led);
-  return added;
+  if(res.added||res.repaired)mrgLedgerWrite(led);
+  res.repairs.forEach(r=>mrgLog({at:new Date().toISOString(),action:'ledger-repaired',
+    key:r.key,was:r.was,now:r.now}));
+  return res;
 }
 
 /* The single funnel for creating a show from a migration.
@@ -682,6 +741,21 @@ function mrgPushShow(d,show,marker){
     return'duplicate-blocked';
   }
 
+  // Layer 2a-bis - a record with this NAME is present under a different start
+  // date. Later migrations move seeded dates (st_martins_20260518 seeds Aug 30
+  // and is moved to Sep 06), so a same-name row at another date is the same
+  // real event with a corrected date, not a second one. Creating here would
+  // duplicate it at the stale seeded date. Only migrations reach this funnel;
+  // the manual add path in the UI does not, so this cannot stop a person
+  // entering two shows that happen to share a name.
+  const nm=mrgNormName(show.name);
+  const byName=d.shows.find(sh=>mrgNormName(sh&&sh.name)===nm);
+  if(nm&&byName){
+    mrgLog({at:new Date().toISOString(),marker:marker||null,key:k,
+      action:'name-duplicate-blocked',keptId:byName.id,keptStartDate:byName.startDate});
+    return'duplicate-blocked';
+  }
+
   // Layer 2b - this device has held this identity before and the row is gone,
   // which is the 2026-08-20 shape: a marker-less document was adopted and the
   // seed is about to mint a SECOND id for a show that already has one.
@@ -696,9 +770,14 @@ function mrgPushShow(d,show,marker){
   const prior=led.entries[k];
   if(prior&&prior.id){
     const restoredFrom=show.id;
-    show.id=prior.id;
+    // If the recorded id is somehow already on another row, uniquify rather
+    // than create a duplicate. mrgLedgerReconcile() normally makes this
+    // impossible, so this is a backstop, not an expected path.
+    show.id=mrgUniqueId(prior.id,d,led,k);
     if(prior.createdAt)show.createdAt=prior.createdAt;
     d.shows.push(show);
+    if(show.id!==prior.id)mrgLog({at:new Date().toISOString(),action:'id-collision-avoided',
+      key:k,wanted:prior.id,assigned:show.id});
     if(restoredFrom!==prior.id){
       mrgLog({at:new Date().toISOString(),marker:marker||null,key:k,
         action:'identity-restored',keptId:prior.id,discardedId:restoredFrom});
@@ -706,10 +785,41 @@ function mrgPushShow(d,show,marker){
     return'identity-restored';
   }
 
+  // buildPlannedShow derives its id from Date.now(), a 0-999 random, and only
+  // the first 20 characters of the name. The six "Rustic Fox - Carol Stream
+  // (...)" shows all share that 20-character prefix, as do the six
+  // "Fox & Found - North Aurora (...)" ones, so when several are seeded inside
+  // the same millisecond the random suffix is the only thing separating them,
+  // and collisions do occur. A duplicate id is exactly what the Phase 2B
+  // matcher quarantines, so uniqueness is enforced here, at the single point
+  // where a migration creates a show. Existing ids are never touched.
+  const wantedId=show.id;
+  show.id=mrgUniqueId(show.id,d,led,k);
+
   d.shows.push(show);
   led.entries[k]={id:show.id,createdAt:show.createdAt||null,marker:marker||'seed'};
   mrgLedgerWrite(led);
+  // Logged AFTER the ledger write. mrgLog re-reads and re-writes the ledger, so
+  // logging first would be undone by the write above.
+  if(show.id!==wantedId)mrgLog({at:new Date().toISOString(),action:'id-collision-avoided',
+    key:k,wanted:wantedId,assigned:show.id});
   return'created';
+}
+
+/* Return an id not already used by a row in this document, nor claimed in the
+   ledger for a DIFFERENT show. Appends digits, so the id keeps its shape. */
+function mrgUniqueId(want,d,led,selfKey){
+  const taken={};
+  ((d&&d.shows)||[]).forEach(sh=>{ if(sh&&sh.id)taken[sh.id]=1; });
+  Object.keys((led&&led.entries)||{}).forEach(kk=>{
+    if(kk===selfKey)return;
+    const e=led.entries[kk];
+    if(e&&e.id)taken[e.id]=1;
+  });
+  if(!taken[want])return want;
+  let n=1, cand=want+String(n);
+  while(taken[cand]){ n++; cand=want+String(n); }
+  return cand;
 }
 
 /* Layer 1. Carry this device's satisfied show-seed markers onto an incoming
@@ -720,17 +830,42 @@ function mrgInheritSeedMarkers(incoming,current){
   if(!incoming||typeof incoming!=='object')return[];
   const from=(current&&current._applied)||{};
   incoming._applied=incoming._applied||{};
-  const took=[];
+  const have=mrgNamesIn(incoming);
+  const took=[], withheld=[];
   MRG_SEED_MARKERS.forEach(m=>{
-    if(from[m]&&!incoming._applied[m]){ incoming._applied[m]=true; took.push(m); }
+    if(!from[m]||incoming._applied[m])return;
+    const missing=(MRG_SEED_RECORDS[m]||[]).filter(n=>!have[n]);
+    if(missing.length){
+      // The incoming document does not carry this marker's records. Withhold
+      // the marker so the migration runs and the records are restored, with
+      // their canonical ids supplied by the ledger. Inheriting here is what
+      // would lose them.
+      withheld.push({marker:m,missing:missing.slice()});
+      return;
+    }
+    incoming._applied[m]=true; took.push(m);
   });
   if(took.length)mrgLog({at:new Date().toISOString(),action:'markers-inherited',markers:took.slice()});
+  withheld.forEach(x=>mrgLog({at:new Date().toISOString(),action:'marker-withheld',
+    marker:x.marker,missing:x.missing}));
   return took;
+}
+/* Exposed for tests and diagnostics: which markers would be withheld, and why. */
+function mrgWithheldMarkers(incoming,current){
+  const from=(current&&current._applied)||{};
+  const have=mrgNamesIn(incoming);
+  const out=[];
+  MRG_SEED_MARKERS.forEach(m=>{
+    if(!from[m]||((incoming&&incoming._applied)||{})[m])return;
+    const missing=(MRG_SEED_RECORDS[m]||[]).filter(n=>!have[n]);
+    if(missing.length)out.push({marker:m,missing:missing});
+  });
+  return out;
 }
 
 function applyOneTimeUpdates(d){
   d._applied=d._applied||{};
-  mrgLedgerBackfill(d);
+  mrgLedgerReconcile(d);
 
   // ===== Jul 2026 audit: REAL street prices + card-only sales tax (Froggy confirmed 7/26) =====
   if(!d._applied['real_prices_v1']){
@@ -1551,6 +1686,20 @@ function applyOneTimeUpdates(d){
     }
     d._applied['cogs_history_v1']=true;
   }
+
+  // Final normalisation pass. The "Ensure new fields on all shows" block above
+  // runs before the seeding migrations, so a show created by a seed during THIS
+  // load would otherwise not gain workers/repPayMeta until the NEXT load. That
+  // one-load gap is why a record restored by mrgPushShow() did not come back
+  // byte-identical to the copy this device already had. Repeating the pass here
+  // closes the gap. Every assignment is guarded, so this is idempotent and
+  // touches nothing that already has a value.
+  (d.shows||[]).forEach(sh=>{
+    if(!sh.boothPayments)sh.boothPayments=[];
+    if(sh.confirmed===undefined)sh.confirmed=sh.status==='completed';
+    if(!sh.workers)sh.workers=[];
+    if(!sh.repPayMeta)sh.repPayMeta={};
+  });
 }
 
 function buildPlannedShow(e){
