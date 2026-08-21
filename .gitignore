@@ -9,3 +9,6 @@ realdata/
 fixtures/
 phase2a_realdata_check.js
 *.local.json
+
+# The real-data replay-guard harness runs against your own export. Local only.
+realcheck.js
