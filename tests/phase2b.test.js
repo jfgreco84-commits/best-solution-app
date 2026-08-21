@@ -119,7 +119,7 @@ R.section('=== FIXTURE SANITY ===');
   chk('fixture: 71 cloud day records', w.cloud.shows.reduce((t,s)=>t+s.days.length,0), 71);
   chk('fixture: 12 reps on both sides', [w.local.reps.length,w.cloud.reps.length], [12,12]);
   chk('the app carries the real verified preconditions', w.ctx.P2B_PRECOND,
-      {deviceFp:'50dfbbf5/86918',cloudFp:'67c10862/80102',device:{shows:35,days:75},cloud:{shows:32,days:71}});
+      {deviceFp:'630f8db0/86919',cloudFp:'67c10862/80102',device:{shows:35,days:75},cloud:{shows:32,days:71}});
 }
 
 R.section('=== 1. THE EXPECTED EIGHT-ADDITION SCENARIO ===');
@@ -203,9 +203,9 @@ R.section('=== 3. THE EXACT AUTHORIZATION MANIFEST ===');
   const w=world();
   const M=w.ctx.P2B_MANIFEST;
   chk('manifest names three shows by stable id', M.shows.map(x=>x.id), [
-    'sh_auto_wholebeadshowmilwauk_178726411239739',
-    'sh_auto_wonderfulworldofwedd_1787264112397189',
-    'sh_auto_partyonthepavement_1787264112399590']);
+    'sh_auto_wholebeadshowmilwauk_1787088971124554',
+    'sh_auto_wonderfulworldofwedd_1787088971124589',
+    'sh_auto_partyonthepavement_1787088971125819']);
   chk('manifest names three markers', M.markers,
       ['shows_add_20260818','pop_racine_20260818','cogs_history_v1']);
   chk('manifest names two fields', M.fields, ['cogsHistory','cogsHistoryMeta']);
@@ -306,7 +306,7 @@ R.section('=== 3b. THE EXACT STORED NAME, EM DASH AND ALL ===');
   const r=await w.stage();
   chk('the verified spelling stages cleanly', r.ok, true);
   chk('and the authorized record carries it',
-      r.op.auth.shows.find(x=>x.id==='sh_auto_wholebeadshowmilwauk_178726411239739').record.name,
+      r.op.auth.shows.find(x=>x.id==='sh_auto_wholebeadshowmilwauk_1787088971124554').record.name,
       'Whole Bead Show \u2014 Milwaukee Pop-up');
 }
 // every near-miss spelling is REJECTED

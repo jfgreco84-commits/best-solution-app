@@ -6407,9 +6407,9 @@ const P2B_MANIFEST={
   shows:[
     // The stored record uses an EM DASH, not a comma. Written as an escape so the
     // runtime value cannot drift through copy-paste or editor normalisation.
-    {id:'sh_auto_wholebeadshowmilwauk_178726411239739', name:'Whole Bead Show \u2014 Milwaukee Pop-up', startDate:'2026-10-27'},
-    {id:'sh_auto_wonderfulworldofwedd_1787264112397189', name:'Wonderful World of Weddings', startDate:'2027-01-30'},
-    {id:'sh_auto_partyonthepavement_1787264112399590', name:'Party on the Pavement', startDate:'2026-09-19'}
+    {id:'sh_auto_wholebeadshowmilwauk_1787088971124554', name:'Whole Bead Show \u2014 Milwaukee Pop-up', startDate:'2026-10-27'},
+    {id:'sh_auto_wonderfulworldofwedd_1787088971124589', name:'Wonderful World of Weddings', startDate:'2027-01-30'},
+    {id:'sh_auto_partyonthepavement_1787088971125819', name:'Party on the Pavement', startDate:'2026-09-19'}
   ],
   markers:['shows_add_20260818','pop_racine_20260818','cogs_history_v1'],
   fields:['cogsHistory','cogsHistoryMeta']
@@ -6418,8 +6418,15 @@ const P2B_EXPECTED_ADDITIONS=P2B_MANIFEST.shows.length+P2B_MANIFEST.markers.leng
 const P2B_PHRASE='ADD 8 ITEMS TO CLOUD';
 const P2B_EXPECT_SHOWS=35, P2B_EXPECT_DAYS=75;
 // Independently verified starting state. These are preconditions, not guesses.
+// Re-pinned 2026-08-21 to the canonical Home Screen copy, after the 2026-08-20
+// migration replay produced a second set of ids in a separate Safari storage.
+// Every value below was extracted from the owner's own export
+// (SHA-256 643d20c4...0c96e508), not typed from a message. The three ids are
+// the ORIGINAL ones, minted 2026-08-18T21:36:11Z; the superseded set was
+// minted 2026-08-20T22:15:12Z. The proposal is unchanged in shape: still
+// 8 additions, 0 changes, 0 deletions, 0 blocked, 0 needing review.
 const P2B_PRECOND={
-  deviceFp:'50dfbbf5/86918', cloudFp:'67c10862/80102',
+  deviceFp:'630f8db0/86919', cloudFp:'67c10862/80102',
   device:{shows:35,days:75}, cloud:{shows:32,days:71}
 };
 let _p2b=null;          // the staged operation. Null means nothing is staged.
