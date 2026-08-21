@@ -57,26 +57,30 @@ function world(opts){
   const {local,cloud}=build(ctx);
   if(opts.mutate)opts.mutate(local,cloud,ctx);
   const box={cloud:JSON.parse(JSON.stringify(cloud)),token:'2026-08-19T09:00:00.000000+00:00',
-    writes:[],updateAttempts:[],readCount:0,
+    writes:[],updateAttempts:[],readFilters:[],selectCols:null,readCount:0,
     failWrite:opts.failWrite||false,corruptAfterWrite:opts.corruptAfterWrite||null,
     afterRead:opts.afterRead||null,dropToken:opts.dropToken||false,reorderKeysOnRead:opts.reorderKeysOnRead||false};
   store['dd_bs_v7']=JSON.stringify(local);
   ctx.__mem=JSON.parse(JSON.stringify(local)); run('S=__mem;');
   ctx.__box=box; ctx.__el=el;
   run(`sb={from:function(){return{
-    select:function(){return{eq:function(){return{maybeSingle:async function(){
+    select:function(cols){ __box.selectCols=cols; var f={};
+      var q={eq:function(col,val){ f[col]=val; return q; },
+        maybeSingle:async function(){
+          __box.readFilters.push(JSON.parse(JSON.stringify(f)));
       __box.readCount++;
       var doc=JSON.parse(JSON.stringify(__box.cloud));
       var tok=(__box.dropToken?null:__box.token);
       if(__box.afterRead&&__box.readCount===__box.afterRead.onRead){
-        var f=__box.afterRead.apply;
-        Promise.resolve().then(function(){ f(__box); });   // lands after this read returns
+        var landLater=__box.afterRead.apply;
+        Promise.resolve().then(function(){ landLater(__box); });  // lands after this read returns
       }
       if(__box.reorderKeysOnRead&&__box.writes.length>0){
         var out={}; Object.keys(doc).sort().reverse().forEach(function(k){out[k]=doc[k];}); doc=out;
       }
       return {data:{data_value:doc,updated_at:tok},error:null};
-    }}}}},
+        }};
+      return q; },
     update:function(patch){
       var f={};
       var api={eq:function(col,val){f[col]=val;return api;},
@@ -278,6 +282,79 @@ R.section('=== 3. THE EXACT AUTHORIZATION MANIFEST ===');
   const errs=w.ctx.p2bManifestCheck(auth,w.local);
   chk('an altered record is caught', errs.some(e=>/does not match the staged device record/.test(e)), true);
   chk('and the two missing shows are caught', errs.filter(e=>/missing from the proposal/.test(e)).length, 2);
+}
+
+R.section('=== 3b. THE EXACT STORED NAME, EM DASH AND ALL ===');
+{
+  const w=world();
+  const m=w.ctx.P2B_MANIFEST.shows[0];
+  // The stored record uses U+2014 EM DASH. A comma, a hyphen or an en dash are
+  // all different records as far as this check is concerned.
+  chk('the manifest carries the em-dash spelling', m.name, 'Whole Bead Show \u2014 Milwaukee Pop-up');
+  chk('and it really is U+2014', m.name.charCodeAt(16), 0x2014);
+  chk('not a comma', m.name.indexOf(',')>=0, false);
+  chk('not a plain hyphen', m.name.indexOf(' - ')>=0, false);
+  chk('not an en dash', m.name.indexOf('\u2013')>=0, false);
+  // the app's own migration, which created the record, must agree
+  const src=require('fs').readFileSync(require('./harness.js').APP,'utf8');
+  chk('the migration that created the show uses the same spelling',
+      src.indexOf("name:'Whole Bead Show \u2014 Milwaukee Pop-up'")>=0, true);
+}
+// the exact stored spelling is ACCEPTED
+{
+  const w=world();
+  const r=await w.stage();
+  chk('the verified spelling stages cleanly', r.ok, true);
+  chk('and the authorized record carries it',
+      r.op.auth.shows.find(x=>x.id==='sh_auto_wholebeadshowmilwauk_178726411239739').record.name,
+      'Whole Bead Show \u2014 Milwaukee Pop-up');
+}
+// every near-miss spelling is REJECTED
+{
+  const NEAR=[['a comma','Whole Bead Show, Milwaukee Pop-up'],
+              ['a hyphen','Whole Bead Show - Milwaukee Pop-up'],
+              ['an en dash','Whole Bead Show \u2013 Milwaukee Pop-up'],
+              ['no separator','Whole Bead Show Milwaukee Pop-up'],
+              ['different case','whole bead show \u2014 milwaukee pop-up'],
+              ['trailing space','Whole Bead Show \u2014 Milwaukee Pop-up ']];
+  for(const [label,name] of NEAR){
+    const w=world({mutate:l=>{ l.shows[32].name=name; }});
+    const r=await w.stage();
+    chk('rejected, '+label, r.ok, false);
+    chk('  and it names the mismatch, '+label, r.errors.some(e=>/is named/.test(e)), true);
+    chk('  ZERO writes, '+label, w.box.writes.length, 0);
+  }
+}
+
+R.section('=== 3c. THE CLOUD READ FILTERS ON USER AND KEY ===');
+{
+  const w=world();
+  await w.stage();
+  chk('at least one read happened', w.box.readFilters.length>0, true);
+  const f=w.box.readFilters[0];
+  chk('filters on the authenticated user_id', f.user_id, 'u1');
+  chk('filters on data_key', f.data_key, 'bs_state');
+  chk('exactly those two filters, nothing looser', Object.keys(f).sort(), ['data_key','user_id']);
+  chk('every read is filtered the same way',
+      w.box.readFilters.every(x=>x.user_id==='u1'&&x.data_key==='bs_state'), true);
+  chk('it selects the version token as well as the document', w.box.selectCols, 'data_value,updated_at');
+}
+{
+  // the filters must still be present on the FINAL fresh read, not just the first
+  const w=world(); await w.ready();
+  const before=w.box.readFilters.length;
+  await w.ctx.p2bApply(PHRASE);
+  chk('the apply path re-read the cloud', w.box.readFilters.length>before, true);
+  chk('and every one of those reads was scoped to the user',
+      w.box.readFilters.every(x=>x.user_id==='u1'&&x.data_key==='bs_state'), true);
+}
+{
+  // signed out means no read is attempted at all
+  const w=world();
+  w.run('_cloudUser=null;');
+  const r=await w.ctx.bxCloudRead();
+  chk('signed out is reported, not queried', r.status, 'signed_out');
+  chk('and no read was issued', w.box.readFilters.length, 0);
 }
 
 R.section('=== 4. PRECONDITIONS ===');

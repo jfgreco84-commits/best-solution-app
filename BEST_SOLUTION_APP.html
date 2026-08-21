@@ -5059,7 +5059,10 @@ async function bxCloudRead(){
     return R('signed_out',null,'not signed in to cloud sync');
   let res;
   try{
-    res=await sb.from('app_data').select('data_value,updated_at').eq('data_key','bs_state').maybeSingle();
+    // Filter on the authenticated user as well as the key. Row-level security
+    // should already isolate this, but the query should not depend on it alone.
+    res=await sb.from('app_data').select('data_value,updated_at')
+      .eq('user_id',_cloudUser.id).eq('data_key','bs_state').maybeSingle();
   }catch(e){
     return R('error',null,'cloud read failed: '+String((e&&e.message)||e));
   }
@@ -6392,7 +6395,8 @@ function bxShowModal(){
 // per (user_id, data_key), data_key = 'bs_state', data_value = the ENTIRE app
 // state as a single JSON document. There is no per-record cloud API, so the
 // narrowest possible update is: read the current cloud document, deep-copy it,
-// splice in only the authorized items, and upsert that document back. Every
+// splice in only the authorized items, and save that document back with a single
+// CONDITIONAL UPDATE pinned to the row version we just read — never an upsert. Every
 // unknown cloud field and every cloud-only record survives by construction,
 // because we start from the cloud document and never from the local one.
 
@@ -6401,7 +6405,9 @@ function bxShowModal(){
 // substituted, missing, duplicated or altered aborts.
 const P2B_MANIFEST={
   shows:[
-    {id:'sh_auto_wholebeadshowmilwauk_178726411239739', name:'Whole Bead Show, Milwaukee Pop-up', startDate:'2026-10-27'},
+    // The stored record uses an EM DASH, not a comma. Written as an escape so the
+    // runtime value cannot drift through copy-paste or editor normalisation.
+    {id:'sh_auto_wholebeadshowmilwauk_178726411239739', name:'Whole Bead Show \u2014 Milwaukee Pop-up', startDate:'2026-10-27'},
     {id:'sh_auto_wonderfulworldofwedd_1787264112397189', name:'Wonderful World of Weddings', startDate:'2027-01-30'},
     {id:'sh_auto_partyonthepavement_1787264112399590', name:'Party on the Pavement', startDate:'2026-09-19'}
   ],
