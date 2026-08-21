@@ -299,8 +299,30 @@ const COGS_SCHEDULE_DEFAULT=[
 ];
 function cogsSchedule(st){ const a=((st||(typeof S!=='undefined'?S:null))||{}).cogsHistory;
   return (a&&a.length)?a:null; }
-function cogsIsoKey(v){ return (typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v))?v:null; }
-function cogsDayBefore(k){ const d=new Date(k+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); }
+// A STRICT calendar date, not just a string that looks like one. The pattern test
+// alone accepted 2026-02-31, 2026-13-01 and 2026-04-31. Every cost-schedule date
+// goes through here, and an impossible date is REJECTED, never normalised into a
+// nearby valid one (Date would silently turn 2026-02-31 into March 3).
+function cogsIsoKey(v){
+  if(typeof v!=='string')return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if(!m)return null;
+  const y=+m[1], mo=+m[2], d=+m[3];
+  if(mo<1||mo>12||d<1||d>31)return null;
+  const dt=new Date(Date.UTC(y,mo-1,d));
+  // The round trip is what catches Feb 30, Apr 31 and a bad leap day: Date rolls
+  // them forward, so the parts come back different from what went in.
+  if(dt.getUTCFullYear()!==y||dt.getUTCMonth()!==mo-1||dt.getUTCDate()!==d)return null;
+  return v;
+}
+// Null in, null out. Callers must not receive a fabricated date for a bad input.
+function cogsDayBefore(k){
+  const key=cogsIsoKey(k); if(!key)return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+  d.setUTCDate(d.getUTCDate()-1);
+  return d.toISOString().slice(0,10);
+}
 
 // ---- SCHEDULE VALIDATION ----
 // A schedule is only authoritative if it is provably unambiguous. Anything less
@@ -328,7 +350,8 @@ function cogsValidate(sch){
       if(pt===null)errors.push(tag+': follows an open-ended entry, so the periods overlap');
       else if(pt&&f){
         if(f<=pt)errors.push(tag+': overlaps the previous period, which ends '+pt);
-        else if(cogsDayBefore(f)!==pt)warnings.push(tag+': gap between '+pt+' and '+f+', dates in that gap have no schedule');
+        else{ const db=cogsDayBefore(f);
+          if(db&&db!==pt)warnings.push(tag+': gap between '+pt+' and '+f+', dates in that gap have no schedule'); }
       }
     }
     prev=e;
@@ -342,11 +365,15 @@ function cogsValidate(sch){
 function cogsIsValid(st){ return cogsValidate(cogsSchedule(st)).valid; }
 
 // The entry covering a date, honouring BOTH effectiveFrom and effectiveTo.
-// Null when the schedule is invalid or the date is not covered.
+// Null when the schedule is invalid, the date is unusable, or the date is not covered.
+// An absent date means "current". A date that is PRESENT but not a real calendar
+// date is bad data, and must never be quietly promoted to "current".
 function cogsEntryOn(dateKey,st){
   const sch=cogsSchedule(st); if(!sch)return null;
   if(!cogsValidate(sch).valid)return null;
-  const k=cogsIsoKey(dateKey);
+  const undated=(dateKey==null||dateKey==='');
+  const k=undated?null:cogsIsoKey(dateKey);
+  if(!undated&&!k)return null;
   if(!k){ const open=sch.filter(e=>e.effectiveTo==null||e.effectiveTo===''); return open.length===1?open[0]:sch[sch.length-1]; }
   let hit=null;
   sch.forEach(e=>{ const f=cogsIsoKey(e.effectiveFrom);
@@ -378,6 +405,8 @@ function costSourceOn(k,dateKey,sh,st){
   if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!=='')return 'per-show override';
   const sch=cogsSchedule(state);
   if(sch&&!cogsValidate(sch).valid)return 'FALLBACK: schedule invalid';
+  if(sch&&dateKey!=null&&dateKey!==''&&!cogsIsoKey(dateKey))
+    return 'FALLBACK: '+JSON.stringify(dateKey)+' is not a real calendar date';
   const e=cogsEntryOn(dateKey,state);
   if(e&&e.costs&&e.costs[k]!=null)return 'schedule: '+(e.id||'entry');
   if(sch)return 'FALLBACK: date not covered by any schedule period';
@@ -1319,10 +1348,15 @@ function applyOneTimeUpdates(d){
   }
 
   // ===== Phase 2A — seed the effective-date COGS schedule =====
-  // ADDITIVE ONLY. Writes exactly one new field, d.cogsHistory, and nothing else.
-  // Does not touch costs, prices, settings, inventory, shows, payments, expenses
-  // or notes. Idempotent: skipped once applied, and skipped if a schedule already
-  // exists, so a hand-edited schedule is never overwritten.
+  // ADDITIVE ONLY. Writes exactly THREE things and nothing else:
+  //   1. d.cogsHistory              — the dated cost schedule
+  //   2. d.cogsHistoryMeta          — who seeded it, when, under which app version
+  //   3. d._applied.cogs_history_v1 — the guard marker that stops it running twice
+  // The first two are written only when no schedule exists yet; the marker is
+  // always written. Does not touch costs, prices, settings, inventory, shows,
+  // payments, expenses or notes, and never creates d.cogsAudit. Idempotent:
+  // skipped once applied, and skipped if a schedule already exists, so a
+  // hand-edited schedule is never overwritten.
   if(!d._applied['cogs_history_v1']){
     if(!d.cogsHistory||!d.cogsHistory.length){
       d.cogsHistory=JSON.parse(JSON.stringify(COGS_SCHEDULE_DEFAULT));
@@ -5692,23 +5726,49 @@ function bxDiffShow(a,b){ const out=[]; bxDeepDiff(a,b,'',out); return out; }
 // it resolves to exactly one candidate. Anything else is ambiguous and is held
 // for human review; it never silently authorises a future merge.
 function bxMatchShows(L,C){
-  const res={pairs:[],onlyLocal:[],onlyCloud:[],ambiguous:[]};
+  const res={pairs:[],onlyLocal:[],onlyCloud:[],ambiguous:[],blocked:[]};
   const lShows=(L.shows||[]).slice(), cShows=(C.shows||[]).slice();
-  const cById={}, cDup={};
-  cShows.forEach(sh=>{ if(!sh.id)return; if(cById[sh.id]){cDup[sh.id]=1;} cById[sh.id]=sh; });
-  const lById={}, lDup={};
-  lShows.forEach(sh=>{ if(!sh.id)return; if(lById[sh.id]){lDup[sh.id]=1;} lById[sh.id]=sh; });
-  Object.keys(cDup).forEach(id=>res.ambiguous.push({reason:'duplicate id in cloud',id:id,
-    label:bxShowLabel(cById[id]),needsHumanReview:true}));
-  Object.keys(lDup).forEach(id=>res.ambiguous.push({reason:'duplicate id in localStorage',id:id,
-    label:bxShowLabel(lById[id]),needsHumanReview:true}));
+
+  // Count every id on each side first. An id that appears twice ANYWHERE stops
+  // being an identity: it cannot tell two records apart, so it is quarantined.
+  const lCount={}, cCount={};
+  lShows.forEach(sh=>{ if(sh.id)lCount[sh.id]=(lCount[sh.id]||0)+1; });
+  cShows.forEach(sh=>{ if(sh.id)cCount[sh.id]=(cCount[sh.id]||0)+1; });
+  const poisoned={};
+  Object.keys(lCount).forEach(id=>{ if(lCount[id]>1)poisoned[id]=1; });
+  Object.keys(cCount).forEach(id=>{ if(cCount[id]>1)poisoned[id]=1; });
+
+  // Every record carrying a duplicated id — on BOTH sides, including the side
+  // where the id appears only once — is blocked. It never reaches pairs,
+  // identical, conflicts, onlyLocal, onlyCloud, or any proposal bucket.
+  Object.keys(poisoned).sort().forEach(id=>{
+    const lHits=lShows.filter(sh=>sh.id===id), cHits=cShows.filter(sh=>sh.id===id);
+    const where=(lCount[id]||0)>1&&(cCount[id]||0)>1?'localStorage and cloud'
+              :((lCount[id]||0)>1?'localStorage':'cloud');
+    res.ambiguous.push({reason:'duplicate id in '+where+': '+(lCount[id]||0)+' local record'+
+        ((lCount[id]||0)===1?'':'s')+' and '+(cCount[id]||0)+' cloud record'+((cCount[id]||0)===1?'':'s')+
+        ' share this id, so it cannot identify a record',
+      id:id, localCount:(lCount[id]||0), cloudCount:(cCount[id]||0),
+      label:bxShowLabel(lHits[0]||cHits[0]),
+      localRecords:lHits.map(sh=>({label:bxShowLabel(sh),startDate:sh.startDate||null})),
+      cloudRecords:cHits.map(sh=>({label:bxShowLabel(sh),startDate:sh.startDate||null})),
+      needsHumanReview:true});
+    lHits.forEach(sh=>res.blocked.push({side:'localStorage',id:id,label:bxShowLabel(sh)}));
+    cHits.forEach(sh=>res.blocked.push({side:'cloud',id:id,label:bxShowLabel(sh)}));
+  });
+
+  // From here on, poisoned records simply do not exist.
+  const lOk=lShows.filter(sh=>!(sh.id&&poisoned[sh.id]));
+  const cOk=cShows.filter(sh=>!(sh.id&&poisoned[sh.id]));
+
+  const cById={}; cOk.forEach(sh=>{ if(sh.id)cById[sh.id]=sh; });
   const usedCloud={};
-  lShows.forEach(a=>{
+  lOk.forEach(a=>{
     if(a.id&&cById[a.id]){ usedCloud[a.id]=1;
       res.pairs.push({local:a,cloud:cById[a.id],matchedBy:'id',id:a.id,trusted:true}); }
   });
-  const unmatchedLocal=lShows.filter(a=>!(a.id&&cById[a.id]));
-  const unmatchedCloud=cShows.filter(b=>!(b.id&&usedCloud[b.id]));
+  const unmatchedLocal=lOk.filter(a=>!(a.id&&cById[a.id]));
+  const unmatchedCloud=cOk.filter(b=>!(b.id&&usedCloud[b.id]));
   // Claimed cloud records are tracked in a Set here, never by tagging the record
   // itself: matching is a read of the caller's data and must not write to it.
   const taken=new Set();
@@ -5726,11 +5786,15 @@ function bxMatchShows(L,C){
       res.ambiguous.push({reason:'fallback match is ambiguous, '+cands.length+' cloud records share this name and date',
         label:bxShowLabel(a),localId:a.id||null,
         candidates:cands.map(c=>({id:c.id||null,label:bxShowLabel(c)})),needsHumanReview:true});
+      res.blocked.push({side:'localStorage',id:a.id||null,label:bxShowLabel(a)});
+      cands.forEach(c=>res.blocked.push({side:'cloud',id:c.id||null,label:bxShowLabel(c)}));
     }else{
       res.onlyLocal.push(a);
     }
   });
-  unmatchedCloud.forEach(b=>{ if(!taken.has(b)&&!res.ambiguous.some(x=>(x.candidates||[]).some(c=>c.id===b.id)))res.onlyCloud.push(b); });
+  const ambigCloud=new Set();
+  res.ambiguous.forEach(x=>(x.candidates||[]).forEach(c=>ambigCloud.add(c.id)));
+  unmatchedCloud.forEach(b=>{ if(!taken.has(b)&&!ambigCloud.has(b.id||null))res.onlyCloud.push(b); });
   return res;
 }
 
@@ -5768,8 +5832,12 @@ function bxReconcile(snap){
   const M=bxMatchShows(L,C);
   out.matchSummary={byId:M.pairs.filter(p=>p.matchedBy==='id').length,
                     byFallback:M.pairs.filter(p=>p.matchedBy!=='id').length,
-                    ambiguous:M.ambiguous.length};
+                    ambiguous:M.ambiguous.length,
+                    blockedRecords:M.blocked.length,
+                    blockedLocal:M.blocked.filter(b=>b.side==='localStorage').length,
+                    blockedCloud:M.blocked.filter(b=>b.side==='cloud').length};
   out.ambiguous=M.ambiguous;
+  out.blocked=M.blocked;
   out.fallbackMatches=[];
 
   M.onlyLocal.forEach(a=>out.onlyInLocal.push({key:bxShowKey(a),label:bxShowLabel(a),id:a.id||null,
@@ -5824,6 +5892,9 @@ function bxReconcile(snap){
     x.diffs.slice(0,8).map(d=>d.field).join(', ')+(x.diffs.length>8?', +'+(x.diffs.length-8)+' more':'')+')'));
   out.ambiguous.forEach(x=>out.proposal.blocked.push(
     'BLOCKED, human review required: '+(x.label||x.id||'(record)')+'  — '+x.reason));
+  M.blocked.forEach(b=>out.proposal.blocked.push(
+    'BLOCKED, excluded from every action: '+b.side+' record '+b.label+
+    ' (id '+(b.id||'none')+') is quarantined and cannot be added, changed or preserved'));
   out.fallbackMatches.forEach(x=>out.proposal.needsReview.push(
     'FALLBACK MATCH, not id-verified: '+x.label+'  (local id '+(x.localId||'none')+', cloud id '+(x.cloudId||'none')+')'));
   out.identical.forEach(x=>out.proposal.wouldPreserve.push('PRESERVE unchanged: '+x.label));
@@ -5873,12 +5944,23 @@ function bxReconReport(rec,meta){
   line('  Matched by stable id        : '+(ms.byId||0));
   line('  Matched by FALLBACK         : '+(ms.byFallback||0)+'   (normalised name + start date)');
   line('  Ambiguous, held for review  : '+(ms.ambiguous||0));
+  line('  Records QUARANTINED         : '+(ms.blockedRecords||0)+
+       '   ('+(ms.blockedLocal||0)+' on this device, '+(ms.blockedCloud||0)+' in the cloud)');
+  if((rec.blocked||[]).length){ line('');
+    line('  QUARANTINED RECORDS. A duplicated id cannot identify a record, so every copy');
+    line('  carrying it is excluded from matching and from every proposal. Nothing here can');
+    line('  be added, changed or preserved until a person resolves the duplicate:');
+    rec.blocked.forEach(b=>line('      '+b.side.padEnd(13)+' id '+(b.id||'none')+'   '+b.label)); }
   if((rec.fallbackMatches||[]).length){ line('');
     line('  FALLBACK MATCHES, not id-verified. Review before any future merge:');
     rec.fallbackMatches.forEach(x=>line('      '+x.label+'   local id '+(x.localId||'none')+', cloud id '+(x.cloudId||'none'))); }
   if((rec.ambiguous||[]).length){ line('');
     line('  AMBIGUOUS, HUMAN REVIEW REQUIRED. These are never auto-matched:');
     rec.ambiguous.forEach(x=>{ line('      '+(x.label||x.id||'(record)')+'   '+x.reason);
+      if(x.localCount!=null)line('          carried by '+x.localCount+' record'+(x.localCount===1?'':'s')+
+        ' on this device and '+x.cloudCount+' record'+(x.cloudCount===1?'':'s')+' in the cloud');
+      (x.localRecords||[]).forEach(r=>line('          device: '+r.label));
+      (x.cloudRecords||[]).forEach(r=>line('          cloud : '+r.label));
       (x.candidates||[]).forEach(c=>line('          candidate: '+c.label+'  id '+(c.id||'none'))); }); }
   line('');
   rule(); line('FIELD-LEVEL CONFLICTS  ('+rec.conflicts.length+' shows)'); rule();
@@ -5993,8 +6075,8 @@ function csOpen(){
 
 // Step 2 — show the complete proposed change. Still nothing saved.
 function csReview(){
-  const dk=(($$('cs_date')||{}).value)||'';
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(dk)){toast('Pick a valid effective date');return;}
+  const dk=cogsIsoKey((($$('cs_date')||{}).value)||'');
+  if(!dk){toast('That is not a real calendar date. Nothing has been changed.');return;}
   const cur=csCurrentEntry();
   if(cur){
     const f=cur.effectiveFrom||'';
@@ -6008,7 +6090,9 @@ function csReview(){
     if(n<0){bad=bad||sk.name+' is negative';return;}
     costs[sk.key]=Math.round(n*100)/100; });
   if(bad){toast('All six costs are required: '+bad);return;}
-  _csDraft={effectiveFrom:dk,costs:costs,closesPrevOn:cur?cogsDayBefore(dk):null,prevId:cur?cur.id:null};
+  const closes=cur?cogsDayBefore(dk):null;
+  if(cur&&!closes){toast('Could not work out the day before '+dk+'. Nothing has been changed.');return;}
+  _csDraft={effectiveFrom:dk,costs:costs,closesPrevOn:closes,prevId:cur?cur.id:null};
   const changed=SKUS.filter(sk=>{ const now=cur&&cur.costs?bxNum(cur.costs[sk.key]):getCost(sk.key);
     return Math.abs(now-costs[sk.key])>0.0001; });
   const rows=SKUS.map(sk=>{
