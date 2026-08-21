@@ -543,8 +543,194 @@ function loadS(){
   return fresh;
 }
 
+/* ======================================================================
+   MIGRATION REPLAY GUARD (mrg*)
+   ----------------------------------------------------------------------
+   Why this exists. A one-time migration is gated only by d._applied[marker].
+   adoptCloud() writes the cloud document straight over dd_bs_v7 and then
+   calls loadS(), so applyOneTimeUpdates() runs against the ADOPTED document.
+   If the cloud copy never received a marker, the migration re-runs and
+   re-creates its records with brand-new sh_auto_<name>_<epoch><rand> ids.
+   That happened on 2026-08-20: a browser storage that had never been used
+   adopted a 32-show cloud copy carrying none of the Aug 18 markers, and
+   minted a SECOND set of ids for three shows that already existed under
+   different ids on the canonical device.
+
+   A name check is NOT sufficient protection on its own, and the incident
+   proves it: both Aug 18 migrations already carried name guards
+   (has('whole bead'), /party on the pavement/i). They passed cleanly,
+   because the adopted document did not contain those shows at all. An
+   existence check can only stop a SECOND row appearing beside a FIRST one;
+   it cannot stop re-creation after the first one has been removed.
+
+   So there are two independent layers here, and they cover different halves
+   of the problem:
+
+     Layer 1 - mrgInheritSeedMarkers(): when a cloud document replaces local
+       state, the show-seeding markers this device already satisfied are
+       carried across onto the incoming document BEFORE loadS() can run.
+       The replay is then never attempted. This is the primary fix.
+
+     Layer 2 - mrgPushShow(): the single funnel every migration uses to add
+       a show. It refuses outright to create a row whose normalized name +
+       startDate already exists, so a second row for one real-world show is
+       impossible by construction. And when a seed tries to create a show
+       this device has held before under a different id, it REUSES the
+       recorded id instead of minting a new one, using a ledger kept in its
+       own localStorage key so it survives wholesale replacement of
+       dd_bs_v7. This is the backstop for any path that replaces state
+       without going through Layer 1.
+
+   Neither layer ever rewrites, renumbers or deletes an existing record. The
+   only value either one ever assigns is the id of a row being created in
+   this call, and only back to an id this device already used for that same
+   show. Every refusal and every restoration is recorded in the ledger file,
+   readable with mrgLogRead(), so it is visible instead of silent. Nothing is
+   written into the state document itself: this guard adds no field to the
+   saved state and so changes neither the state fingerprint nor the size of
+   the Phase 2B proposal.
+   ====================================================================== */
+const MRG_LEDGER_KEY='dd_bs_seedlog_v1';
+
+/* Markers for the migrations that CREATE show records carrying a random
+   sh_auto_ id. Only these are inherited across a cloud adoption. Migrations
+   that merely fix or shape existing data are deliberately NOT inherited:
+   the adopted document may genuinely still need them, and re-running them
+   mints no identities, so replay there is harmless. */
+const MRG_SEED_MARKERS=['shows_20260518v2','rustic_fox_20260518','holiday_markets_v1',
+  'st_martins_20260518','hours_and_shows_v1','rf_holiday_20260518',
+  'pewaukee_beach_20260626','shows_add_20260818','pop_racine_20260818'];
+
+/* Normalized show name. Folds the dash variants that differ between a typed
+   record and a pasted one (en dash, em dash, non-breaking hyphen, minus),
+   drops punctuation, collapses whitespace, lowercases. */
+function mrgNormName(name){
+  let s=String(name==null?'':name);
+  try{ s=s.normalize('NFC'); }catch(e){}
+  s=s.replace(/[‐‑‒–—―−]/g,'-');
+  s=s.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+  return s;
+}
+function mrgShowKey(name,startDate){
+  return mrgNormName(name)+'|'+String(startDate==null?'':startDate).trim();
+}
+function mrgKeyOf(sh){ return sh?mrgShowKey(sh.name,sh.startDate):''; }
+
+/* The ledger lives OUTSIDE dd_bs_v7 on purpose: adoptCloud replaces that key
+   wholesale, so anything stored inside it cannot survive an adoption. Every
+   access is guarded - Safari private mode and a full quota both throw. */
+function mrgLedgerRead(){
+  try{
+    const raw=localStorage.getItem(MRG_LEDGER_KEY);
+    if(!raw)return{v:1,entries:{},log:[]};
+    const o=JSON.parse(raw);
+    if(!o||typeof o!=='object'||!o.entries)return{v:1,entries:{},log:[]};
+    return{v:1,entries:o.entries,log:Array.isArray(o.log)?o.log:[]};
+  }catch(e){ return{v:1,entries:{},log:[]}; }
+}
+function mrgLedgerWrite(led){
+  try{ localStorage.setItem(MRG_LEDGER_KEY,
+        JSON.stringify({v:1,entries:led.entries,log:Array.isArray(led.log)?led.log:[]})); return true; }
+  catch(e){ console.warn('mrgLedgerWrite',e); return false; }
+}
+/* The log lives in the ledger file, NOT in the state document. Nothing this
+   guard does may add a field to the saved state: that would change the state
+   fingerprint, ride along on every cloud push, and turn the Phase 2B proposal
+   into more than the 8 additions it is authorised for. */
+function mrgLog(entry){
+  try{
+    const led=mrgLedgerRead();
+    led.log=Array.isArray(led.log)?led.log:[];
+    led.log.push(entry);
+    if(led.log.length>50)led.log.splice(0,led.log.length-50);
+    mrgLedgerWrite(led);
+  }catch(e){ console.warn('mrgLog',e); }
+}
+function mrgLogRead(){ const l=mrgLedgerRead().log; return Array.isArray(l)?l:[]; }
+
+/* Record the identity of every show currently in the document, so a device
+   that was already carrying these records before this guard shipped is
+   protected on its very first load. Never overwrites an existing entry:
+   the FIRST identity this device saw for a key is the one it defends. */
+function mrgLedgerBackfill(d){
+  const led=mrgLedgerRead();
+  let added=0;
+  (d&&d.shows||[]).forEach(sh=>{
+    if(!sh||!sh.id||!sh.name||!sh.startDate)return;
+    const k=mrgKeyOf(sh);
+    if(!k||k==='|')return;
+    if(led.entries[k])return;
+    led.entries[k]={id:sh.id,createdAt:sh.createdAt||null,marker:'backfill'};
+    added++;
+  });
+  if(added)mrgLedgerWrite(led);
+  return added;
+}
+
+/* The single funnel for creating a show from a migration.
+   Returns 'created' | 'duplicate-blocked' | 'identity-restored'. */
+function mrgPushShow(d,show,marker){
+  if(!d||!show)return'duplicate-blocked';
+  d.shows=d.shows||[];
+  const k=mrgKeyOf(show);
+
+  // Layer 2a - a row with this identity is already present. Never a second one.
+  const existing=d.shows.find(sh=>mrgKeyOf(sh)===k);
+  if(existing){
+    mrgLog({at:new Date().toISOString(),marker:marker||null,key:k,
+      action:'duplicate-blocked',keptId:existing.id});
+    return'duplicate-blocked';
+  }
+
+  // Layer 2b - this device has held this identity before and the row is gone,
+  // which is the 2026-08-20 shape: a marker-less document was adopted and the
+  // seed is about to mint a SECOND id for a show that already has one.
+  //
+  // Restoring the recorded id is strictly safer than either alternative.
+  // Refusing outright would lose the record, and would also break the ordinary
+  // case where dd_bs_v7 is cleared but this ledger survives - the app would
+  // come up empty and decline to seed anything. Minting a fresh id is what
+  // caused the incident. So the row is created with the identity this device
+  // has always used for it, and the restoration is recorded.
+  const led=mrgLedgerRead();
+  const prior=led.entries[k];
+  if(prior&&prior.id){
+    const restoredFrom=show.id;
+    show.id=prior.id;
+    if(prior.createdAt)show.createdAt=prior.createdAt;
+    d.shows.push(show);
+    if(restoredFrom!==prior.id){
+      mrgLog({at:new Date().toISOString(),marker:marker||null,key:k,
+        action:'identity-restored',keptId:prior.id,discardedId:restoredFrom});
+    }
+    return'identity-restored';
+  }
+
+  d.shows.push(show);
+  led.entries[k]={id:show.id,createdAt:show.createdAt||null,marker:marker||'seed'};
+  mrgLedgerWrite(led);
+  return'created';
+}
+
+/* Layer 1. Carry this device's satisfied show-seed markers onto an incoming
+   document, so applyOneTimeUpdates() does not re-seed records the device has
+   already created. Only MRG_SEED_MARKERS are inherited, and only ones this
+   device actually holds. Returns the list inherited. */
+function mrgInheritSeedMarkers(incoming,current){
+  if(!incoming||typeof incoming!=='object')return[];
+  const from=(current&&current._applied)||{};
+  incoming._applied=incoming._applied||{};
+  const took=[];
+  MRG_SEED_MARKERS.forEach(m=>{
+    if(from[m]&&!incoming._applied[m]){ incoming._applied[m]=true; took.push(m); }
+  });
+  if(took.length)mrgLog({at:new Date().toISOString(),action:'markers-inherited',markers:took.slice()});
+  return took;
+}
+
 function applyOneTimeUpdates(d){
   d._applied=d._applied||{};
+  mrgLedgerBackfill(d);
 
   // ===== Jul 2026 audit: REAL street prices + card-only sales tax (Froggy confirmed 7/26) =====
   if(!d._applied['real_prices_v1']){
@@ -627,7 +813,7 @@ function applyOneTimeUpdates(d){
       }else{
         const sh=buildPlannedShow(e);
         sh.confirmed=e.confirmed;
-        d.shows.push(sh);
+        mrgPushShow(d,sh,'shows_20260518v2');
       }
     });
     d._applied['shows_20260518v2']=true;
@@ -710,7 +896,7 @@ function applyOneTimeUpdates(d){
     ];
     rfShows.forEach(e=>{
       const exists=d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase());
-      if(!exists){const sh=buildPlannedShow(e);sh.confirmed=e.confirmed;d.shows.push(sh);}
+      if(!exists){const sh=buildPlannedShow(e);sh.confirmed=e.confirmed;mrgPushShow(d,sh,'rustic_fox_20260518');}
     });
     d._applied['rustic_fox_20260518']=true;
   }
@@ -728,7 +914,7 @@ function applyOneTimeUpdates(d){
       const exists=d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase());
       if(!exists){ const sh=buildPlannedShow(e); sh.confirmed=false; sh.openTime='10:00'; sh.closeTime='16:00';
         sh.notes='⚠️ VERIFY 2026 DATES — Rustic Fox holiday market, not yet booked or paid. (Fri 4–8 / Sat 10–4 / Sun 10–3 typical.)';
-        d.shows.push(sh); }
+        mrgPushShow(d,sh,'holiday_markets_v1'); }
     });
     d._applied['holiday_markets_v1']=true;
   }
@@ -749,7 +935,7 @@ function applyOneTimeUpdates(d){
         confirmed:false
       });
       sh.confirmed=false;
-      d.shows.push(sh);
+      mrgPushShow(d,sh,'st_martins_20260518');
     }
     d._applied['st_martins_20260518']=true;
   }
@@ -757,7 +943,7 @@ function applyOneTimeUpdates(d){
   // v11: add Washington County + Sheboygan County fairs; seed best-effort per-day hours on known shows
   if(!d._applied['hours_and_shows_v1']){
     d.shows=d.shows||[];
-    const addShow=e=>{ if(d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase()))return; const sh=buildPlannedShow(e); sh.confirmed=false; if(e.notes)sh.notes=e.notes; d.shows.push(sh); };
+    const addShow=e=>{ if(d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase()))return; const sh=buildPlannedShow(e); sh.confirmed=false; if(e.notes)sh.notes=e.notes; mrgPushShow(d,sh,'hours_and_shows_v1'); };
     addShow({name:'Washington County Fair',location:'West Bend, WI',startDate:'2026-07-21',numDays:6,boothCost:580,miles:38,boothPayments:[],notes:'Indoor corner booth ($580). ⚠️ Verify daily hours in Edit Show.'});
     addShow({name:'Sheboygan County Fair',location:'Plymouth, WI',startDate:'2026-09-03',numDays:5,boothCost:225,miles:62,boothPayments:[],notes:'Sheboygan County Fair (175th) — Sep 3–7, 2026 (Thu–Mon), Labor Day weekend. ✓ Dates confirmed.'});
     const setHrs=(sh,arr)=>{ (sh.days||[]).forEach((day,i)=>{ const t=arr[i]||arr[arr.length-1]; if(t&&!day.openTime&&!day.closeTime){ day.openTime=t[0]; day.closeTime=t[1]; } }); if(sh.days&&sh.days[0]){ if(!sh.openTime)sh.openTime=sh.days[0].openTime; if(!sh.closeTime)sh.closeTime=sh.days[0].closeTime; } };
@@ -788,7 +974,7 @@ function applyOneTimeUpdates(d){
     ];
     hShows.forEach(e=>{
       const exists=d.shows.find(sh=>(sh.name||'').toLowerCase()===e.name.toLowerCase());
-      if(!exists){const sh=buildPlannedShow(e);sh.confirmed=e.confirmed;d.shows.push(sh);}
+      if(!exists){const sh=buildPlannedShow(e);sh.confirmed=e.confirmed;mrgPushShow(d,sh,'rf_holiday_20260518');}
     });
     d._applied['rf_holiday_20260518']=true;
   }
@@ -877,7 +1063,7 @@ function applyOneTimeUpdates(d){
       });
       sh.confirmed=true;
       sh.notes='Booth: $425. Cleanup by 6am June 28. 2 show days Jun 26-27.';
-      d.shows.push(sh);
+      mrgPushShow(d,sh,'pewaukee_beach_20260626');
     }
     d._applied['pewaukee_beach_20260626']=true;
   }
@@ -1267,7 +1453,7 @@ function applyOneTimeUpdates(d){
         +'Parking: hotel $20 flat rate. Sales tax 7.9% on retail sales (Milwaukee city + county). '
         +'REQUIRED: Vendor Information Form must be filled out BEFORE the show — the promoter reports it to the WI Dept of Revenue. '
         +'One day, one round trip, ~29 mi each way from Waterford.';
-      d.shows.push(wb);
+      mrgPushShow(d,wb,'shows_add_20260818');
     }
 
     // ---- 59th Annual Wonderful World of Weddings (Jan 30-31 2027) ----
@@ -1299,7 +1485,7 @@ function applyOneTimeUpdates(d){
         +'PAPERWORK: certificate of insurance required, plus WI Dept of Revenue S-240 form (top box only). '
         +'DEADLINES: Wisconsin Expo service kit advance discount Dec 6 2026, State Fair Park exhibit services advance pricing Dec 17 2026. '
         +'~24 mi each way from Waterford, home every night = 2 round trips.';
-      d.shows.push(ww);
+      mrgPushShow(d,ww,'shows_add_20260818');
     }
 
     d._applied['shows_add_20260818']=true;
@@ -1342,7 +1528,7 @@ function applyOneTimeUpdates(d){
         +'PARKING $4 all day: Lake Ave Ramp (300 Lake Ave), Civic Centre Ramp (501 Lake Ave), McMynn Ramp (120 7th St), or Shoop (Main & State). '
         +'RAIN OR SHINE, NO REFUNDS for vendors. '
         +'~24 mi each way from Waterford, 1 round trip.';
-      d.shows.push(pop);
+      mrgPushShow(d,pop,'pop_racine_20260818');
     }
     d._applied['pop_racine_20260818']=true;
   }
@@ -4737,6 +4923,10 @@ function looksUsed(st){
 function adoptCloud(cloud){
   backupLocal();
   cloud.v=INIT.v;
+  // The incoming document may predate migrations this device has already run.
+  // Carry the show-seeding markers across so applyOneTimeUpdates() below does
+  // not re-create those records under fresh ids. See MIGRATION REPLAY GUARD.
+  mrgInheritSeedMarkers(cloud,typeof S!=='undefined'?S:null);
   localStorage.setItem('dd_bs_v7',JSON.stringify(cloud));
   S=loadS();
   renderCur();
