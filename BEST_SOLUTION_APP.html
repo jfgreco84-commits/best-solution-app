@@ -4472,6 +4472,7 @@ function rSettings(){
   <div class="fg"><label class="fl">Sales Tax % on CARD sales (currently ${(((s.cardTax||0))*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_ct" value="${(((s.cardTax||0))*100).toFixed(1)}" step="0.1" min="0" onchange="setSt('cardTax',this.value/100)"><div style="font-size:10px;color:var(--muted);margin-top:3px">Charged on Square/Debit only. Card totals you enter include this tax; the app sets the state's cut aside automatically.</div></div>
   </div>
   ${csHistoryCard()}
+  ${p2bSettingsCard()}
   <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🏷️ PRODUCT UNIT COSTS (COGS)</div>${cogsIsValid(S)?'':`<button class="btn btn-xs btn-ghost" onclick="resetCosts()">Reset</button>`}</div>
   ${cogsIsValid(S)
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">These mirror the cost period running now. They are shown for reference and are <strong>not</strong> used for calculation while the cost history above is valid. To change costs, use <strong>Change costs from a date</strong> so the change is dated and audited.</div>
@@ -6372,6 +6373,422 @@ function bxShowModal(){
   '</div>'+
   '<div style="font-size:10px;color:var(--muted);margin-top:10px">To restore, use Restore from File in Settings with <code>restorable-state-only.json</code> from the zip.</div>');
 }
+
+// ===================================================================
+// PHASE 2B — CONTROLLED, USER-CONFIRMED ONE-WAY RECONCILIATION
+// ===================================================================
+// This is NOT Sync Now. Sync Now (cloudSyncNow / cloudPush) replaces the whole
+// cloud document with the whole local document and is left completely untouched.
+//
+// Phase 2B does one narrow thing: it takes the reconciliation preview's
+// authorized additions, and ONLY those, and adds them to a FRESHLY READ cloud
+// document. It never deletes, never overwrites a matched cloud record, and never
+// replaces the cloud document with the local one.
+//
+// Storage architecture this must work within: Supabase table `app_data`, one row
+// per (user_id, data_key), data_key = 'bs_state', data_value = the ENTIRE app
+// state as a single JSON document. There is no per-record cloud API, so the
+// narrowest possible update is: read the current cloud document, deep-copy it,
+// splice in only the authorized items, and upsert that document back. Every
+// unknown cloud field and every cloud-only record survives by construction,
+// because we start from the cloud document and never from the local one.
+
+const P2B_EXPECTED_ADDITIONS=8;
+const P2B_PHRASE='ADD 8 ITEMS TO CLOUD';
+const P2B_EXPECT_SHOWS=35, P2B_EXPECT_DAYS=75;
+let _p2b=null;          // the staged operation. Null means nothing is staged.
+let _p2bWrites=0;       // process-wide count of cloud writes this feature performed
+
+function p2bNow(){ return new Date().toISOString(); }
+function p2bDeep(o){ return o==null?o:JSON.parse(JSON.stringify(o)); }
+function p2bDayCount(st){ return ((st&&st.shows)||[]).reduce((t,sh)=>t+((sh.days||[]).length),0); }
+
+// ---- What the preview authorizes, derived ONLY from the reconciliation result.
+// Shows are taken by stable id. A show without an id is never authorized.
+function p2bAuthorized(rec,L,C){
+  const out={shows:[],markers:[],fields:[],errors:[]};
+  const cloudIds={}; ((C&&C.shows)||[]).forEach(sh=>{ if(sh.id)cloudIds[sh.id]=(cloudIds[sh.id]||0)+1; });
+  const localById={}, localDup={};
+  ((L&&L.shows)||[]).forEach(sh=>{ if(!sh.id)return; if(localById[sh.id])localDup[sh.id]=1; localById[sh.id]=sh; });
+
+  (rec.onlyInLocal||[]).forEach(x=>{
+    if(!x.id){ out.errors.push('a device-only show has no stable id, so it cannot be authorized: '+x.label); return; }
+    if(localDup[x.id]){ out.errors.push('stable id '+x.id+' appears more than once on the device'); return; }
+    if(cloudIds[x.id]){ out.errors.push('stable id '+x.id+' already exists in the cloud'); return; }
+    const sh=localById[x.id];
+    if(!sh){ out.errors.push('device-only show '+x.id+' could not be located in the device copy'); return; }
+    out.shows.push({id:x.id,label:x.label,record:p2bDeep(sh)});
+  });
+  (rec.migrationsOnlyInLocal||[]).forEach(k=>out.markers.push(k));
+  (rec.scheduleDiffs||[]).forEach(d=>{
+    if(!d.onlyOnDevice)return;                       // only device-side-only fields are additions
+    out.fields.push({field:d.field,value:p2bDeep((L||{})[d.field])});
+  });
+  out.total=out.shows.length+out.markers.length+out.fields.length;
+  return out;
+}
+
+// ---- The proposal must be exactly the authorized shape. Anything else aborts.
+function p2bValidateProposal(rec,auth){
+  const e=[];
+  if(!rec||!rec.available)e.push('reconciliation preview is not available');
+  const nChange=(rec.conflicts||[]).length+
+    (rec.settingsDiffs||[]).length+(rec.costTableDiffs||[]).length+(rec.inventoryDiffs||[]).length+
+    (rec.scheduleDiffs||[]).filter(d=>!d.onlyOnDevice).length;
+  const nDelete=(rec.proposal&&rec.proposal.wouldRemove||[]).length;
+  const nBlocked=(rec.proposal&&rec.proposal.blocked||[]).length;
+  const nReview=(rec.proposal&&rec.proposal.needsReview||[]).length;
+  if(auth.errors.length)auth.errors.forEach(x=>e.push(x));
+  if(auth.total!==P2B_EXPECTED_ADDITIONS)
+    e.push('expected exactly '+P2B_EXPECTED_ADDITIONS+' additions, found '+auth.total);
+  if(nChange!==0)e.push('expected 0 changes, found '+nChange);
+  if(nDelete!==0)e.push('expected 0 deletions, found '+nDelete);
+  if(nBlocked!==0)e.push('expected 0 blocked records, found '+nBlocked);
+  if(nReview!==0)e.push('expected 0 records needing review, found '+nReview);
+  if((rec.ambiguous||[]).length)e.push('ambiguous records present: '+rec.ambiguous.length);
+  if((rec.fallbackMatches||[]).length)e.push('name-and-date fallback matches present: '+rec.fallbackMatches.length+
+    ' — Phase 2B matches by stable id only');
+  ((rec.matchSummary||{}).byFallback)&&e.push('matchSummary reports '+rec.matchSummary.byFallback+' fallback match(es)');
+  return {ok:e.length===0,errors:e,counts:{additions:auth.total,changes:nChange,deletions:nDelete,
+    blocked:nBlocked,needsReview:nReview}};
+}
+
+// ---- Build the document to write. STARTS FROM THE FRESH CLOUD COPY.
+// The local document is never used as the base, so unknown cloud fields and
+// cloud-only records cannot be dropped.
+function p2bBuildDoc(freshCloud,auth){
+  const doc=p2bDeep(freshCloud)||{};
+  doc.shows=Array.isArray(doc.shows)?doc.shows:[];
+  const have={}; doc.shows.forEach(sh=>{ if(sh.id)have[sh.id]=1; });
+  auth.shows.forEach(a=>{ if(have[a.id])throw new Error('refusing to add '+a.id+': it now exists in the cloud');
+    doc.shows.push(p2bDeep(a.record)); have[a.id]=1; });
+  if(auth.markers.length){ doc._applied=doc._applied||{};
+    auth.markers.forEach(k=>{ doc._applied[k]=true; }); }
+  auth.fields.forEach(f=>{ doc[f.field]=p2bDeep(f.value); });
+  return doc;
+}
+
+// ---- Post-write verification. Every clause is a hard gate.
+function p2bVerify(post,L,expectedDoc,auth){
+  const f=[];
+  if(!post)f.push('the cloud could not be read back after the write');
+  else{
+    const shows=post.shows||[];
+    if(shows.length!==P2B_EXPECT_SHOWS)f.push('cloud has '+shows.length+' shows, expected '+P2B_EXPECT_SHOWS);
+    const days=p2bDayCount(post);
+    if(days!==P2B_EXPECT_DAYS)f.push('cloud has '+days+' show-day records, expected '+P2B_EXPECT_DAYS);
+    const byId={}; shows.forEach(sh=>{ if(sh.id)byId[sh.id]=sh; });
+    ((L&&L.shows)||[]).forEach(sh=>{
+      if(!sh.id){f.push('a device show has no stable id, so it cannot be verified');return;}
+      const c=byId[sh.id];
+      if(!c){f.push('cloud is missing show '+sh.id);return;}
+      const d=bxDiffShow(sh,c);
+      if(d.length)f.push('show '+sh.id+' differs from the device in '+d.length+' field(s): '+
+        d.slice(0,5).map(x=>x.field).join(', '));
+    });
+    ['cogsHistory','cogsHistoryMeta'].forEach(k=>{
+      if(JSON.stringify(post[k])!==JSON.stringify((L||{})[k]))f.push(k+' in the cloud does not match the device');
+    });
+    ['shows_add_20260818','pop_racine_20260818','cogs_history_v1'].forEach(k=>{
+      if(!((post._applied||{})[k]))f.push('migration marker missing in the cloud: '+k); });
+    // Nothing beyond the authorized additions may have changed. The document we
+    // built is the only acceptable result.
+    if(JSON.stringify(post)!==JSON.stringify(expectedDoc)){
+      const d=[]; bxDeepDiff(expectedDoc,post,'',d);
+      f.push('the cloud document does not match what was authorized, '+d.length+' difference(s): '+
+        d.slice(0,8).map(x=>x.field).join(', '));
+    }
+  }
+  return {ok:f.length===0,failures:f};
+}
+
+// ---- The single authorized write. Refuses to run twice, ever.
+async function p2bWriteOnce(doc){
+  if(_p2bWrites>0)throw new Error('a Phase 2B write has already been performed in this session');
+  if(typeof sb==='undefined'||!sb||typeof _cloudUser==='undefined'||!_cloudUser)
+    throw new Error('not signed in to cloud sync');
+  _p2bWrites++;
+  const res=await sb.from('app_data').upsert(
+    {user_id:_cloudUser.id,data_key:'bs_state',data_value:doc,updated_at:p2bNow()},
+    {onConflict:'user_id,data_key'});
+  if(res&&res.error)throw new Error('cloud write failed: '+String(res.error.message||res.error));
+  return true;
+}
+
+// ---- Stage the operation. Reads, compares, and stages. Writes NOTHING.
+async function p2bStage(){
+  const snap=await bxCollect('localStorage');
+  const L=(snap.sources.localStorage||{}).state, C=(snap.sources.cloud||{}).state;
+  if(!L)return {ok:false,errors:['no saved copy on this device']};
+  if((snap.sources.cloud||{}).status!=='ok')
+    return {ok:false,errors:['the cloud could not be read: '+((snap.cloudRead||{}).message||'unknown')]};
+  const rec=bxReconcile(snap);
+  const auth=p2bAuthorized(rec,L,C);
+  const val=p2bValidateProposal(rec,auth);
+  const op={at:p2bNow(),appVersion:APP_VERSION,
+    deviceFp:bxFingerprint(L), cloudFp:bxFingerprint(C),
+    deviceCounts:{shows:(L.shows||[]).length,days:p2bDayCount(L),reps:(L.reps||[]).length},
+    cloudCounts:{shows:(C.shows||[]).length,days:p2bDayCount(C),reps:(C.reps||[]).length},
+    auth:auth, validation:val, snapshot:snap,
+    backupDownloaded:false, phraseOk:false, applied:false};
+  _p2b=val.ok?op:null;
+  return {ok:val.ok,errors:val.errors,op:op};
+}
+
+// ---- The pre-write backup. Local + memory + the FRESH cloud copy.
+// Downloading it is a hard gate: no write is possible until this has run.
+function p2bBackupFile(op){
+  const s=op.snapshot.sources;
+  return {name:'best-solution-PRE-WRITE-backup-'+op.at.slice(0,19).replace(/[:T]/g,'-')+'.json',
+    text:JSON.stringify({
+      kind:'phase-2b pre-write backup',
+      takenAt:op.at, appVersion:APP_VERSION,
+      warning:'This is the state of all three copies immediately BEFORE any Phase 2B write. Keep it.',
+      fingerprints:{device:op.deviceFp,cloud:op.cloudFp,memory:(s.memory||{}).fingerprint||null},
+      counts:{device:op.deviceCounts,cloud:op.cloudCounts},
+      authorizedAdditions:{shows:op.auth.shows.map(x=>({id:x.id,label:x.label})),
+        migrationMarkers:op.auth.markers, fields:op.auth.fields.map(f=>f.field)},
+      copies:{localStorage:(s.localStorage||{}).state||null,
+              memory:(s.memory||{}).state||null,
+              cloud:(s.cloud||{}).state||null}
+    },null,2)};
+}
+function p2bDownloadBackup(){
+  if(!_p2b){toast('Nothing is staged');return;}
+  const f=p2bBackupFile(_p2b);
+  bxDl(f.name,f.text,'application/json');
+  _p2b.backupDownloaded=true;
+  _p2b.backupName=f.name;
+  toast('✅ Pre-write backup downloaded');
+  p2bConfirmScreen();
+}
+
+// ---- Apply. Every safeguard is re-checked against a FRESH cloud read.
+async function p2bApply(typed){
+  const op=_p2b;
+  const fail=(...m)=>({ok:false,errors:m,writesPerformed:_p2bWrites});
+  if(!op)return fail('nothing is staged');
+  if(op.applied)return fail('this operation has already run');
+  if(!op.backupDownloaded)return fail('the pre-write backup has not been downloaded');
+  if(String(typed)!==P2B_PHRASE)return fail('the confirmation phrase does not match exactly');
+  op.phraseOk=true;
+
+  // 1. Re-read the cloud immediately before writing.
+  const fresh=await bxCloudRead();
+  if(fresh.status!=='ok')return fail('aborted: the cloud could not be re-read: '+fresh.message);
+  const freshCloud=fresh.state;
+
+  // 2. Fingerprints must be unchanged on BOTH sides.
+  let nowLocal=null;
+  try{ const raw=localStorage.getItem('dd_bs_v7'); nowLocal=raw?JSON.parse(raw):null; }catch(e){}
+  if(!nowLocal)return fail('aborted: the device copy could not be re-read');
+  const devFpNow=bxFingerprint(nowLocal), cloudFpNow=bxFingerprint(freshCloud);
+  if(devFpNow!==op.deviceFp)
+    return fail('aborted: the device copy changed since the preview',
+      'preview '+op.deviceFp,'now '+devFpNow);
+  if(cloudFpNow!==op.cloudFp)
+    return fail('aborted: the cloud copy changed since the preview',
+      'preview '+op.cloudFp,'now '+cloudFpNow);
+
+  // 3. Re-derive and re-validate the proposal against the fresh read.
+  const snap2=p2bDeep(op.snapshot);
+  snap2.sources.cloud.state=freshCloud;
+  const rec2=bxReconcile(snap2);
+  const auth2=p2bAuthorized(rec2,nowLocal,freshCloud);
+  const val2=p2bValidateProposal(rec2,auth2);
+  if(!val2.ok)return fail.apply(null,['aborted: the proposal is no longer the authorized shape'].concat(val2.errors));
+  if(JSON.stringify(auth2.shows.map(x=>x.id).sort())!==JSON.stringify(op.auth.shows.map(x=>x.id).sort())
+     ||JSON.stringify(auth2.markers.slice().sort())!==JSON.stringify(op.auth.markers.slice().sort())
+     ||JSON.stringify(auth2.fields.map(f=>f.field).sort())!==JSON.stringify(op.auth.fields.map(f=>f.field).sort()))
+    return fail('aborted: the authorized items changed since the preview');
+
+  // 4. Build the result from the FRESH CLOUD document.
+  let doc; try{ doc=p2bBuildDoc(freshCloud,auth2); }
+  catch(e){ return fail('aborted before writing: '+String(e.message||e)); }
+
+  // 5. Exactly one write.
+  try{ await p2bWriteOnce(doc); }
+  catch(e){ return fail('the cloud write failed: '+String(e.message||e)); }
+
+  // 6. Read back and verify.
+  const after=await bxCloudRead();
+  const post=(after.status==='ok')?after.state:null;
+  const ver=p2bVerify(post,nowLocal,doc,auth2);
+
+  op.applied=true;
+  const entry={at:p2bNow(),appVersion:APP_VERSION,action:'phase2b-add-authorized-items',
+    preWriteFingerprint:{device:op.deviceFp,cloud:op.cloudFp},
+    postWriteFingerprint:{cloud:post?bxFingerprint(post):null},
+    authorizedAdditions:{shows:auth2.shows.map(x=>({id:x.id,label:x.label})),
+      migrationMarkers:auth2.markers,fields:auth2.fields.map(f=>f.field)},
+    writesPerformed:_p2bWrites,
+    verification:ver.ok?'PASSED':'FAILED',
+    verificationFailures:ver.failures,
+    backupFile:op.backupName||null};
+  p2bPersistAudit(entry);
+  op.audit=entry;
+  op.receipt=p2bReceipt(op,entry,ver);
+  // A failed verification is NEVER retried automatically. The caller is handed
+  // the pre-write backup and the exact discrepancy instead.
+  return {ok:ver.ok,errors:ver.failures,audit:entry,receipt:op.receipt,
+    writesPerformed:_p2bWrites,verification:ver};
+}
+
+// The audit entry must NOT go through saveS(). saveS() calls cloudQueuePush(),
+// which fires the ordinary Sync Now 800ms later and replaces the ENTIRE cloud
+// document with the local one — precisely the whole-document overwrite this
+// feature exists to avoid, and it would happen silently right after our careful
+// narrow write. So the entry is appended in memory and persisted straight to
+// localStorage, with no cloud queue and no _updatedAt bump.
+function p2bPersistAudit(entry){
+  S.cloudReconAudit=S.cloudReconAudit||[];
+  S.cloudReconAudit.push(entry);
+  try{ localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }
+  catch(e){ console.warn('p2bPersistAudit',e); }
+  try{ if(typeof renderCur==='function')renderCur(); }catch(e){}
+}
+
+function p2bReceipt(op,entry,ver){
+  const L=[],line=t=>L.push(t==null?'':String(t)),rule=()=>line('='.repeat(72));
+  rule(); line('BEST SOLUTION — CLOUD RECONCILIATION RECEIPT'); rule();
+  line('  When            : '+entry.at);
+  line('  App version     : '+entry.appVersion);
+  line('  Result          : '+(ver.ok?'SUCCESS — verified against the cloud':'FAILED VERIFICATION'));
+  line('  Cloud writes    : '+entry.writesPerformed+'  (this feature performs at most one)');
+  line('  Pre-write backup: '+(entry.backupFile||'(not recorded)'));
+  line('');
+  rule(); line('FINGERPRINTS'); rule();
+  line('  Device, before  : '+entry.preWriteFingerprint.device);
+  line('  Cloud,  before  : '+entry.preWriteFingerprint.cloud);
+  line('  Cloud,  after   : '+(entry.postWriteFingerprint.cloud||'(unreadable)'));
+  line('');
+  rule(); line('WHAT WAS ADDED  ('+(entry.authorizedAdditions.shows.length+
+    entry.authorizedAdditions.migrationMarkers.length+entry.authorizedAdditions.fields.length)+' items)'); rule();
+  entry.authorizedAdditions.shows.forEach((s,i)=>line('  '+(i+1)+'. show   '+s.label+'   [id '+s.id+']'));
+  entry.authorizedAdditions.migrationMarkers.forEach(k=>line('     marker '+k));
+  entry.authorizedAdditions.fields.forEach(f=>line('     field  '+f));
+  line('');
+  rule(); line('WHAT WAS NOT TOUCHED'); rule();
+  line('  No cloud record was deleted.');
+  line('  No matched cloud record was overwritten.');
+  line('  No sales, payments, expenses, inventory, rep records, booth payments,');
+  line('  notes, stored net figures or 2025 season rows were modified.');
+  line('  The cloud document was built from the freshly read cloud copy, so every');
+  line('  unknown cloud field and every cloud-only record was preserved.');
+  line('');
+  rule(); line('VERIFICATION'); rule();
+  if(ver.ok){ line('  PASSED. The cloud now holds '+P2B_EXPECT_SHOWS+' shows and '+P2B_EXPECT_DAYS+
+    ' show-day records, every show matches this device by stable id and full nested');
+    line('  content, the COGS schedule and its metadata match, and all three migration');
+    line('  markers are present. Nothing else changed.'); }
+  else { line('  FAILED. Nothing was retried. Use the pre-write backup above.');
+    ver.failures.forEach(x=>line('      - '+x)); }
+  line('');
+  return L.join('\r\n');
+}
+function p2bDownloadReceipt(){
+  if(!_p2b||!_p2b.receipt){toast('No receipt yet');return;}
+  bxDl('cloud-reconciliation-receipt-'+_p2b.at.slice(0,19).replace(/[:T]/g,'-')+'.txt',
+    _p2b.receipt,'text/plain');
+}
+
+// ---- UI. Three screens, each one a gate.
+function p2bEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+async function p2bOpen(){
+  mOpen('<div class="mh"><div class="mt">☁️ Add missing items to the cloud</div>'+
+    '<button class="mx" onclick="p2bClose()">&times;</button></div>'+
+    '<div style="font-size:12px;color:var(--muted)">Reading this device and the cloud…</div>');
+  const r=await p2bStage();
+  if(!r.ok){
+    mOpen('<div class="mh"><div class="mt">Cannot proceed</div><button class="mx" onclick="p2bClose()">&times;</button></div>'+
+      '<div class="card rb" style="margin-bottom:12px"><div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:6px">THIS OPERATION IS NOT AVAILABLE</div>'+
+      '<div style="font-size:12px">'+r.errors.map(e=>'• '+p2bEsc(e)).join('<br>')+'</div></div>'+
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Nothing was written. Phase 2B only ever runs against the exact proposal it was designed for: '+
+      P2B_EXPECTED_ADDITIONS+' additions, no changes, no deletions, nothing blocked, nothing needing review.</div>'+
+      '<button class="btn btn-ghost btn-full" onclick="p2bClose()">Close</button>');
+    return;
+  }
+  const op=r.op, a=op.auth;
+  mOpen('<div class="mh"><div class="mt">☁️ Add missing items to the cloud</div>'+
+    '<button class="mx" onclick="p2bClose()">&times;</button></div>'+
+    '<div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">WHAT THE CLOUD IS MISSING</div>'+
+    '<div style="font-size:12px">This device: <strong>'+op.deviceCounts.shows+'</strong> shows, '+op.deviceCounts.days+' day records</div>'+
+    '<div style="font-size:12px">The cloud&nbsp;&nbsp;: <strong>'+op.cloudCounts.shows+'</strong> shows, '+op.cloudCounts.days+' day records</div>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:6px">Every show already in the cloud is identical to this device. Nothing needs changing.</div></div>'+
+    '<div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">'+
+      a.total+' ITEMS WOULD BE ADDED</div>'+
+    a.shows.map((x,i)=>'<div style="font-size:12px;padding:2px 0">'+(i+1)+'. '+p2bEsc(x.label)+'</div>').join('')+
+    a.markers.map(k=>'<div style="font-size:12px;padding:2px 0;color:var(--muted)">setup marker '+p2bEsc(k)+'</div>').join('')+
+    a.fields.map(f=>'<div style="font-size:12px;padding:2px 0;color:var(--muted)">'+p2bEsc(f.field)+'</div>').join('')+
+    '</div>'+
+    '<div class="card" style="margin-bottom:12px;border-color:rgba(0,210,106,0.4)">'+
+    '<div style="font-size:11px">Nothing is deleted. Nothing already in the cloud is overwritten. '+
+    'Your sales, payments, expenses, inventory, reps, booth payments, notes and 2025 season are not touched.</div></div>'+
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Step 1 of 3. Nothing has been written.</div>'+
+    '<button class="btn btn-gold btn-full" onclick="p2bDownloadBackup()">⬇︎ Download the pre-write backup to continue</button>'+
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="p2bClose()">Cancel</button>');
+}
+function p2bConfirmScreen(){
+  const op=_p2b; if(!op)return;
+  const a=op.auth;
+  mOpen('<div class="mh"><div class="mt">Confirm the write</div><button class="mx" onclick="p2bClose()">&times;</button></div>'+
+    '<div class="card rb" style="margin-bottom:10px"><div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:4px">THIS WILL WRITE TO SUPABASE</div>'+
+    '<div style="font-size:12px">This is the only step in the whole app, other than normal sync, that changes your cloud copy. It adds the '+
+    a.total+' items below and nothing else.</div></div>'+
+    '<div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">EVERY ITEM, ONE BY ONE</div>'+
+    a.shows.map((x,i)=>'<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><strong>'+(i+1)+'.</strong> '+
+      p2bEsc(x.label)+'<div style="font-size:10px;color:var(--muted)">id '+p2bEsc(x.id)+' &middot; '+
+      ((x.record.days||[]).length)+' day record(s) &middot; booth '+fmt(bxNum(x.record.boothCost))+'</div></div>').join('')+
+    a.markers.map((k,i)=>'<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><strong>'+
+      (a.shows.length+i+1)+'.</strong> setup marker <code>'+p2bEsc(k)+'</code></div>').join('')+
+    a.fields.map((f,i)=>'<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><strong>'+
+      (a.shows.length+a.markers.length+i+1)+'.</strong> <code>'+p2bEsc(f.field)+'</code> (cost schedule data)</div>').join('')+
+    '</div>'+
+    '<div class="card" style="margin-bottom:10px"><div style="font-size:11px;color:var(--muted)">Backup downloaded: <strong>'+
+    p2bEsc(op.backupName||'')+'</strong></div></div>'+
+    '<div class="fg"><label class="fl">Type <strong>'+P2B_PHRASE+'</strong> exactly</label>'+
+    '<input class="fi" id="p2b_phrase" placeholder="'+P2B_PHRASE+'"></div>'+
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Step 3 of 3. The cloud is read again the moment you confirm, and the write is abandoned if anything has moved.</div>'+
+    '<button class="btn btn-gold btn-full" onclick="p2bGo()">Add '+a.total+' items to the cloud</button>'+
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="p2bClose()">Cancel, write nothing</button>');
+}
+async function p2bGo(){
+  const typed=(($$('p2b_phrase')||{}).value)||'';
+  if(typed!==P2B_PHRASE){toast('The phrase must match exactly. Nothing was written.');return;}
+  mOpen('<div class="mh"><div class="mt">Working…</div></div><div style="font-size:12px;color:var(--muted)">Re-reading the cloud, checking nothing moved, then writing once.</div>');
+  const r=await p2bApply(typed);
+  if(r.ok){
+    mOpen('<div class="mh"><div class="mt">✅ Done and verified</div><button class="mx" onclick="p2bClose()">&times;</button></div>'+
+      '<div class="card grb" style="margin-bottom:12px"><div style="font-size:12px">The cloud now holds '+P2B_EXPECT_SHOWS+
+      ' shows and '+P2B_EXPECT_DAYS+' show-day records, and every one matches this device. Verified by reading the cloud back.</div></div>'+
+      '<button class="btn btn-gold btn-full" onclick="p2bDownloadReceipt()">⬇︎ Download the receipt</button>'+
+      '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="p2bClose()">Close</button>');
+  }else{
+    mOpen('<div class="mh"><div class="mt">Stopped</div><button class="mx" onclick="p2bClose()">&times;</button></div>'+
+      '<div class="card rb" style="margin-bottom:10px"><div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:6px">'+
+      (r.writesPerformed?'THE WRITE DID NOT VERIFY':'NOTHING WAS WRITTEN')+'</div>'+
+      '<div style="font-size:12px">'+(r.errors||[]).map(e=>'• '+p2bEsc(e)).join('<br>')+'</div></div>'+
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">'+
+      (r.writesPerformed?'No second attempt was made, and none will be made automatically. Your pre-write backup is <strong>'+
+        p2bEsc((_p2b&&_p2b.backupName)||'the file you downloaded')+'</strong>.':
+       'The cloud is untouched.')+'</div>'+
+      (r.receipt?'<button class="btn btn-gold btn-full" onclick="p2bDownloadReceipt()">⬇︎ Download the receipt</button>':'')+
+      '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="p2bClose()">Close</button>');
+  }
+}
+function p2bClose(){ _p2b=null; mClose(); }
+
+// Settings card. Deliberately separate from the Cloud Sync card, which is untouched.
+function p2bSettingsCard(){
+  return '<div class="card" style="border-color:rgba(0,210,106,0.35)">'+
+  '<div style="font-size:10px;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD RECONCILIATION</div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Adds items this device has and the cloud is missing, and nothing else. '+
+  'It never deletes, never overwrites a record already in the cloud, and never replaces the cloud with this device. '+
+  'You download a backup first, confirm every item, and type a phrase before anything is written. This is separate from Sync Now.</div>'+
+  '<button class="btn btn-ghost btn-full" onclick="p2bOpen()">☁️ Review what the cloud is missing</button>'+
+  '</div>';
+}
+
 function bxSettingsCard(){
   return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
   '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 ADMINISTRATIVE — FULL DATA EXPORT</div>'+
