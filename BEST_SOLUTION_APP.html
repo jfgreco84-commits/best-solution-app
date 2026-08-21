@@ -277,6 +277,152 @@ const SKUS=[
   {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00}
 ];
 // COMM_CARD / COMM_CASH below are the TAX-base rates only (PMTS[].commRate). Do not repurpose for rep commission.
+// ===================================================
+// PHASE 2A — APP VERSION + EFFECTIVE-DATE COGS SCHEDULE
+// ===================================================
+// APP_VERSION is the PRODUCTION APP version. It advances only when app
+// behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
+// separate and must never be conflated with it. A ?v=NN on the page URL is
+// a browser cache-buster and is neither of these.
+const APP_VERSION='v30';
+
+// Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
+// that was in force on the date of the sale, not today's cost table.
+// Entries are ordered oldest first. effectiveFrom is inclusive.
+const COGS_SCHEDULE_DEFAULT=[
+  {id:'cogs_historical', effectiveFrom:'1900-01-01', effectiveTo:'2026-07-31',
+   label:'Historical (through Jul 31 2026)',
+   costs:{'32oz':6.00,'16oz':4.50,'8oz':4.00,'2oz':2.25,'c5s':3.00,'c5l':6.00}},
+  {id:'cogs_current_2026_08', effectiveFrom:'2026-08-01', effectiveTo:null,
+   label:'Current (from Aug 1 2026)',
+   costs:{'32oz':4.50,'16oz':3.75,'8oz':3.25,'2oz':2.00,'c5s':2.80,'c5l':5.84}}
+];
+function cogsSchedule(st){ const a=((st||(typeof S!=='undefined'?S:null))||{}).cogsHistory;
+  return (a&&a.length)?a:null; }
+// A STRICT calendar date, not just a string that looks like one. The pattern test
+// alone accepted 2026-02-31, 2026-13-01 and 2026-04-31. Every cost-schedule date
+// goes through here, and an impossible date is REJECTED, never normalised into a
+// nearby valid one (Date would silently turn 2026-02-31 into March 3).
+function cogsIsoKey(v){
+  if(typeof v!=='string')return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if(!m)return null;
+  const y=+m[1], mo=+m[2], d=+m[3];
+  if(mo<1||mo>12||d<1||d>31)return null;
+  const dt=new Date(Date.UTC(y,mo-1,d));
+  // The round trip is what catches Feb 30, Apr 31 and a bad leap day: Date rolls
+  // them forward, so the parts come back different from what went in.
+  if(dt.getUTCFullYear()!==y||dt.getUTCMonth()!==mo-1||dt.getUTCDate()!==d)return null;
+  return v;
+}
+// Null in, null out. Callers must not receive a fabricated date for a bad input.
+function cogsDayBefore(k){
+  const key=cogsIsoKey(k); if(!key)return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+  d.setUTCDate(d.getUTCDate()-1);
+  return d.toISOString().slice(0,10);
+}
+
+// ---- SCHEDULE VALIDATION ----
+// A schedule is only authoritative if it is provably unambiguous. Anything less
+// raises a CRITICAL diagnostic instead of silently picking a number.
+function cogsValidate(sch){
+  const errors=[], warnings=[];
+  if(!sch||!sch.length)return{valid:false,errors:['no schedule present'],warnings:warnings};
+  let prev=null;
+  sch.forEach((e,i)=>{
+    const tag='entry '+(i+1)+' ('+(e&&e.id||'no id')+')';
+    if(!e||typeof e!=='object'){errors.push(tag+': not an object');return;}
+    const f=cogsIsoKey(e.effectiveFrom);
+    if(!f)errors.push(tag+': effectiveFrom is not a valid ISO date');
+    const t=(e.effectiveTo==null||e.effectiveTo==='')?null:cogsIsoKey(e.effectiveTo);
+    if(e.effectiveTo!=null&&e.effectiveTo!==''&&!t)errors.push(tag+': effectiveTo is not a valid ISO date');
+    if(f&&t&&t<f)errors.push(tag+': effectiveTo '+t+' is before effectiveFrom '+f);
+    SKUS.forEach(sk=>{ const v=(e.costs||{})[sk.key];
+      if(v==null||v==='')errors.push(tag+': missing cost for '+sk.key);
+      else{ const n=parseFloat(v);
+        if(!isFinite(n))errors.push(tag+': cost for '+sk.key+' is not a number');
+        else if(n<0)errors.push(tag+': cost for '+sk.key+' is negative'); } });
+    if(prev){
+      const pf=cogsIsoKey(prev.effectiveFrom), pt=(prev.effectiveTo==null||prev.effectiveTo==='')?null:cogsIsoKey(prev.effectiveTo);
+      if(pf&&f&&f<=pf)errors.push(tag+': out of chronological order, starts on or before the previous entry');
+      if(pt===null)errors.push(tag+': follows an open-ended entry, so the periods overlap');
+      else if(pt&&f){
+        if(f<=pt)errors.push(tag+': overlaps the previous period, which ends '+pt);
+        else{ const db=cogsDayBefore(f);
+          if(db&&db!==pt)warnings.push(tag+': gap between '+pt+' and '+f+', dates in that gap have no schedule'); }
+      }
+    }
+    prev=e;
+  });
+  const open=sch.filter(e=>e.effectiveTo==null||e.effectiveTo==='');
+  if(open.length===0)warnings.push('no open-ended entry, so dates after the last period end have no schedule');
+  if(open.length>1)errors.push('more than one open-ended entry, so the current period is ambiguous');
+  else if(open.length===1&&open[0]!==sch[sch.length-1])errors.push('the open-ended entry is not the newest entry');
+  return {valid:errors.length===0,errors:errors,warnings:warnings};
+}
+function cogsIsValid(st){ return cogsValidate(cogsSchedule(st)).valid; }
+
+// The entry covering a date, honouring BOTH effectiveFrom and effectiveTo.
+// Null when the schedule is invalid, the date is unusable, or the date is not covered.
+// An absent date means "current". A date that is PRESENT but not a real calendar
+// date is bad data, and must never be quietly promoted to "current".
+function cogsEntryOn(dateKey,st){
+  const sch=cogsSchedule(st); if(!sch)return null;
+  if(!cogsValidate(sch).valid)return null;
+  const undated=(dateKey==null||dateKey==='');
+  const k=undated?null:cogsIsoKey(dateKey);
+  if(!undated&&!k)return null;
+  if(!k){ const open=sch.filter(e=>e.effectiveTo==null||e.effectiveTo===''); return open.length===1?open[0]:sch[sch.length-1]; }
+  let hit=null;
+  sch.forEach(e=>{ const f=cogsIsoKey(e.effectiveFrom);
+    const t=(e.effectiveTo==null||e.effectiveTo==='')?null:cogsIsoKey(e.effectiveTo);
+    if(f&&k>=f&&(t===null||k<=t))hit=e; });
+  return hit;
+}
+function cogsIsLatestEntry(e,st){ const sch=cogsSchedule(st); return !!e&&!!sch&&e===sch[sch.length-1]; }
+
+// ---- COST PRECEDENCE (Phase 2A, revision 2). Highest wins. ----
+//  1. per-show override   sh.costs[sku]
+//  2. the VALID dated schedule entry covering that date   <-- AUTHORITATIVE
+//     (this now governs the open/current period too, not just closed ones)
+//  3. legacy cost table  S.costs[sku]   -- compatibility fallback ONLY when no
+//     valid schedule exists. It can never override a valid dated schedule.
+//  4. SKUS built-in default
+// A null date resolves to the open-ended entry.
+function getCostOn(k,dateKey,sh,st){
+  const state=st||(typeof S!=='undefined'?S:null)||{};
+  if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!==''){ const v=parseFloat(sh.costs[k]); if(isFinite(v))return v; }
+  const e=cogsEntryOn(dateKey,state);
+  if(e&&e.costs&&e.costs[k]!=null)return parseFloat(e.costs[k])||0;
+  const c=state.costs&&state.costs[k];
+  if(c!=null&&c!=='')return parseFloat(c)||0;
+  return (SKUS.find(x=>x.key===k)||{}).cost||0;
+}
+function costSourceOn(k,dateKey,sh,st){
+  const state=st||(typeof S!=='undefined'?S:null)||{};
+  if(sh&&sh.costs&&sh.costs[k]!=null&&sh.costs[k]!=='')return 'per-show override';
+  const sch=cogsSchedule(state);
+  if(sch&&!cogsValidate(sch).valid)return 'FALLBACK: schedule invalid';
+  if(sch&&dateKey!=null&&dateKey!==''&&!cogsIsoKey(dateKey))
+    return 'FALLBACK: '+JSON.stringify(dateKey)+' is not a real calendar date';
+  const e=cogsEntryOn(dateKey,state);
+  if(e&&e.costs&&e.costs[k]!=null)return 'schedule: '+(e.id||'entry');
+  if(sch)return 'FALLBACK: date not covered by any schedule period';
+  const c=state.costs&&state.costs[k];
+  if(c!=null&&c!=='')return 'cost table (no schedule present)';
+  return 'SKUS default';
+}
+function showDayKey(sh,di){
+  const st=cogsIsoKey(sh&&sh.startDate); if(!st)return null;
+  const d=new Date(st+'T12:00:00'); d.setDate(d.getDate()+(parseInt(di,10)||0));
+  return d.toISOString().slice(0,10);
+}
+function calcCOGSOn(units,dateKey,sh,st){
+  return SKUS.reduce((t,s)=>t+((units[s.key]||0)*getCostOn(s.key,dateKey,sh,st)),0);
+}
+
 const COMM_CARD = 0.30;
 const COMM_CASH = 0.35;
 // ----- Rep pay (Jul 2026 overhaul) -----
@@ -1200,6 +1346,25 @@ function applyOneTimeUpdates(d){
     }
     d._applied['pop_racine_20260818']=true;
   }
+
+  // ===== Phase 2A — seed the effective-date COGS schedule =====
+  // ADDITIVE ONLY. Writes exactly THREE things and nothing else:
+  //   1. d.cogsHistory              — the dated cost schedule
+  //   2. d.cogsHistoryMeta          — who seeded it, when, under which app version
+  //   3. d._applied.cogs_history_v1 — the guard marker that stops it running twice
+  // The first two are written only when no schedule exists yet; the marker is
+  // always written. Does not touch costs, prices, settings, inventory, shows,
+  // payments, expenses or notes, and never creates d.cogsAudit. Idempotent:
+  // skipped once applied, and skipped if a schedule already exists, so a
+  // hand-edited schedule is never overwritten.
+  if(!d._applied['cogs_history_v1']){
+    if(!d.cogsHistory||!d.cogsHistory.length){
+      d.cogsHistory=JSON.parse(JSON.stringify(COGS_SCHEDULE_DEFAULT));
+      d.cogsHistoryMeta={seededBy:'phase2a',seededAt:'2026-08-20',appVersion:APP_VERSION,
+        note:'Unit costs changed 2026-08-01. Entries are ordered oldest first and effectiveFrom is inclusive.'};
+    }
+    d._applied['cogs_history_v1']=true;
+  }
 }
 
 function buildPlannedShow(e){
@@ -1253,7 +1418,10 @@ function pg(i){return $$('pg-'+i);}
 function fmt(n){if(n===null||n===undefined)return'$0.00';const a=Math.abs(n);const s='$'+a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');return n<0?'-'+s:s;}
 function fmtN(n){return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',');}
 function getP(k){return(S.prices&&S.prices[k])||SKUS.find(s=>s.key===k).defP;}
-function getCost(k){const c=S&&S.costs&&S.costs[k];return(c!=null&&c!=='')?(parseFloat(c)||0):SKUS.find(s=>s.key===k).cost;}
+// Undated / current cost. Kept for every legacy caller. Now falls back to the
+// newest schedule entry before the SKUS default, so current inventory is valued
+// at today's costs even when the editable cost table has never been touched.
+function getCost(k){ return getCostOn(k,null,null,(typeof S!=='undefined'?S:null)); }
 function setCost(k,v){if(!S.costs)S.costs={};const n=(v===''||v==null)?null:(parseFloat(v)||0);S.costs[k]=(n==null?SKUS.find(s=>s.key===k).cost:Math.max(0,n));saveS();toast('✅ Cost updated');}
 function resetCosts(){S.costs={};saveS();toast('Costs reset to defaults');rSettings();}
 function eSku(){const r={};SKUS.forEach(s=>r[s.key]=0);return r;}
@@ -1277,8 +1445,9 @@ function calcShow(sh){
   // Booth: book what was actually PAID when it exceeds the sticker price (overpays are real money out)
   const booth=Math.max(sh.boothCost||0,(typeof boothPaid==='function')?boothPaid(sh):0);
   exp+=booth;
-  (sh.days||[]).forEach(d=>{
-    if(d.morningCount&&d.eveningCount){potential+=calcRev(daySold(d),sh.prices||null);cogs+=calcCOGS(dayCogsUnits(d));}
+  (sh.days||[]).forEach((d,di)=>{
+    // Phase 2A: COGS uses the cost schedule in force on THAT DAY, not today's table.
+    if(d.morningCount&&d.eveningCount){potential+=calcRev(daySold(d),sh.prices||null);cogs+=calcCOGSOn(dayCogsUnits(d),showDayKey(sh,di),sh);}
     if(d.expenses){exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);dayGas+=parseFloat(d.expenses.gas)||0;}
   });
   // Gas: auto-include the commute estimate once the show has begun, unless gas was hand-logged on any day
@@ -4301,9 +4470,16 @@ function rSettings(){
   <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
   <div class="fg"><label class="fl">Sales Tax % on CARD sales (currently ${(((s.cardTax||0))*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_ct" value="${(((s.cardTax||0))*100).toFixed(1)}" step="0.1" min="0" onchange="setSt('cardTax',this.value/100)"><div style="font-size:10px;color:var(--muted);margin-top:3px">Charged on Square/Debit only. Card totals you enter include this tax; the app sets the state's cut aside automatically.</div></div>
   </div>
-  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🏷️ PRODUCT UNIT COSTS (COGS)</div><button class="btn btn-xs btn-ghost" onclick="resetCosts()">Reset</button></div>
-  ${SKUS.map(k=>`<div class="fg"><label class="fl">${k.name} cost ($)</label><input class="fi" type="number" step="0.01" min="0" value="${getCost(k.key).toFixed(2)}" onchange="setCost('${k.key}',this.value)"></div>`).join('')}
-  <div style="font-size:10px;color:var(--muted)">What each unit costs YOU. Drives COGS and profit everywhere.</div></div>
+  ${csHistoryCard()}
+  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🏷️ PRODUCT UNIT COSTS (COGS)</div>${cogsIsValid(S)?'':`<button class="btn btn-xs btn-ghost" onclick="resetCosts()">Reset</button>`}</div>
+  ${cogsIsValid(S)
+    ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">These mirror the cost period running now. They are shown for reference and are <strong>not</strong> used for calculation while the cost history above is valid. To change costs, use <strong>Change costs from a date</strong> so the change is dated and audited.</div>
+       ${SKUS.map(k=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)"><span>${k.name}</span><strong>${fmt(getCost(k.key))}</strong></div>`).join('')}
+       <div style="font-size:10px;color:var(--muted);margin-top:8px">Cost source: ${costSourceOn(SKUS[0].key,null,null,S)}</div>`
+    : `<div style="font-size:12px;color:var(--red);margin-bottom:10px">No valid cost history, so this table is the fallback and IS being used for calculation.</div>
+       ${SKUS.map(k=>`<div class="fg"><label class="fl">${k.name} cost ($)</label><input class="fi" type="number" step="0.01" min="0" value="${getCost(k.key).toFixed(2)}" onchange="setCost('${k.key}',this.value)"></div>`).join('')}
+       <div style="font-size:10px;color:var(--muted)">What each unit costs YOU. Drives COGS and profit everywhere.</div>`}
+  </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TRAVEL (2017 Ram 1500)</div>
   <div class="fg"><label class="fl">Gas Price ($/gallon)</label><input class="fi" type="number" id="st_g" value="${s.gasPrice}" step="0.01" onchange="setSt('gasPrice',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">MPG (default: 17.5)</label><input class="fi" type="number" id="st_m" value="${s.mpg}" step="0.1" onchange="setSt('mpg',parseFloat(this.value))"></div>
@@ -4662,12 +4838,15 @@ function cloudCardHTML(){
 // app version and does not have to match BX_BUILD.version. Bump the URL number
 // whenever you need a device to fetch a fresh copy; leave version alone.
 const BX_BUILD={
-  version:'v29',
+  version:(typeof APP_VERSION!=='undefined'?APP_VERSION:'v30'),
   baseCommit:'42daec5',
   backupBranch:'backup/pre-export-2026-08-20',
   featureCommit:'a90760e',
-  featureBuild:'export-2026-08-20c',
-  builtOn:'2026-08-20'
+  featureBuild:'export-2026-08-20d-phase2a',
+  builtOn:'2026-08-20',
+  phase:'2A',
+  phase2aBaseCommit:'d15efa7',
+  phase2aBackupBranch:'backup/pre-phase2a-2026-08-20'
 };
 
 function bxNum(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
@@ -4688,7 +4867,21 @@ function bxView(st){
   const A=st||{}, set=A.settings||{}, V={state:A,settings:set};
   const N=bxNum;
   V.price=k=>{ const p=A.prices&&A.prices[k]; return (p!=null&&p!=='')?N(p):((SKUS.find(s=>s.key===k)||{}).defP||0); };
-  V.cost =k=>{ const c=A.costs &&A.costs[k];  return (c!=null&&c!=='')?N(c):((SKUS.find(s=>s.key===k)||{}).cost||0); };
+  // Phase 2A: cost resolution is date-aware and reads ONLY this snapshot.
+  // Precedence: per-show override, dated historical schedule entry, snapshot cost
+  // table, newest schedule entry, SKUS default.
+  V.schedule=()=>(A.cogsHistory&&A.cogsHistory.length)?A.cogsHistory:null;
+  V.scheduleValidation=()=>cogsValidate(V.schedule());
+  V.entryOn=dateKey=>cogsEntryOn(dateKey,A);
+  V.isLatestEntry=e=>{ const sch=V.schedule(); return !!e&&!!sch&&e===sch[sch.length-1]; };
+  V.costOn=(k,dateKey,sh)=>getCostOn(k,dateKey,sh,A);
+  V.costSourceOn=(k,dateKey,sh)=>costSourceOn(k,dateKey,sh,A);
+  V.dayKey=(sh,di)=>{ const st=sh&&sh.startDate;
+    if(!(typeof st==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(st)))return null;
+    const d=new Date(st+'T12:00:00'); d.setDate(d.getDate()+(parseInt(di,10)||0));
+    return d.toISOString().slice(0,10); };
+  // Undated / current cost (inventory valuation and anything without a date).
+  V.cost =k=>V.costOn(k,null,null);
   V.setting=(k,dflt)=>(set[k]!=null&&set[k]!=='')?N(set[k]):dflt;
 
   V.dayUnitsLeft=d=>{ const r={}; SKUS.forEach(s=>{
@@ -4700,7 +4893,8 @@ function bxView(st){
   V.dayCogsUnits=d=>V.dayUnitsLeft(d);
   V.dayHasCounts=d=>!!(d.morningCount&&d.eveningCount);
   V.rev=(sold,P)=>SKUS.reduce((t,s)=>t+N(sold[s.key])*((P&&P[s.key]!=null)?N(P[s.key]):V.price(s.key)),0);
-  V.cogsOf=u=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.cost(s.key),0);
+  V.cogsOf=u=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.cost(s.key),0); // undated
+  V.cogsOfOn=(u,dateKey,sh)=>SKUS.reduce((t,s)=>t+N(u[s.key])*V.costOn(s.key,dateKey,sh),0);
   V.pmtTotal=p=>PMTS.reduce((t,m)=>t+N((p||{})[m.key]),0);
 
   V.boothPaid=sh=>(sh.boothPayments||[]).reduce((t,p)=>t+N(p.amount),0);
@@ -4764,8 +4958,8 @@ function bxView(st){
     let cogs=0,exp=0,potential=0,dayGas=0;
     const booth=Math.max(N(sh.boothCost),V.boothPaid(sh));
     exp+=booth;
-    (sh.days||[]).forEach(d=>{
-      if(V.dayHasCounts(d)){ potential+=V.rev(V.daySold(d),sh.prices||null); cogs+=V.cogsOf(V.dayCogsUnits(d)); }
+    (sh.days||[]).forEach((d,di)=>{
+      if(V.dayHasCounts(d)){ potential+=V.rev(V.daySold(d),sh.prices||null); cogs+=V.cogsOfOn(V.dayCogsUnits(d),V.dayKey(sh,di),sh); }
       if(d.expenses){ exp+=Object.values(d.expenses).reduce((a,b)=>a+N(b),0); dayGas+=N(d.expenses.gas); }
     });
     const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(V.gas(sh)*100)/100):0;
@@ -5112,6 +5306,29 @@ function bxCsvFiles(st,meta){
     put('15_season_2025.csv',r);
   }
 
+  // 17. effective-date COGS schedule as it stands in this snapshot
+  r=[['entry_id','label','effective_from','effective_to','is_latest','sku','unit_cost']];
+  (V.schedule()||[]).forEach((e,i,arr)=>{ SKUS.forEach(sk=>{
+    r.push([e.id||('entry'+i),e.label||'',e.effectiveFrom||'',e.effectiveTo||'(open)',
+      (i===arr.length-1)?'yes':'no',sk.key,bxNum((e.costs||{})[sk.key]).toFixed(2)]); }); });
+  r.push(['(cost table)','snapshot costs, governs the current period','','', 'n/a','','']);
+  SKUS.forEach(sk=>{ const c=(st.costs||{})[sk.key];
+    r.push(['(cost table)','S.costs','','','n/a',sk.key,(c!=null&&c!=='')?bxNum(c).toFixed(2):'(not set)']); });
+  put('17_cogs_schedule.csv',r);
+
+  // 18. which cost rule decided each unit, per show day
+  r=[['show_id','show_name','day_index','day_date','sku','unit_cost_used','cost_source','schedule_entry']];
+  shows.forEach(sh=>(sh.days||[]).forEach((d,di)=>{ if(!V.dayHasCounts(d))return;
+    const dk=V.dayKey(sh,di), e=V.entryOn(dk);
+    SKUS.forEach(sk=>r.push([sh.id,sh.name,di+1,dk||'(no date)',sk.key,
+      V.costOn(sk.key,dk,sh).toFixed(2),V.costSourceOn(sk.key,dk,sh),(e&&e.id)||''])); }));
+  if(r.length===1)r.push(['(none)','no show day has both counts, so no COGS was computed','','','','','','']);
+  put('18_cost_source_by_day.csv',r);
+
+  // 19. reconciliation preview, read only
+  if(meta._recon)F.push({name:'19_reconciliation_preview.csv',
+    text:_csvRows([hdr]) +'\r\n'+ bxReconCsv(meta._recon)});
+
   r=[['source','present','label','updated_at','fingerprint','shows','show_days','reps','selected_for_this_export']];
   ['memory','localStorage','cloud'].forEach(k=>{ const s=(meta._sources||{})[k]||{};
     r.push([k,s.present?'yes':'no',s.label||'',s.updatedAt||'',s.fingerprint||'',
@@ -5126,7 +5343,7 @@ function bxCsvFiles(st,meta){
 }
 
 // ---- Diagnostics. All figures via V, so they describe the SELECTED snapshot. ----
-function bxDiagnose(st,snap){
+function bxDiagnose(st,snap,meta){
   const V=bxView(st), out=[], shows=st.shows||[], reps=st.reps||[];
   const add=(sev,code,title,items,advice)=>{ if(items.length)out.push({sev,code,title,count:items.length,items,advice}); };
   const nm=sh=>sh.name+(sh.startDate?' ('+sh.startDate+')':'');
@@ -5199,6 +5416,41 @@ function bxDiagnose(st,snap){
   Object.keys(clash).sort().forEach(k=>{ if(clash[k].length>1)dupes.push('Two confirmed shows on '+k+': '+clash[k].join(' AND ')); });
   add('WARN','DUPLICATE_SHOWS','Duplicate or conflicting show records',dupes,
     'Two confirmed shows on the same day cannot both be worked unless a rep covers one.');
+
+  const sch=V.schedule(), sv=V.scheduleValidation();
+  add('CRITICAL','COGS_SCHEDULE_INVALID','COGS schedule is not valid, so costs fell back',
+    sch?sv.errors:[], 'While the schedule is invalid it is ignored entirely and costs fall back to the cost table, then to the product default. Fix the schedule before trusting any COGS figure.');
+  add('WARN','COGS_SCHEDULE_GAPS','COGS schedule has gaps or an open end problem',
+    sch?sv.warnings:[], 'Sale dates inside a gap are not covered by any period and fall back.');
+  const uncovered=[];
+  if(sch&&sv.valid)shows.forEach(sh=>(sh.days||[]).forEach((d,di)=>{
+    if(!V.dayHasCounts(d))return; const dk=V.dayKey(sh,di);
+    if(!V.entryOn(dk))uncovered.push(nm(sh)+' day '+(di+1)+' ('+(dk||'no date')+') is not covered by any schedule period'); }));
+  add('CRITICAL','COGS_DATE_UNCOVERED','Selling days with no schedule period',uncovered,
+    'These days fell back to the cost table or the product default instead of a dated cost.');
+  const schedDrift=[];
+  const latest=sch?sch[sch.length-1]:null;
+  SKUS.forEach(sk=>{ const t=(st.costs||{})[sk.key];
+    if(t!=null&&t!==''&&latest&&latest.costs&&latest.costs[sk.key]!=null&&
+       Math.abs(bxNum(t)-bxNum(latest.costs[sk.key]))>0.0001)
+      schedDrift.push(sk.name+': cost table '+M(bxNum(t))+' vs newest schedule entry '+M(bxNum(latest.costs[sk.key]))); });
+  add('WARN','COGS_TABLE_STALE','Cost table no longer matches the newest schedule entry',schedDrift,
+    'The schedule is authoritative, so the table is not used for calculation. It should still be kept in step, and the staged cost-change flow does that automatically.');
+
+  if(snap&&snap.comparison&&meta&&meta._recon&&meta._recon.available){
+    const R=meta._recon, items=[];
+    R.onlyInLocal.forEach(x=>items.push('Only on this device, not in the cloud: '+x.label));
+    R.onlyInCloud.forEach(x=>items.push('Only in the cloud, not on this device: '+x.label));
+    R.conflicts.forEach(x=>items.push('Field conflict: '+x.label+' ('+x.diffs.map(d=>d.field).join(', ')+')'));
+    add('WARN','RECON_PENDING','Local and cloud copies are not reconciled',items,
+      'Preview only. Phase 2A deliberately has no apply, sync, repair, restore or push action. Nothing was written.');
+    add('CRITICAL','RECON_AMBIGUOUS','Records that cannot be matched safely',
+      (R.ambiguous||[]).map(x=>(x.label||x.id||'(record)')+' — '+x.reason),
+      'More than one record could be the same show, or an id appears twice. These are never matched automatically and must be resolved by a person before any future merge.');
+    add('WARN','RECON_FALLBACK_MATCH','Matched on name and date, not on a stable id',
+      (R.fallbackMatches||[]).map(x=>x.label+' (local id '+(x.localId||'none')+', cloud id '+(x.cloudId||'none')+')'),
+      'One side is missing a show id, so the match rests on a normalised name and start date. It is not id-verified and authorises nothing on its own.');
+  }
 
   if(snap&&snap.cloudRead&&snap.cloudRead.status!=='ok'){
     const cs=snap.cloudRead.status;
@@ -5303,8 +5555,26 @@ function bxSummary(st,meta,diag,snap){
   line('  Inventory at cost      '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.cost(s.key),0)));
   line('  Inventory at retail    '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.price(s.key),0)));
   line('');
-  rule(); line('PRICES AND COSTS IN THIS SNAPSHOT'); rule();
-  SKUS.forEach(s=>line('  '+s.name.padEnd(22)+' sell '+M(V.price(s.key)).padStart(9)+'   cost '+M(V.cost(s.key)).padStart(9)));
+  rule(); line('PRICES AND CURRENT COSTS IN THIS SNAPSHOT'); rule();
+  SKUS.forEach(s=>line('  '+s.name.padEnd(22)+' sell '+M(V.price(s.key)).padStart(9)+'   cost '+M(V.cost(s.key)).padStart(9)+
+    '   ['+V.costSourceOn(s.key,null,null)+']'));
+  line('');
+  rule(); line('EFFECTIVE-DATE COGS SCHEDULE'); rule();
+  line('  COGS is computed with the costs that were in force on the date of the sale,');
+  line('  not with today\'s cost table. Schedule source: '+((st.cogsHistory&&st.cogsHistory.length)?'this snapshot':'built-in default'));
+  line('');
+  (V.schedule()||[]).forEach((e,i,arr)=>{
+    line('  '+(e.label||e.id)+(i===arr.length-1?'   [LATEST]':''));
+    line('      effective '+(e.effectiveFrom||'?')+' through '+(e.effectiveTo||'open ended'));
+    SKUS.forEach(sk=>line('        '+sk.name.padEnd(22)+M(bxNum((e.costs||{})[sk.key]))));
+    line('');
+  });
+  line('  COST PRECEDENCE, highest first:');
+  line('    1. per-show override on the show record');
+  line('    2. a closed historical schedule period matching the sale date');
+  line('    3. the editable cost table in this snapshot (governs the current period)');
+  line('    4. the newest schedule entry');
+  line('    5. the built-in product default');
   line('');
   rule(); line('SHOWS'); rule();
   shows.slice().sort((a,b)=>(a.startDate||'').localeCompare(b.startDate||'')).forEach(sh=>{
@@ -5312,6 +5582,29 @@ function bxSummary(st,meta,diag,snap){
     line('  '+(sh.startDate||'????-??-??')+'  '+(sh.name||'').padEnd(34).slice(0,34)+' '+String(sh.numDays||1)+'d  '+
       (sh.confirmed===false?'PENDING  ':'confirmed').padEnd(10)+' booth '+M(bxNum(sh.boothCost)).padStart(10)+
       '  paid '+M(V.boothPaid(sh)).padStart(10)+(bal>0.005?'  OWES '+M(bal):'')); });
+  line('');
+  rule(); line('RECONCILIATION PREVIEW (READ ONLY)'); rule();
+  if(!meta._recon||!meta._recon.available){
+    line('  Not available: '+((meta._recon&&meta._recon.reason)||'unknown'));
+  }else{
+    const R=meta._recon;
+    line('  Base for the proposal : localStorage');
+    line('  Only in localStorage  : '+R.onlyInLocal.length+' show(s)');
+    R.onlyInLocal.forEach(x=>line('      '+x.label));
+    line('  Only in cloud         : '+R.onlyInCloud.length+' show(s)');
+    R.onlyInCloud.forEach(x=>line('      '+x.label));
+    line('  Field-level conflicts : '+R.conflicts.length+' show(s), compared to full depth');
+    line('  Identical shows       : '+R.identical.length+' (no persisted value differs anywhere)');
+    line('  Matched by id         : '+((R.matchSummary||{}).byId||0));
+    line('  Matched by fallback   : '+((R.matchSummary||{}).byFallback||0)+'  (needs review before any merge)');
+    line('  Ambiguous, blocked    : '+((R.matchSummary||{}).ambiguous||0));
+    line('  Would add             : '+R.proposal.wouldAdd.length);
+    line('  Would change          : '+R.proposal.wouldChange.length);
+    line('  Would preserve        : '+R.proposal.wouldPreserve.length);
+    line('  Would remove          : 0 (reconciliation never deletes)');
+    line('  Writes performed      : '+R.writesPerformed+'   NOTHING WAS WRITTEN');
+    line('  Full detail is in RECONCILIATION-PREVIEW.txt and 19_reconciliation_preview.csv');
+  }
   line('');
   rule(); line('DIAGNOSTICS'); rule();
   if(!diag.length)line('  No issues found.');
@@ -5329,8 +5622,9 @@ function bxSummary(st,meta,diag,snap){
 // ---- File assembly ----
 function bxBuildAll(snap){
   const sel=snap.sources[snap.selected], st=sel.state||{};
-  const meta=Object.assign({},snap.meta,{_sources:snap.sources});
-  const diag=bxDiagnose(st,snap);
+  const recon=bxReconcile(snap);
+  const meta=Object.assign({},snap.meta,{_sources:snap.sources,_recon:recon});
+  const diag=bxDiagnose(st,snap,meta);
   const csvs=bxCsvFiles(st,meta);
   const summary=bxSummary(st,meta,diag,snap);
   const metaOut=Object.assign({},snap.meta);
@@ -5349,6 +5643,12 @@ function bxBuildAll(snap){
       present:snap.sources[k].present,updatedAt:snap.sources[k].updatedAt,
       fingerprint:snap.sources[k].fingerprint,counts:snap.sources[k].counts,selected:k===snap.selected})),
     comparison:snap.comparison,
+    cogsSchedule:(st.cogsHistory&&st.cogsHistory.length)?st.cogsHistory:COGS_SCHEDULE_DEFAULT,
+    cogsScheduleMeta:st.cogsHistoryMeta||null,
+    cogsScheduleSource:(st.cogsHistory&&st.cogsHistory.length)?'snapshot':'built-in default',
+    costTable:st.costs||null,
+    reconciliationPreview:recon,
+    _phase:'2A — preview and proof only. No apply, sync, repair, restore or push action exists.',
     localBackupSlots:snap.localBackups.map(b=>({key:b.key,savedAt:b.savedAt})),
     season2025:(typeof SHOWS_2025!=='undefined')?SHOWS_2025:null };
   const files=[
@@ -5356,6 +5656,7 @@ function bxBuildAll(snap){
     {name:'backup/restorable-state-only.json',text:JSON.stringify(st,null,2)},
     {name:'SUMMARY.txt',text:summary},
     {name:'DIAGNOSTICS.csv',text:bxDiagCsv(diag,meta)},
+    {name:'RECONCILIATION-PREVIEW.txt',text:bxReconReport(recon,meta)},
     {name:'READ-ME-FIRST.txt',text:
       'BEST SOLUTION EXPORT\r\n\r\n'+
       (meta.capturedAllCopies
@@ -5374,7 +5675,522 @@ function bxBuildAll(snap){
   ['memory','localStorage','cloud'].forEach(k=>{ const s=snap.sources[k];
     if(s.present&&k!==snap.selected)files.push({name:'backup/other-copies/'+k+'.json',text:JSON.stringify(s.state,null,2)}); });
   snap.localBackups.forEach((b,i)=>files.push({name:'backup/auto-slot-'+(i+1)+'-'+b.savedAt.slice(0,10)+'.json',text:b.raw||''}));
-  return {files,diag,csvs,backup,meta,summary};
+  return {files,diag,csvs,backup,meta,summary,recon};
+}
+
+// ===================================================
+// PHASE 2A — RECONCILIATION PREVIEW (STRICTLY READ ONLY)
+// Compares localStorage against the Supabase cloud copy and reports what a
+// reconciliation WOULD do. It writes nothing to either side. There is no
+// apply, sync, repair, restore or push action in this phase, by design.
+// ===================================================
+function bxNormName(n){ return String(n||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+function bxShowKey(sh){ return bxNormName(sh&&sh.name)+'|'+((sh&&sh.startDate)||''); }
+function bxShowLabel(sh){ return ((sh&&sh.name)||'(unnamed)')+(sh&&sh.startDate?' ('+sh.startDate+')':''); }
+
+// ---- Fields deliberately NOT compared, because they are derived or display-only ----
+// dates      : array of display strings rebuilt from startDate + numDays
+// days[].date: display string for the same reason
+// Everything else persisted on a show IS compared, recursively, to full depth.
+const BX_DIFF_EXCLUDE={'dates':'derived display array, rebuilt from startDate and numDays',
+                       'days[].date':'derived display string, rebuilt from startDate and day index'};
+function bxIsExcluded(path){
+  return path==='dates'||/^days\[\d+\]\.date$/.test(path);
+}
+// Recursive deep diff. Reports a leaf path for every persisted value that differs,
+// including values present on one side only.
+function bxDeepDiff(a,b,path,out){
+  if(bxIsExcluded(path))return;
+  const ta=(a===null)?'null':(Array.isArray(a)?'array':typeof a);
+  const tb=(b===null)?'null':(Array.isArray(b)?'array':typeof b);
+  if(a===undefined&&b===undefined)return;
+  if(a===undefined||b===undefined||ta!==tb||ta!=='object'&&ta!=='array'){
+    if(JSON.stringify(a===undefined?null:a)!==JSON.stringify(b===undefined?null:b))
+      out.push({field:path||'(root)',local:a===undefined?'(absent)':a,cloud:b===undefined?'(absent)':b});
+    return;
+  }
+  if(ta==='array'){
+    const n=Math.max(a.length,b.length);
+    if(a.length!==b.length)out.push({field:path+'.length',local:a.length,cloud:b.length});
+    for(let i=0;i<n;i++)bxDeepDiff(a[i],b[i],path+'['+i+']',out);
+    return;
+  }
+  const keys={}; Object.keys(a||{}).forEach(k=>keys[k]=1); Object.keys(b||{}).forEach(k=>keys[k]=1);
+  Object.keys(keys).sort().forEach(k=>bxDeepDiff((a||{})[k],(b||{})[k],path?path+'.'+k:k,out));
+}
+function bxDiffShow(a,b){ const out=[]; bxDeepDiff(a,b,'',out); return out; }
+
+// ---- ID-FIRST MATCHING ----
+// Stable show id is the only trusted key. Normalised name + start date is a
+// LABELLED fallback, used only when an id is missing on one side, and only when
+// it resolves to exactly one candidate. Anything else is ambiguous and is held
+// for human review; it never silently authorises a future merge.
+function bxMatchShows(L,C){
+  const res={pairs:[],onlyLocal:[],onlyCloud:[],ambiguous:[],blocked:[]};
+  const lShows=(L.shows||[]).slice(), cShows=(C.shows||[]).slice();
+
+  // Count every id on each side first. An id that appears twice ANYWHERE stops
+  // being an identity: it cannot tell two records apart, so it is quarantined.
+  const lCount={}, cCount={};
+  lShows.forEach(sh=>{ if(sh.id)lCount[sh.id]=(lCount[sh.id]||0)+1; });
+  cShows.forEach(sh=>{ if(sh.id)cCount[sh.id]=(cCount[sh.id]||0)+1; });
+  const poisoned={};
+  Object.keys(lCount).forEach(id=>{ if(lCount[id]>1)poisoned[id]=1; });
+  Object.keys(cCount).forEach(id=>{ if(cCount[id]>1)poisoned[id]=1; });
+
+  // Every record carrying a duplicated id — on BOTH sides, including the side
+  // where the id appears only once — is blocked. It never reaches pairs,
+  // identical, conflicts, onlyLocal, onlyCloud, or any proposal bucket.
+  Object.keys(poisoned).sort().forEach(id=>{
+    const lHits=lShows.filter(sh=>sh.id===id), cHits=cShows.filter(sh=>sh.id===id);
+    const where=(lCount[id]||0)>1&&(cCount[id]||0)>1?'localStorage and cloud'
+              :((lCount[id]||0)>1?'localStorage':'cloud');
+    res.ambiguous.push({reason:'duplicate id in '+where+': '+(lCount[id]||0)+' local record'+
+        ((lCount[id]||0)===1?'':'s')+' and '+(cCount[id]||0)+' cloud record'+((cCount[id]||0)===1?'':'s')+
+        ' share this id, so it cannot identify a record',
+      id:id, localCount:(lCount[id]||0), cloudCount:(cCount[id]||0),
+      label:bxShowLabel(lHits[0]||cHits[0]),
+      localRecords:lHits.map(sh=>({label:bxShowLabel(sh),startDate:sh.startDate||null})),
+      cloudRecords:cHits.map(sh=>({label:bxShowLabel(sh),startDate:sh.startDate||null})),
+      needsHumanReview:true});
+    lHits.forEach(sh=>res.blocked.push({side:'localStorage',id:id,label:bxShowLabel(sh)}));
+    cHits.forEach(sh=>res.blocked.push({side:'cloud',id:id,label:bxShowLabel(sh)}));
+  });
+
+  // From here on, poisoned records simply do not exist.
+  const lOk=lShows.filter(sh=>!(sh.id&&poisoned[sh.id]));
+  const cOk=cShows.filter(sh=>!(sh.id&&poisoned[sh.id]));
+
+  const cById={}; cOk.forEach(sh=>{ if(sh.id)cById[sh.id]=sh; });
+  const usedCloud={};
+  lOk.forEach(a=>{
+    if(a.id&&cById[a.id]){ usedCloud[a.id]=1;
+      res.pairs.push({local:a,cloud:cById[a.id],matchedBy:'id',id:a.id,trusted:true}); }
+  });
+  const unmatchedLocal=lOk.filter(a=>!(a.id&&cById[a.id]));
+  const unmatchedCloud=cOk.filter(b=>!(b.id&&usedCloud[b.id]));
+  // Claimed cloud records are tracked in a Set here, never by tagging the record
+  // itself: matching is a read of the caller's data and must not write to it.
+  const taken=new Set();
+  unmatchedLocal.forEach(a=>{
+    // Fallback is ONLY permitted when an id is missing on one side. Two records
+    // that both carry ids and those ids differ are DIFFERENT records, never
+    // merged on a name-and-date coincidence.
+    const cands=unmatchedCloud.filter(b=>!taken.has(b)&&bxShowKey(a)===bxShowKey(b)&&(!a.id||!b.id));
+    if(cands.length===1){
+      taken.add(cands[0]);
+      res.pairs.push({local:a,cloud:cands[0],matchedBy:'fallback: normalised name + start date',
+        id:a.id||null,trusted:false,
+        note:'FALLBACK MATCH, not id-verified. Review before any future merge.'});
+    }else if(cands.length>1){
+      res.ambiguous.push({reason:'fallback match is ambiguous, '+cands.length+' cloud records share this name and date',
+        label:bxShowLabel(a),localId:a.id||null,
+        candidates:cands.map(c=>({id:c.id||null,label:bxShowLabel(c)})),needsHumanReview:true});
+      res.blocked.push({side:'localStorage',id:a.id||null,label:bxShowLabel(a)});
+      cands.forEach(c=>res.blocked.push({side:'cloud',id:c.id||null,label:bxShowLabel(c)}));
+    }else{
+      res.onlyLocal.push(a);
+    }
+  });
+  const ambigCloud=new Set();
+  res.ambiguous.forEach(x=>(x.candidates||[]).forEach(c=>ambigCloud.add(c.id)));
+  unmatchedCloud.forEach(b=>{ if(!taken.has(b)&&!ambigCloud.has(b.id||null))res.onlyCloud.push(b); });
+  return res;
+}
+
+function bxCountRecords(st){
+  const shows=(st&&st.shows)||[]; let days=0,bp=0,se=0;
+  shows.forEach(sh=>{ days+=(sh.days||[]).length; bp+=(sh.boothPayments||[]).length; se+=(sh.showExpenses||[]).length; });
+  return {shows:shows.length,showDays:days,boothPayments:bp,showExpenses:se,reps:((st&&st.reps)||[]).length};
+}
+
+function bxReconcile(snap){
+  const L=(snap.sources.localStorage&&snap.sources.localStorage.state)||null;
+  const C=(snap.sources.cloud&&snap.sources.cloud.state)||null;
+  const out={
+    available:!!(L&&C),
+    reason:!L?'no localStorage copy available':(!C?('cloud copy not captured: '+((snap.cloudRead&&snap.cloudRead.message)||'unknown')):''),
+    base:'localStorage',
+    fingerprints:{localStorage:(snap.sources.localStorage||{}).fingerprint||null,
+                  cloud:(snap.sources.cloud||{}).fingerprint||null,
+                  memory:(snap.sources.memory||{}).fingerprint||null},
+    updatedAt:{localStorage:(snap.sources.localStorage||{}).updatedAt||null,
+               cloud:(snap.sources.cloud||{}).updatedAt||null,
+               memory:(snap.sources.memory||{}).updatedAt||null},
+    counts:{localStorage:L?bxCountRecords(L):null, cloud:C?bxCountRecords(C):null},
+    onlyInLocal:[], onlyInCloud:[], conflicts:[], identical:[],
+    ambiguous:[], fallbackMatches:[], matchSummary:null,
+    excludedFields:BX_DIFF_EXCLUDE,
+    migrationsOnlyInLocal:[], migrationsOnlyInCloud:[],
+    repsOnlyInLocal:[], repsOnlyInCloud:[],
+    settingsDiffs:[], inventoryDiffs:[], costTableDiffs:[], scheduleDiffs:[],
+    proposal:{wouldAdd:[],wouldChange:[],wouldPreserve:[],wouldRemove:[],blocked:[],needsReview:[]},
+    writesPerformed:0
+  };
+  if(!out.available)return out;
+
+  const M=bxMatchShows(L,C);
+  out.matchSummary={byId:M.pairs.filter(p=>p.matchedBy==='id').length,
+                    byFallback:M.pairs.filter(p=>p.matchedBy!=='id').length,
+                    ambiguous:M.ambiguous.length,
+                    blockedRecords:M.blocked.length,
+                    blockedLocal:M.blocked.filter(b=>b.side==='localStorage').length,
+                    blockedCloud:M.blocked.filter(b=>b.side==='cloud').length};
+  out.ambiguous=M.ambiguous;
+  out.blocked=M.blocked;
+  out.fallbackMatches=[];
+
+  M.onlyLocal.forEach(a=>out.onlyInLocal.push({key:bxShowKey(a),label:bxShowLabel(a),id:a.id||null,
+    startDate:a.startDate||'',days:(a.days||[]).length,boothCost:bxNum(a.boothCost),
+    boothPayments:(a.boothPayments||[]).length,showExpenses:(a.showExpenses||[]).length,
+    confirmed:a.confirmed!==false}));
+  M.onlyCloud.forEach(b2=>out.onlyInCloud.push({key:bxShowKey(b2),label:bxShowLabel(b2),id:b2.id||null,
+    startDate:b2.startDate||'',days:(b2.days||[]).length,boothCost:bxNum(b2.boothCost)}));
+
+  M.pairs.forEach(pr=>{
+    const diffs=bxDiffShow(pr.local,pr.cloud);
+    if(!pr.trusted)out.fallbackMatches.push({label:bxShowLabel(pr.local),localId:pr.local.id||null,
+      cloudId:pr.cloud.id||null,note:pr.note});
+    if(diffs.length){
+      out.conflicts.push({key:bxShowKey(pr.local),label:bxShowLabel(pr.local),id:pr.local.id||null,
+        matchedBy:pr.matchedBy,trusted:pr.trusted,diffs:diffs});
+    }else{
+      out.identical.push({label:bxShowLabel(pr.local),id:pr.local.id||null,matchedBy:pr.matchedBy,trusted:pr.trusted});
+    }
+  });
+
+  const lm=Object.keys(L._applied||{}), cm=Object.keys(C._applied||{});
+  out.migrationsOnlyInLocal=lm.filter(k=>!(C._applied||{})[k]);
+  out.migrationsOnlyInCloud=cm.filter(k=>!(L._applied||{})[k]);
+
+  const lr={}, cr={};
+  (L.reps||[]).forEach(r=>lr[r.id]=r); (C.reps||[]).forEach(r=>cr[r.id]=r);
+  out.repsOnlyInLocal=Object.keys(lr).filter(id=>!cr[id]).map(id=>lr[id].name+' ('+id+')');
+  out.repsOnlyInCloud=Object.keys(cr).filter(id=>!lr[id]).map(id=>cr[id].name+' ('+id+')');
+
+  const keys=k=>Object.keys(k||{});
+  const cmp=(a,b,label,bucket)=>{
+    const all={}; keys(a).forEach(k=>all[k]=1); keys(b).forEach(k=>all[k]=1);
+    Object.keys(all).sort().forEach(k=>{
+      const av=(a||{})[k], bv=(b||{})[k];
+      if(JSON.stringify(av===undefined?null:av)!==JSON.stringify(bv===undefined?null:bv))
+        bucket.push({field:label+'.'+k,local:av===undefined?null:av,cloud:bv===undefined?null:bv});
+    });
+  };
+  cmp(L.settings,C.settings,'settings',out.settingsDiffs);
+  cmp(L.inventory,C.inventory,'inventory',out.inventoryDiffs);
+  cmp(L.costs,C.costs,'costs',out.costTableDiffs);
+  if(JSON.stringify(L.cogsHistory||null)!==JSON.stringify(C.cogsHistory||null))
+    out.scheduleDiffs.push({field:'cogsHistory',local:(L.cogsHistory||[]).length+' entries',cloud:(C.cogsHistory||[]).length+' entries'});
+
+  // PROPOSAL ONLY. Nothing here is executed in Phase 2A.
+  out.onlyInLocal.forEach(x=>out.proposal.wouldAdd.push(
+    'ADD to cloud: '+x.label+'  ('+x.days+' days, booth '+bxMoney(x.boothCost)+', '+x.boothPayments+' payments)'));
+  out.conflicts.forEach(x=>out.proposal.wouldChange.push(
+    'CHANGE in cloud: '+x.label+'  ['+x.matchedBy+(x.trusted?'':', NEEDS REVIEW')+']  ('+
+    x.diffs.length+' field'+(x.diffs.length===1?'':'s')+': '+
+    x.diffs.slice(0,8).map(d=>d.field).join(', ')+(x.diffs.length>8?', +'+(x.diffs.length-8)+' more':'')+')'));
+  out.ambiguous.forEach(x=>out.proposal.blocked.push(
+    'BLOCKED, human review required: '+(x.label||x.id||'(record)')+'  — '+x.reason));
+  M.blocked.forEach(b=>out.proposal.blocked.push(
+    'BLOCKED, excluded from every action: '+b.side+' record '+b.label+
+    ' (id '+(b.id||'none')+') is quarantined and cannot be added, changed or preserved'));
+  out.fallbackMatches.forEach(x=>out.proposal.needsReview.push(
+    'FALLBACK MATCH, not id-verified: '+x.label+'  (local id '+(x.localId||'none')+', cloud id '+(x.cloudId||'none')+')'));
+  out.identical.forEach(x=>out.proposal.wouldPreserve.push('PRESERVE unchanged: '+x.label));
+  out.onlyInCloud.forEach(x=>out.proposal.wouldPreserve.push(
+    'PRESERVE cloud-only record, NOT deleted: '+x.label));
+  out.migrationsOnlyInLocal.forEach(k=>out.proposal.wouldAdd.push('ADD migration marker to cloud: '+k));
+  out.repsOnlyInLocal.forEach(r=>out.proposal.wouldAdd.push('ADD rep to cloud: '+r));
+  out.settingsDiffs.concat(out.costTableDiffs,out.inventoryDiffs,out.scheduleDiffs)
+    .forEach(d=>out.proposal.wouldChange.push('CHANGE in cloud: '+d.field+'  local='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud)));
+  return out;
+}
+
+function bxReconReport(rec,meta){
+  const L=[], line=s=>L.push(s), rule=()=>L.push('='.repeat(66));
+  rule(); line('BEST SOLUTION — RECONCILIATION PREVIEW (READ ONLY)'); rule();
+  line('Generated      : '+(meta?meta.exportedAt:''));
+  line('App version    : '+(meta?meta.appVersion:'')+'   module build: '+(meta?meta.featureBuild:''));
+  line('');
+  line('NOTHING WAS WRITTEN. This is a preview of what a reconciliation would do.');
+  line('Phase 2A has no apply, sync, repair, restore or push-to-cloud action.');
+  line('Writes performed this run: '+rec.writesPerformed);
+  line('');
+  if(!rec.available){ line('Comparison unavailable: '+rec.reason); rule(); return L.join('\r\n'); }
+  rule(); line('SOURCE FINGERPRINTS'); rule();
+  ['memory','localStorage','cloud'].forEach(k=>
+    line('  '+k.padEnd(14)+' '+String(rec.fingerprints[k]||'n/a').padEnd(22)+' updated '+(rec.updatedAt[k]||'unknown')));
+  line('');
+  rule(); line('RECORD COUNTS'); rule();
+  const c=rec.counts;
+  line('  '+'metric'.padEnd(18)+'localStorage'.padStart(14)+'cloud'.padStart(10)+'difference'.padStart(13));
+  ['shows','showDays','boothPayments','showExpenses','reps'].forEach(k=>{
+    const a=c.localStorage[k], b=c.cloud[k];
+    line('  '+k.padEnd(18)+String(a).padStart(14)+String(b).padStart(10)+String(a-b>=0?'+'+(a-b):(a-b)).padStart(13));
+  });
+  line('');
+  rule(); line('RECORDS ONLY IN LOCALSTORAGE  ('+rec.onlyInLocal.length+')'); rule();
+  if(!rec.onlyInLocal.length)line('  none');
+  rec.onlyInLocal.forEach(x=>{ line('  '+x.label);
+    line('      '+x.days+' days, booth '+bxMoney(x.boothCost)+', '+x.boothPayments+' booth payments, '+x.showExpenses+' show expenses'); });
+  line('');
+  rule(); line('RECORDS ONLY IN CLOUD  ('+rec.onlyInCloud.length+')'); rule();
+  if(!rec.onlyInCloud.length)line('  none');
+  rec.onlyInCloud.forEach(x=>line('  '+x.label+'   ('+x.days+' days)'));
+  line('');
+  rule(); line('HOW RECORDS WERE MATCHED'); rule();
+  const ms=rec.matchSummary||{};
+  line('  Matched by stable id        : '+(ms.byId||0));
+  line('  Matched by FALLBACK         : '+(ms.byFallback||0)+'   (normalised name + start date)');
+  line('  Ambiguous, held for review  : '+(ms.ambiguous||0));
+  line('  Records QUARANTINED         : '+(ms.blockedRecords||0)+
+       '   ('+(ms.blockedLocal||0)+' on this device, '+(ms.blockedCloud||0)+' in the cloud)');
+  if((rec.blocked||[]).length){ line('');
+    line('  QUARANTINED RECORDS. A duplicated id cannot identify a record, so every copy');
+    line('  carrying it is excluded from matching and from every proposal. Nothing here can');
+    line('  be added, changed or preserved until a person resolves the duplicate:');
+    rec.blocked.forEach(b=>line('      '+b.side.padEnd(13)+' id '+(b.id||'none')+'   '+b.label)); }
+  if((rec.fallbackMatches||[]).length){ line('');
+    line('  FALLBACK MATCHES, not id-verified. Review before any future merge:');
+    rec.fallbackMatches.forEach(x=>line('      '+x.label+'   local id '+(x.localId||'none')+', cloud id '+(x.cloudId||'none'))); }
+  if((rec.ambiguous||[]).length){ line('');
+    line('  AMBIGUOUS, HUMAN REVIEW REQUIRED. These are never auto-matched:');
+    rec.ambiguous.forEach(x=>{ line('      '+(x.label||x.id||'(record)')+'   '+x.reason);
+      if(x.localCount!=null)line('          carried by '+x.localCount+' record'+(x.localCount===1?'':'s')+
+        ' on this device and '+x.cloudCount+' record'+(x.cloudCount===1?'':'s')+' in the cloud');
+      (x.localRecords||[]).forEach(r=>line('          device: '+r.label));
+      (x.cloudRecords||[]).forEach(r=>line('          cloud : '+r.label));
+      (x.candidates||[]).forEach(c=>line('          candidate: '+c.label+'  id '+(c.id||'none'))); }); }
+  line('');
+  rule(); line('FIELD-LEVEL CONFLICTS  ('+rec.conflicts.length+' shows)'); rule();
+  line('  Every persisted value inside a matched show is compared to full depth.');
+  line('  Excluded as derived or display only:');
+  Object.keys(rec.excludedFields||{}).forEach(k=>line('      '+k+'  —  '+rec.excludedFields[k]));
+  line('');
+  if(!rec.conflicts.length)line('  none');
+  rec.conflicts.forEach(x=>{ line('  '+x.label+'   [matched by '+x.matchedBy+(x.trusted?'':', NEEDS REVIEW')+']');
+    x.diffs.forEach(d=>line('      '+String(d.field).padEnd(34)+' local='+JSON.stringify(d.local)+'   cloud='+JSON.stringify(d.cloud))); });
+  line('');
+  const other=[['Settings',rec.settingsDiffs],['Cost table',rec.costTableDiffs],
+               ['Inventory',rec.inventoryDiffs],['COGS schedule',rec.scheduleDiffs]];
+  rule(); line('OTHER DIFFERENCES'); rule();
+  other.forEach(([n,arr])=>{ line('  '+n+': '+(arr.length?arr.length+' difference(s)':'identical'));
+    arr.forEach(d=>line('      '+d.field+'  local='+JSON.stringify(d.local)+'  cloud='+JSON.stringify(d.cloud))); });
+  line('  Migration markers only in localStorage: '+(rec.migrationsOnlyInLocal.join(', ')||'none'));
+  line('  Migration markers only in cloud:        '+(rec.migrationsOnlyInCloud.join(', ')||'none'));
+  line('  Reps only in localStorage:              '+(rec.repsOnlyInLocal.join(', ')||'none'));
+  line('  Reps only in cloud:                     '+(rec.repsOnlyInCloud.join(', ')||'none'));
+  line('');
+  rule(); line('PROPOSED RESULT IF LOCALSTORAGE IS THE OPERATIONAL BASE'); rule();
+  line('  This is a proposal. It has NOT been applied.');
+  line('');
+  line('  WOULD ADD ('+rec.proposal.wouldAdd.length+')');
+  if(!rec.proposal.wouldAdd.length)line('    none');
+  rec.proposal.wouldAdd.forEach(x=>line('    '+x));
+  line('');
+  line('  WOULD CHANGE ('+rec.proposal.wouldChange.length+')');
+  if(!rec.proposal.wouldChange.length)line('    none');
+  rec.proposal.wouldChange.forEach(x=>line('    '+x));
+  line('');
+  line('  WOULD PRESERVE ('+rec.proposal.wouldPreserve.length+')');
+  if(!rec.proposal.wouldPreserve.length)line('    none');
+  rec.proposal.wouldPreserve.forEach(x=>line('    '+x));
+  line('');
+  line('  WOULD REMOVE ('+rec.proposal.wouldRemove.length+')');
+  line('    none. Reconciliation never deletes. Cloud-only records are preserved.');
+  line('');
+  line('  NEEDS REVIEW BEFORE ANY MERGE ('+rec.proposal.needsReview.length+')');
+  if(!rec.proposal.needsReview.length)line('    none');
+  rec.proposal.needsReview.forEach(x=>line('    '+x));
+  line('');
+  line('  BLOCKED, HUMAN DECISION REQUIRED ('+rec.proposal.blocked.length+')');
+  if(!rec.proposal.blocked.length)line('    none');
+  rec.proposal.blocked.forEach(x=>line('    '+x));
+  line('');
+  rule();
+  line('END OF PREVIEW. No data was modified in localStorage, in memory, or in the cloud.');
+  rule();
+  return L.join('\r\n');
+}
+
+function bxReconCsv(rec){
+  const r=[['category','record','field','local_value','cloud_value','proposed_action']];
+  if(!rec.available){ r.push(['unavailable',rec.reason,'','','','']); return _csvRows(r); }
+  rec.onlyInLocal.forEach(x=>r.push(['only_in_localStorage',x.label,'','present','MISSING','would add to cloud']));
+  rec.onlyInCloud.forEach(x=>r.push(['only_in_cloud',x.label,'','MISSING','present','would preserve, never delete']));
+  rec.conflicts.forEach(x=>x.diffs.forEach(d=>
+    r.push(['field_conflict'+(x.trusted?'':'_FALLBACK_MATCH'),x.label,d.field,JSON.stringify(d.local),JSON.stringify(d.cloud),
+      x.trusted?'would take localStorage value':'REVIEW: match not id-verified'])));
+  (rec.fallbackMatches||[]).forEach(x=>r.push(['fallback_match',x.label,'','local id '+(x.localId||'none'),'cloud id '+(x.cloudId||'none'),'review before any merge']));
+  (rec.ambiguous||[]).forEach(x=>r.push(['AMBIGUOUS',x.label||x.id||'(record)','',x.reason,'','BLOCKED, human review required']));
+  Object.keys(rec.excludedFields||{}).forEach(k=>r.push(['excluded_field',k,'','','',rec.excludedFields[k]]));
+  rec.settingsDiffs.concat(rec.costTableDiffs,rec.inventoryDiffs,rec.scheduleDiffs).forEach(d=>
+    r.push(['global_difference','(state)',d.field,JSON.stringify(d.local),JSON.stringify(d.cloud),'would take localStorage value']));
+  rec.migrationsOnlyInLocal.forEach(k=>r.push(['migration_marker',k,'','present','MISSING','would add to cloud']));
+  rec.migrationsOnlyInCloud.forEach(k=>r.push(['migration_marker',k,'','MISSING','present','would preserve']));
+  rec.repsOnlyInLocal.forEach(x=>r.push(['rep_only_local',x,'','present','MISSING','would add to cloud']));
+  rec.repsOnlyInCloud.forEach(x=>r.push(['rep_only_cloud',x,'','MISSING','present','would preserve']));
+  rec.identical.forEach(x=>r.push(['identical',x.label,'','same','same','would preserve unchanged']));
+  return _csvRows(r);
+}
+
+// ===================================================
+// PHASE 2A — STAGED COST-CHANGE WORKFLOW
+// Costs are never edited in place. A change is entered in full, reviewed, and
+// only then committed as ONE atomic schedule change: the open period closes the
+// day before the new effective date, a new period opens, and the legacy cost
+// table is brought into step. Editing one product can never produce six entries.
+// ===================================================
+let _csDraft=null;
+
+function csFmtDate(k){ if(!/^\d{4}-\d{2}-\d{2}$/.test(k||''))return k||'';
+  const d=new Date(k+'T12:00:00');
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+function csCurrentEntry(){ const sch=cogsSchedule(S); if(!sch)return null;
+  const open=sch.filter(e=>e.effectiveTo==null||e.effectiveTo==='');
+  return open.length===1?open[0]:sch[sch.length-1]; }
+
+// Step 1 — collect all six costs plus one effective date. Nothing is saved here.
+function csOpen(){
+  const cur=csCurrentEntry(), sv=cogsValidate(cogsSchedule(S));
+  const today=_todayKey();
+  const rows=SKUS.map(sk=>{
+    const now=cur&&cur.costs?bxNum(cur.costs[sk.key]):getCost(sk.key);
+    return '<div class="fg"><label class="fl">'+sk.name+' &nbsp;<span style="color:var(--muted)">now '+fmt(now)+'</span></label>'+
+      '<input class="fi" type="number" step="0.01" min="0" id="cs_'+sk.key+'" value="'+now.toFixed(2)+'"></div>';
+  }).join('');
+  mOpen('<div class="mh"><div class="mt">💲 Change product costs</div><button class="mx" onclick="mClose()">&times;</button></div>'+
+  (sv.valid?'':'<div class="card rb" style="margin-bottom:10px;padding:10px"><div style="font-size:11px;font-weight:900;color:var(--red)">SCHEDULE PROBLEM</div>'+
+     '<div style="font-size:11px">'+sv.errors.map(e=>e.replace(/</g,'&lt;')).join('<br>')+'</div></div>')+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter <strong>all six</strong> new costs and the date they take effect. '+
+  'Nothing is saved until you review and confirm on the next screen. Past periods are never touched.</div>'+
+  '<div class="fg"><label class="fl">New costs take effect on</label>'+
+  '<input class="fi" type="date" id="cs_date" value="'+today+'"></div>'+
+  '<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">The period running now will be closed on the day before this date.</div>'+
+  rows+
+  '<button class="btn btn-gold btn-full" style="margin-top:6px" onclick="csReview()">Review this change →</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+}
+
+// Step 2 — show the complete proposed change. Still nothing saved.
+function csReview(){
+  const dk=cogsIsoKey((($$('cs_date')||{}).value)||'');
+  if(!dk){toast('That is not a real calendar date. Nothing has been changed.');return;}
+  const cur=csCurrentEntry();
+  if(cur){
+    const f=cur.effectiveFrom||'';
+    if(dk<=f){toast('The new date must be after '+csFmtDate(f)+', when the current period started');return;}
+  }
+  const costs={}; let bad=null;
+  SKUS.forEach(sk=>{ const raw=(($$('cs_'+sk.key)||{}).value);
+    if(raw===''||raw==null){bad=bad||sk.name+' is blank';return;}
+    const n=parseFloat(raw);
+    if(!isFinite(n)){bad=bad||sk.name+' is not a number';return;}
+    if(n<0){bad=bad||sk.name+' is negative';return;}
+    costs[sk.key]=Math.round(n*100)/100; });
+  if(bad){toast('All six costs are required: '+bad);return;}
+  const closes=cur?cogsDayBefore(dk):null;
+  if(cur&&!closes){toast('Could not work out the day before '+dk+'. Nothing has been changed.');return;}
+  _csDraft={effectiveFrom:dk,costs:costs,closesPrevOn:closes,prevId:cur?cur.id:null};
+  const changed=SKUS.filter(sk=>{ const now=cur&&cur.costs?bxNum(cur.costs[sk.key]):getCost(sk.key);
+    return Math.abs(now-costs[sk.key])>0.0001; });
+  const rows=SKUS.map(sk=>{
+    const now=cur&&cur.costs?bxNum(cur.costs[sk.key]):getCost(sk.key), nw=costs[sk.key];
+    const moved=Math.abs(now-nw)>0.0001;
+    return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">'+
+      '<span'+(moved?' style="font-weight:800"':'')+'>'+sk.name+'</span>'+
+      '<span>'+fmt(now)+' <span style="color:var(--muted)">&rarr;</span> <strong style="color:'+(moved?'var(--gold)':'var(--muted)')+'">'+fmt(nw)+'</strong></span></div>';
+  }).join('');
+  mOpen('<div class="mh"><div class="mt">Review cost change</div><button class="mx" onclick="mClose()">&times;</button></div>'+
+  '<div class="card" style="margin-bottom:10px">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">WHAT WILL HAPPEN</div>'+
+    (cur?'<div style="font-size:12px;padding:3px 0">Close <strong>'+(cur.label||cur.id)+'</strong> on <strong>'+csFmtDate(_csDraft.closesPrevOn)+'</strong></div>':'')+
+    '<div style="font-size:12px;padding:3px 0">Open a new period starting <strong>'+csFmtDate(dk)+'</strong></div>'+
+    '<div style="font-size:12px;padding:3px 0">Update the cost table to match the new period</div>'+
+    '<div style="font-size:12px;padding:3px 0;color:var(--muted)">All six products are saved together as one change</div>'+
+  '</div>'+
+  '<div class="card" style="margin-bottom:10px">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">COSTS ('+changed.length+' changing)</div>'+rows+'</div>'+
+  '<div class="card" style="margin-bottom:12px;border-color:rgba(255,215,0,0.4)">'+
+    '<div style="font-size:11px">Sales <strong>on or after '+csFmtDate(dk)+'</strong> will use the new costs. '+
+    'Sales before that date keep the costs they already had. Existing history is not rewritten.</div></div>'+
+  '<button class="btn btn-gold btn-full" onclick="csCommit()">✔ Confirm and save this change</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="csOpen()">← Back to edit</button>');
+}
+
+// Step 3 — commit atomically. One saveS(), one audit record.
+function csCommit(){
+  if(!_csDraft){toast('Nothing to save');return;}
+  const d=_csDraft;
+  const sch=(S.cogsHistory&&S.cogsHistory.length)?JSON.parse(JSON.stringify(S.cogsHistory)):[];
+  const before=JSON.parse(JSON.stringify(sch));
+  const openIdx=sch.map((e,i)=>({e,i})).filter(x=>x.e.effectiveTo==null||x.e.effectiveTo==='').map(x=>x.i);
+  if(openIdx.length===1)sch[openIdx[0]].effectiveTo=d.closesPrevOn;
+  else if(sch.length)sch[sch.length-1].effectiveTo=d.closesPrevOn;
+  const id='cogs_'+d.effectiveFrom.replace(/-/g,'_');
+  sch.push({id:id,effectiveFrom:d.effectiveFrom,effectiveTo:null,
+    label:'Effective '+csFmtDate(d.effectiveFrom),costs:JSON.parse(JSON.stringify(d.costs))});
+  const check=cogsValidate(sch);
+  if(!check.valid){ toast('Not saved: '+check.errors[0]); return; }
+  S.cogsHistory=sch;
+  S.costs=S.costs||{}; SKUS.forEach(sk=>S.costs[sk.key]=d.costs[sk.key]);
+  S.cogsAudit=S.cogsAudit||[];
+  S.cogsAudit.push({at:new Date().toISOString(),action:'add-schedule-entry',appVersion:APP_VERSION,
+    entryId:id,effectiveFrom:d.effectiveFrom,closedPrevOn:d.closesPrevOn,
+    costs:JSON.parse(JSON.stringify(d.costs)),scheduleBefore:before});
+  _csDraft=null;
+  saveS(); mClose(); toast('✅ Cost change saved, effective '+csFmtDate(d.effectiveFrom));
+  rSettings();
+}
+
+// Correcting a mistake: explicit, confirmed, and audited. Only the newest entry.
+function csUndoLast(){
+  const sch=(S.cogsHistory||[]);
+  if(sch.length<2){toast('There is only the original period, nothing to undo');return;}
+  const last=sch[sch.length-1];
+  if(!confirm('Remove the most recent cost period?\n\n'+(last.label||last.id)+'\nstarting '+csFmtDate(last.effectiveFrom)+
+    '\n\nThe previous period will be reopened. This is recorded in the cost change log.'))return;
+  const before=JSON.parse(JSON.stringify(sch));
+  const next=sch.slice(0,-1);
+  next[next.length-1].effectiveTo=null;
+  const check=cogsValidate(next);
+  if(!check.valid){toast('Not removed: '+check.errors[0]);return;}
+  S.cogsHistory=next;
+  const nowOpen=next[next.length-1];
+  S.costs=S.costs||{}; SKUS.forEach(sk=>S.costs[sk.key]=bxNum((nowOpen.costs||{})[sk.key]));
+  S.cogsAudit=S.cogsAudit||[];
+  S.cogsAudit.push({at:new Date().toISOString(),action:'remove-newest-entry',appVersion:APP_VERSION,
+    removedEntryId:last.id,removedEffectiveFrom:last.effectiveFrom,reopened:nowOpen.id,scheduleBefore:before});
+  saveS(); toast('Removed. '+(nowOpen.label||nowOpen.id)+' is open again.'); rSettings();
+}
+
+// Settings card: the full history, always visible, with the audited actions.
+function csHistoryCard(){
+  const sch=cogsSchedule(S), sv=cogsValidate(sch);
+  const audit=(S.cogsAudit||[]);
+  const rows=(sch||[]).map((e,i,arr)=>{
+    const open=(e.effectiveTo==null||e.effectiveTo==='');
+    return '<div style="padding:7px 0;border-bottom:1px solid var(--border)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
+      '<span style="font-weight:800;font-size:12px">'+(e.label||e.id)+(open?' <span style="color:var(--green)">● now</span>':'')+'</span>'+
+      '<span style="font-size:10px;color:var(--muted)">'+csFmtDate(e.effectiveFrom)+' to '+(open?'now':csFmtDate(e.effectiveTo))+'</span></div>'+
+      '<div style="font-size:10px;color:var(--muted);margin-top:3px">'+
+        SKUS.map(sk=>sk.short+' '+fmt(bxNum((e.costs||{})[sk.key]))).join(' &nbsp;·&nbsp; ')+'</div></div>';
+  }).join('');
+  return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
+  '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">💲 COST HISTORY (drives all COGS)</div>'+
+  (sch?'':'<div style="font-size:12px;color:var(--red);margin-bottom:8px">No schedule present. Costs fall back to the table below.</div>')+
+  (sv.valid?'':'<div class="card rb" style="padding:8px;margin-bottom:8px"><div style="font-size:11px;font-weight:900;color:var(--red)">SCHEDULE INVALID, COSTS ARE FALLING BACK</div>'+
+    '<div style="font-size:11px">'+sv.errors.slice(0,4).map(x=>x.replace(/</g,'&lt;')).join('<br>')+'</div></div>')+
+  (sv.warnings.length?'<div style="font-size:11px;color:var(--gold);margin-bottom:8px">'+sv.warnings.map(x=>x.replace(/</g,'&lt;')).join('<br>')+'</div>':'')+
+  (rows||'')+
+  '<button class="btn btn-gold btn-full btn-sm" style="margin-top:10px" onclick="csOpen()">Change costs from a date</button>'+
+  ((sch&&sch.length>1)?'<button class="btn btn-ghost btn-full btn-sm" style="margin-top:6px" onclick="csUndoLast()">Remove the newest period</button>':'')+
+  (audit.length?'<div style="font-size:10px;color:var(--muted);margin-top:8px">Cost change log: '+audit.length+' recorded change'+(audit.length===1?'':'s')+
+    ', newest '+(audit[audit.length-1].at||'').slice(0,10)+'</div>':'')+
+  '<div style="font-size:10px;color:var(--muted);margin-top:6px">The schedule is authoritative. COGS uses the costs in force on the date of each sale.</div>'+
+  '</div>';
 }
 
 // ---- Actions & UI ----
@@ -5399,6 +6215,15 @@ function bxDlCsvZip(){ const p=bxPack(); if(!p)return;
   bxDl('best-solution-csv-'+bxTag()+'.zip',bxZip(p.csvs.concat([{name:'DIAGNOSTICS.csv',text:bxDiagCsv(p.diag,p.meta)}])),'application/zip'); }
 function bxDlSummary(){ const p=bxPack(); if(!p)return; bxDl('best-solution-summary-'+bxTag()+'.txt',p.summary,'text/plain'); }
 function bxDlDiag(){ const p=bxPack(); if(!p)return; bxDl('best-solution-diagnostics-'+bxTag()+'.csv',bxDiagCsv(p.diag,p.meta),'text/csv'); }
+function bxDlRecon(){ const p=bxPack(); if(!p)return;
+  bxDl('best-solution-reconciliation-preview-'+bxTag()+'.txt',bxReconReport(p.recon,p.meta),'text/plain'); }
+function bxViewRecon(){ const p=bxPack(); if(!p)return;
+  mOpen('<div class="mh"><div class="mt">Reconciliation Preview</div><button class="mx" onclick="mClose()">&times;</button></div>'+
+    '<div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:8px">READ ONLY. Nothing was written to this device or the cloud.</div>'+
+    '<textarea class="fi" style="min-height:340px;font-size:10px;font-family:monospace;white-space:pre" readonly onclick="this.select()">'+
+    bxReconReport(p.recon,p.meta).replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</textarea>'+
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxDlRecon()">Download this report</button>'+
+    '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxShowModal()">&larr; Back to export</button>'); }
 function bxViewSummary(){ const p=bxPack(); if(!p)return;
   mOpen('<div class="mh"><div class="mt">Export Summary</div><button class="mx" onclick="mClose()">&times;</button></div>'+
     '<textarea class="fi" style="min-height:340px;font-size:10px;font-family:monospace;white-space:pre" readonly onclick="this.select()">'+
@@ -5465,6 +6290,25 @@ function bxShowModal(){
       (d.sev==='CRITICAL'?'var(--red)':d.sev==='WARN'?'var(--gold)':'var(--muted)')+'">'+d.sev+'</strong> '+esc(d.title)+' <span style="color:var(--muted)">('+d.count+')</span></div>').join('')
       :'<div style="font-size:12px;color:var(--green)">No issues found.</div>')+
   '</div>'+
+  (function(){ const R=p.recon;
+    if(!R||!R.available)return '<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">RECONCILIATION PREVIEW</div>'+
+      '<div style="font-size:12px;color:var(--muted)">Not available: '+esc((R&&R.reason)||'unknown')+'</div></div>';
+    const n=(R.onlyInLocal.length+R.onlyInCloud.length+R.conflicts.length);
+    return '<div class="card '+(n?'':'grb')+'" style="margin-bottom:12px">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">RECONCILIATION PREVIEW (READ ONLY)</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:8px">'+
+      '<div class="sbox" style="flex:1"><div class="sl">Only on device</div><div class="sv sm w">'+R.onlyInLocal.length+'</div></div>'+
+      '<div class="sbox" style="flex:1"><div class="sl">Only in cloud</div><div class="sv sm w">'+R.onlyInCloud.length+'</div></div>'+
+      '<div class="sbox" style="flex:1"><div class="sl">Conflicts</div><div class="sv sm w">'+R.conflicts.length+'</div></div></div>'+
+    (R.onlyInLocal.length?'<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Missing from cloud: '+
+      esc(R.onlyInLocal.map(x=>x.label).join(' · '))+'</div>':'')+
+    '<div style="font-size:11px;padding:4px 0"><strong>Would add</strong> '+R.proposal.wouldAdd.length+
+      ' &nbsp;<strong>change</strong> '+R.proposal.wouldChange.length+
+      ' &nbsp;<strong>preserve</strong> '+R.proposal.wouldPreserve.length+
+      ' &nbsp;<strong>remove</strong> 0</div>'+
+    '<div style="font-size:10px;color:var(--gold);font-weight:700;margin-top:4px">PREVIEW ONLY. Phase 2A has no apply, sync, repair, restore or push action. Writes performed: '+R.writesPerformed+'</div>'+
+    '<button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px" onclick="bxViewRecon()">View reconciliation preview</button>'+
+    '</div>'; })()+
   '<button class="btn btn-gold btn-full" onclick="bxDlEverything()">⬇️ Download EVERYTHING (.zip)</button>'+
   '<div style="font-size:10px;color:var(--muted);margin:6px 0 12px">One zip: full JSON backup (all three copies), '+p.csvs.length+' CSVs, summary, diagnostics.</div>'+
   '<div class="g2" style="gap:8px">'+
@@ -5475,13 +6319,16 @@ function bxShowModal(){
     '<button class="btn btn-ghost btn-full" onclick="bxDlSummary()">📄 Summary (.txt)</button>'+
     '<button class="btn btn-ghost btn-full" onclick="bxDlDiag()">🩺 Diagnostics (.csv)</button>'+
   '</div>'+
-  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="bxViewSummary()">👁️ View summary on screen</button>'+
+  '<div class="g2" style="gap:8px;margin-top:8px">'+
+    '<button class="btn btn-ghost btn-full" onclick="bxDlRecon()">🔀 Reconciliation (.txt)</button>'+
+    '<button class="btn btn-ghost btn-full" onclick="bxViewSummary()">👁️ View summary</button>'+
+  '</div>'+
   '<div style="font-size:10px;color:var(--muted);margin-top:10px">To restore, use Restore from File in Settings with <code>restorable-state-only.json</code> from the zip.</div>');
 }
 function bxSettingsCard(){
   return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
   '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 ADMINISTRATIVE — FULL DATA EXPORT</div>'+
-  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Compares all three stored copies, includes a diagnostic report. Read only, changes nothing.</div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Includes the effective-date COGS schedule, a diagnostic report, and a read-only reconciliation preview of this device against the cloud. Changes nothing.</div>'+
   '<button class="btn btn-gold btn-full" onclick="bxRun()">📦 Export Complete Business Data</button>'+
   '</div>';
 }

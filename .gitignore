@@ -1,0 +1,11 @@
+# Never commit exported business data or local test fixtures.
+# The Phase 2A real-data harness runs against your own export; that file
+# and anything derived from it stays on your machine.
+*.zip
+restorable-state-only.json
+best-solution-full-backup.json
+best-solution-export-*/
+realdata/
+fixtures/
+phase2a_realdata_check.js
+*.local.json
