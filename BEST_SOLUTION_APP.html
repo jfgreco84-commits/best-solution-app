@@ -218,7 +218,8 @@
 .clps>summary::after{content:'▸';color:var(--gold);font-size:14px}
 .clps[open]>summary::after{content:'▾'}
 .clps .card{border:none;background:none;padding-left:0;padding-right:0;margin-bottom:8px}
-  </style>
+  .sbox.pipe-on{outline:2px solid #FFC845;outline-offset:-2px}
+</style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -501,7 +502,7 @@ const INIT={
 // ===================================================
 // STATE
 // ===================================================
-let S,curPg='home',curShow=null,curDay=0,calMonth=null,shows2025Mode=false,showsTab='upcoming',curSection=null;
+let S,curPg='home',curShow=null,curDay=0,calMonth=null,shows2025Mode=false,showsTab='upcoming',curSection=null,pipeFilter=null;   // 'paid' | 'owe' | 'pending' — Booking Pipeline filter for the upcoming list
 
 function normalizeShowDates(d){
   // Always fix startDate from dates[] on every load — no flags, always reliable
@@ -2359,21 +2360,99 @@ function secExpenses(C){
     </div>
   </div>`;
 }
+// ===================================================
+// SUPPLIER INVOICES (product debt)
+// ===================================================
+// The supplier account is a LIST OF INVOICES, each with its own line items,
+// its own payments and its own balance. Two separate purchases are never
+// merged into one running total, because a paid-off invoice is not partial
+// progress toward the next order.
+//
+// pdInvoices() is the single reader every consumer goes through. It accepts
+// BOTH the current shape and the older single-balance shape, so the app is
+// correct no matter which order the code and the data arrive in.
+function pdInvoices(pd){
+  pd=pd||{};
+  if(Array.isArray(pd.invoices))return pd.invoices;
+  // legacy: one implicit invoice built from originalBalance + payments
+  const tot=parseFloat(pd.originalBalance)||0;
+  if(!tot&&!((pd.payments||[]).length))return [];
+  return [{id:'inv_legacy',name:'Invoice',lines:[],subtotal:tot,shipping:0,
+           shippingPending:false,closed:false,payments:(pd.payments||[]).slice()}];
+}
+function pdPaidOn(inv){ return (inv.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0); }
+function pdTotalOf(inv){ return (parseFloat(inv.subtotal)||0)+(parseFloat(inv.shipping)||0); }
+function pdBalanceOf(inv){ return Math.max(0,pdTotalOf(inv)-pdPaidOn(inv)); }
+function pdIsPaid(inv){ return !inv.shippingPending && pdBalanceOf(inv)<=0 && pdTotalOf(inv)>0; }
+function pdPctOf(inv){ const t=pdTotalOf(inv); return t>0?Math.min(100,Math.round((pdPaidOn(inv)/t)*100)):0; }
+// Supplier-wide rollups. Outstanding counts OPEN invoices only, so a paid
+// invoice can never look like progress against an unpaid one.
+function pdOutstanding(pd){ return pdInvoices(pd).filter(i=>!pdIsPaid(i)).reduce((t,i)=>t+pdBalanceOf(i),0); }
+function pdPaidTotal(pd){ return pdInvoices(pd).reduce((t,i)=>t+pdPaidOn(i),0); }
+function pdOpenCount(pd){ return pdInvoices(pd).filter(i=>!pdIsPaid(i)).length; }
+function pdPaidCount(pd){ return pdInvoices(pd).filter(i=>pdIsPaid(i)).length; }
+function pdShippingPending(pd){ return pdInvoices(pd).some(i=>i.shippingPending); }
+// The invoice a new payment lands on: the first open, unclosed one.
+function pdDefaultInvoice(pd){ const o=pdInvoices(pd).filter(i=>!i.closed&&!pdIsPaid(i)); return o.length?o[0]:null; }
+
 function secDebt(){
-  const debt=S.productDebt||{supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
-  const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
-  return `<div class="card rb">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div><div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(debtBal)}</div></div>
-      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Total Paid</div><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(debtPaid)}</div></div>
+  const debt=S.productDebt||{};
+  const invs=pdInvoices(debt);
+  const supplier=debt.supplier||'Supplier';
+  if(!invs.length){
+    return `<div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">${supplier}</div>
+      <div style="font-size:12px;color:var(--muted)">No supplier invoices yet.</div></div>`;
+  }
+  const out=pdOutstanding(debt), paidAll=pdPaidTotal(debt), shipPend=pdShippingPending(debt);
+  // ---- supplier summary. Outstanding is the sum of OPEN invoices only.
+  let h=`<div class="card rb" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">${supplier} — supplier summary</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Outstanding</div>
+        <div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(out)}</div>
+        ${shipPend?`<div style="font-size:11px;color:var(--amber,#C77700);font-weight:700">plus shipping, not yet confirmed</div>`:''}</div>
+      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Paid historically</div>
+        <div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(paidAll)}</div></div>
     </div>
-    <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
-    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
-    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
+    <div class="g2" style="gap:8px">
+      <div class="sbox"><div class="sl">Open invoices</div><div class="sv sm w">${pdOpenCount(debt)}</div></div>
+      <div class="sbox grb"><div class="sl">Paid invoices</div><div class="sv sm g">${pdPaidCount(debt)}</div></div>
+    </div>
   </div>`;
+  // ---- one card per invoice
+  invs.forEach((inv,idx)=>{
+    const paid=pdPaidOn(inv), bal=pdBalanceOf(inv), tot=pdTotalOf(inv), pct=pdPctOf(inv), done=pdIsPaid(inv);
+    const lines=(inv.lines||[]).map(l=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--muted)">${_esc(l.sku||'')}${l.cases?` &middot; ${l.cases} case${l.cases===1?'':'s'}`:''}</span>
+        <span style="font-weight:700">${fmt(l.amount)}</span></div>`).join('');
+    const pmts=[...(inv.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <span style="color:var(--muted)">${_esc(p.date||'')}</span>
+        <span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>
+        <span style="color:var(--muted);font-size:10px">${_esc(p.method||p.note||'')}</span></div>`).join('');
+    h+=`<div class="card ${done?'grb':'rb'}" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:900;color:${done?'var(--green)':'var(--gold,#FFC845)'}">${_esc(inv.name||('Invoice '+(idx+1)))}</div>
+        <div style="font-size:10px;font-weight:900;padding:2px 8px;border-radius:10px;background:${done?'rgba(0,210,106,0.15)':'rgba(255,77,77,0.15)'};color:${done?'var(--green)':'var(--red)'}">${done?'PAID IN FULL':'OPEN'}</div>
+      </div>
+      ${lines?`<div style="margin-bottom:8px">${lines}</div>`:''}
+      <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span style="color:var(--muted)">Product subtotal</span><span style="font-weight:700">${fmt(inv.subtotal)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span style="color:var(--muted)">Shipping</span><span style="font-weight:700">${inv.shippingPending?'pending':(parseFloat(inv.shipping)?fmt(inv.shipping):'Free')}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-top:1px solid var(--border);margin-top:3px"><span style="color:var(--muted);font-weight:700">Invoice total</span><span style="font-weight:900">${fmt(tot)}${inv.shippingPending?' + shipping':''}</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:10px 0 6px">
+        <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Balance</div>
+          <div style="font-size:22px;font-weight:900;color:${done?'var(--green)':'var(--red)'}">${fmt(bal)}${inv.shippingPending?'<span style="font-size:12px"> + shipping</span>':''}</div></div>
+        <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">Paid</div>
+          <div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(paid)}</div></div>
+      </div>
+      <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${pct}%;background:var(--green)"></div></div>
+      <div style="font-size:11px;color:var(--muted)">${pct}% paid${done?' — closed':''}</div>
+      ${pmts?`<div style="padding-top:8px;margin-top:6px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Payment history</div>${pmts}</div>`:''}
+      ${inv.closed
+        ? `<div style="font-size:11px;color:var(--muted);margin-top:10px;text-align:center">Closed invoice — no further payments can be logged.</div>`
+        : `<button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt('${_esc(inv.id||'')}')">+ Log Payment to ${_esc((supplier.split(' ')[0])||'Supplier')}</button>`}
+    </div>`;
+  });
+  return h;
 }
 function secSplit(C){
   return `<div class="card">
@@ -2666,6 +2745,7 @@ function showSortKey(sh){
   if(sh.dates&&sh.dates[0]){const m=sh.dates[0].match(/(\w{3})\s+(\d+)/);if(m&&mo[m[1]])return '2026-'+mo[m[1]]+'-'+String(m[2]).padStart(2,'0');}
   return sh.createdAt||'9999';
 }
+function pipeTap(k){ pipeFilter=(pipeFilter===k?null:k); rShows(); }
 function rShows(){
   if(shows2025Mode){r2025Season();return;}
   // Upcoming = not completed AND not missed (active + future planned). Missed = date passed, never completed.
@@ -2673,7 +2753,7 @@ function rShows(){
   const completed=[...S.shows].filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
   const missed=[...S.shows].filter(s=>isMissed(s)).sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
   const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':'upcoming');
-  const list=tab==='completed'?completed:(tab==='missed'?missed:upcoming);
+  let list=tab==='completed'?completed:(tab==='missed'?missed:upcoming);
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   h+=`<div style="display:flex;gap:6px;margin-bottom:12px">
     <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='upcoming';rShows()">📅 Upcoming (${upcoming.length})</button>
@@ -2683,23 +2763,36 @@ function rShows(){
   h+=`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="shows2025Mode=true;rShows()">📊 View 2025 Season Results</button>`;
   if(tab==='upcoming'){
     const planned=upcoming.filter(s=>s.status!=='active');
-    const paidS=planned.filter(s=>(s.boothCost||0)>0&&boothBalance(s)<=0);
-    const oweS=planned.filter(s=>s.confirmed!==false&&(s.boothCost||0)>0&&boothBalance(s)>0);
+    // The three buckets are MUTUALLY EXCLUSIVE. Pending is decided first, so a
+    // booth that is paid but not yet accepted counts as pending, not as booked.
     const pendS=planned.filter(s=>s.confirmed===false);
+    const bookedS=planned.filter(s=>s.confirmed!==false);
+    const paidS=bookedS.filter(s=>(s.boothCost||0)>0&&boothBalance(s)<=0);
+    const oweS=bookedS.filter(s=>(s.boothCost||0)>0&&boothBalance(s)>0);
+    const pipeSets={paid:paidS,owe:oweS,pending:pendS};
+    const pipeLabels={paid:'Booth Paid',owe:'Owe Booth',pending:'Pending / Applied'};
     const dep=depositAlerts(14);
     if(planned.length){
       h+=`<div class="card" style="margin-bottom:12px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">📋 Booking Pipeline</div>
         ${dep.length?dep.map(x=>`<div class="sr" style="border:none;padding:3px 0"><span class="srl" style="color:var(--red);font-weight:700">💸 ${x.sh.name}</span><span class="srv red">${fmt(x.bal)} due ${x.days<0?('OVERDUE '+(-x.days)+'d'):x.days===0?'TODAY':'in '+x.days+'d'}</span></div>`).join(''):''}
         <div class="g3" style="margin-top:${dep.length?'8px':'0'}">
-          <div class="sbox grb"><div class="sl">Booth Paid</div><div class="sv sm g">${paidS.length}</div></div>
-          <div class="sbox ${oweS.length?'rb':''}"><div class="sl">Owe Booth</div><div class="sv sm ${oweS.length?'r':'w'}">${oweS.length}</div><div class="ss">${fmt(oweS.reduce((t,s)=>t+boothBalance(s),0))} total</div></div>
-          <div class="sbox"><div class="sl">Pending / Applied</div><div class="sv sm w">${pendS.length}</div></div>
+          <div class="sbox grb${pipeFilter==='paid'?' pipe-on':''}" style="cursor:pointer" onclick="pipeTap('paid')"><div class="sl">Booth Paid</div><div class="sv sm g">${paidS.length}</div></div>
+          <div class="sbox ${oweS.length?'rb':''}${pipeFilter==='owe'?' pipe-on':''}" style="cursor:pointer" onclick="pipeTap('owe')"><div class="sl">Owe Booth</div><div class="sv sm ${oweS.length?'r':'w'}">${oweS.length}</div><div class="ss">${fmt(oweS.reduce((t,s)=>t+boothBalance(s),0))} total</div></div>
+          <div class="sbox${pipeFilter==='pending'?' pipe-on':''}" style="cursor:pointer" onclick="pipeTap('pending')"><div class="sl">Pending / Applied</div><div class="sv sm w">${pendS.length}</div></div>
         </div>
         ${oweS.length?`<div style="font-size:11px;color:var(--muted);margin-top:8px">${oweS.map(s=>`${s.name} ${fmt(boothBalance(s))}${s.depositDue?' by '+s.depositDue:''}`).join(' · ')}</div>`:''}
+        <div style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">Tap a box to see just those shows</div>
       </div>`;
     }
-  }
+    if(pipeFilter&&pipeSets[pipeFilter]){
+      const keep=new Set(pipeSets[pipeFilter].map(s=>s.id));
+      list=list.filter(s=>keep.has(s.id));
+      h+=`<div class="wb" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span style="font-size:12px"><strong>${pipeLabels[pipeFilter]}</strong> &mdash; showing ${list.length} of ${planned.length}</span>
+        <button class="btn btn-ghost btn-sm" style="padding:4px 10px" onclick="pipeTap('${pipeFilter}')">Clear</button></div>`;
+    }
+  } else { pipeFilter=null; }
   if(tab==='missed'&&missed.length){h+=`<div class="wb red" style="margin-bottom:10px">These shows' dates passed but were never completed. Open one to mark it done if you actually did it, or edit/delete it.</div>`;}
   if(list.length){h+=list.map(s=>showCard(s)).join('');}
   else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':'No upcoming shows. Tap + New Show to start.'}</div>`;}
@@ -4176,16 +4269,27 @@ function confirmEndShow(shId){
 // ===================================================
 // PRODUCT DEBT (MARK MARTONE)
 // ===================================================
-function openDebtPmt(){
+function openDebtPmt(invId){
   const debt=S.productDebt||{};
-  const paid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const bal=Math.max(0,(debt.originalBalance||0)-paid);
+  const invs=pdInvoices(debt);
+  const target=invs.find(i=>i.id===invId)||pdDefaultInvoice(debt)||invs[0];
+  if(!target){toast('No supplier invoice to pay');return;}
+  if(target.closed){toast('That invoice is closed — no further payments.');return;}
+  const bal=pdBalanceOf(target);
   const today=_todayKey();
-  mOpen(`<div class="mh"><div class="mt">💳 Log Payment to ${debt.supplier||'Supplier'}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div class="wb red" style="margin-bottom:12px">Current balance: <strong>${fmt(bal)}</strong></div>
+  const METHODS=['Zelle','Venmo','Check','Cash','Credit Card','PayPal','Other'];
+  const def=debt.defaultMethod||'Zelle';
+  const open=invs.filter(i=>!i.closed);
+  mOpen(`<div class="mh"><div class="mt">💳 Log Payment to ${_esc(debt.supplier||'Supplier')}</div><button class="mx" onclick="mClose()">×</button></div>
+  ${open.length>1?`<div class="fg"><label class="fl">APPLY TO INVOICE</label><select class="fi" id="dpt_inv">${
+    open.map(i=>`<option value="${_esc(i.id||'')}"${i.id===target.id?' selected':''}>${_esc(i.name||'Invoice')} — ${fmt(pdBalanceOf(i))} owed</option>`).join('')
+  }</select></div>`:`<input type="hidden" id="dpt_inv" value="${_esc(target.id||'')}">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Applying to <strong>${_esc(target.name||'Invoice')}</strong></div>`}
+  <div class="wb red" style="margin-bottom:12px">Balance on this invoice: <strong>${fmt(bal)}</strong>${target.shippingPending?' plus shipping, not yet confirmed':''}</div>
   <div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01"></div>
+  <div class="fg"><label class="fl">METHOD</label><select class="fi" id="dpt_method">${METHODS.map(m=>`<option value="${m}"${m===def?' selected':''}>${m}</option>`).join('')}</select></div>
   <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="${today}"></div>
-  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. Venmo, check #1234"></div>
+  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. check #1234"></div>
   <button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ Save Payment</button>
   <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
 }
@@ -4194,9 +4298,18 @@ function saveDebtPmt(){
   if(!amt||amt<=0){toast('Enter a valid amount');return;}
   const date=$$('dpt_date').value||_todayKey();
   const note=$$('dpt_note').value||'';
-  if(!S.productDebt)S.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  S.productDebt.payments.push({amount:amt,date,note});
-  mClose();saveS();toast('✅ Payment logged — '+fmt(amt));
+  const method=(($$('dpt_method')||{}).value)||'Zelle';
+  const invId=(($$('dpt_inv')||{}).value)||'';
+  if(!S.productDebt)S.productDebt={supplier:'Mark Martone',defaultMethod:'Zelle',invoices:[]};
+  const pd=S.productDebt;
+  const invs=pdInvoices(pd);
+  const target=invs.find(i=>i.id===invId)||pdDefaultInvoice(pd)||invs[0];
+  if(!target){toast('No invoice to apply this payment to');return;}
+  if(target.closed){toast('That invoice is closed — nothing was saved.');return;}
+  if(!Array.isArray(pd.invoices)){ pd.invoices=invs; delete pd.originalBalance; delete pd.payments; }
+  target.payments=target.payments||[];
+  target.payments.push({amount:amt,date,method,note});
+  mClose();saveS();toast('✅ Payment logged — '+fmt(amt)+' ('+method+')');
 }
 
 // ===================================================
@@ -5528,7 +5641,7 @@ function bxCounts(st){
     repPaymentRecords:(st.reps||[]).reduce((t,r)=>t+((r.payments||[]).length),0),
     supplies:(st.supplies||[]).length,
     transfers:(st.transfers||[]).length,
-    productDebtPayments:((st.productDebt||{}).payments||[]).length,
+    productDebtPayments:pdInvoices(st.productDebt).reduce((t,i)=>t+((i.payments||[]).length),0),
     inventorySkus:Object.keys(st.inventory||{}).length,
     batmanBorrowSkus:Object.keys(st.batmanBorrow||{}).length,
     season2025Rows:(typeof SHOWS_2025!=='undefined'?SHOWS_2025.length:0)
@@ -5623,11 +5736,18 @@ function bxCsvFiles(st,meta){
   (st.transfers||[]).forEach(t=>r.push(['transfer','','',t.date||'',t.sku||'',bxNum(t.qty),t.fromName||'',t.toName||'',t.note||'']));
   put('10_inventory_adjustments.csv',r);
 
-  r=[['supplier','original_balance','payment_date','amount','note','remaining']];
-  const pd=st.productDebt||{}; let rem=bxNum(pd.originalBalance);
-  if(!(pd.payments||[]).length)r.push([pd.supplier||'',rem.toFixed(2),'','','NO PAYMENTS LOGGED',rem.toFixed(2)]);
-  (pd.payments||[]).forEach(p=>{ rem-=bxNum(p.amount);
-    r.push([pd.supplier||'',bxNum(pd.originalBalance).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',rem.toFixed(2)]); });
+  r=[['supplier','invoice','invoice_status','invoice_total','shipping','payment_date','amount','method','note','remaining_on_invoice']];
+  { const pd=st.productDebt||{};
+    pdInvoices(pd).forEach(inv=>{
+      const tot=pdTotalOf(inv), st2=pdIsPaid(inv)?'PAID IN FULL':'OPEN';
+      const ship=inv.shippingPending?'PENDING':bxNum(inv.shipping).toFixed(2);
+      let rem=tot;
+      if(!((inv.payments||[]).length))
+        r.push([pd.supplier||'',inv.name||'',st2,tot.toFixed(2),ship,'','','','NO PAYMENTS LOGGED',rem.toFixed(2)]);
+      (inv.payments||[]).forEach(p=>{ rem-=bxNum(p.amount);
+        r.push([pd.supplier||'',inv.name||'',st2,tot.toFixed(2),ship,p.date||'',bxNum(p.amount).toFixed(2),
+                p.method||'',p.note||'',Math.max(0,rem).toFixed(2)]); });
+    }); }
   put('11_product_debt.csv',r);
 
   r=[['id','name','qty_on_hand','low_threshold','unit','unit_cost']];
@@ -5903,8 +6023,12 @@ function bxSummary(st,meta,diag,snap){
   line('  Tax reserve            '+M(taxRes)+'   (rate '+(V.setting('tax',0.28)*100).toFixed(0)+'%)');
   line('  Total miles            '+miles.toFixed(0));
   line('  IRS mileage deduction  '+M(miles*V.setting('irsRate',0))+'   (rate $'+V.setting('irsRate',0)+'/mi)');
-  const pd=st.productDebt||{}, pdPaid=(pd.payments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-  line('  Product debt remaining '+M(bxNum(pd.originalBalance)-pdPaid)+' of '+M(bxNum(pd.originalBalance))+' to '+(pd.supplier||'supplier'));
+  { const pd=st.productDebt||{};
+    line('  Supplier outstanding   '+M(pdOutstanding(pd))+(pdShippingPending(pd)?' plus pending shipping':'')+' to '+(pd.supplier||'supplier'));
+    line('  Supplier paid to date  '+M(pdPaidTotal(pd))+'   ('+pdOpenCount(pd)+' open invoice(s), '+pdPaidCount(pd)+' paid)');
+    pdInvoices(pd).forEach(inv=>line('    '+String(inv.name||'Invoice').padEnd(30)+' total '+M(pdTotalOf(inv)).padStart(10)
+      +'  paid '+M(pdPaidOn(inv)).padStart(10)+'  balance '+M(pdBalanceOf(inv)).padStart(10)
+      +(inv.shippingPending?' + shipping':'')+(pdIsPaid(inv)?'  PAID IN FULL':''))); }
   line('  Inventory at cost      '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.cost(s.key),0)));
   line('  Inventory at retail    '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.price(s.key),0)));
   line('');
