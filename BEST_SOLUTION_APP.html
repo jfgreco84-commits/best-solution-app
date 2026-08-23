@@ -64,6 +64,18 @@
     .sv.g{color:var(--green)}.sv.r{color:var(--red)}.sv.w{color:var(--text)}.sv.sm{font-size:16px}
     .ss{font-size:10px;color:var(--muted);margin-top:3px}
 
+    /* BOOKING PIPELINE — tap-to-filter cards */
+    .pf{display:block;width:100%;text-align:left;font:inherit;color:var(--text);cursor:pointer;-webkit-appearance:none;appearance:none;transition:border-color .12s,background .12s,transform .1s}
+    .pf:active{transform:scale(0.97)}
+    .pf:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+    .pf[aria-pressed="true"]{border-color:var(--gold);background:var(--goldbg);box-shadow:inset 0 0 0 1px var(--goldbd)}
+    .pf[aria-pressed="true"] .sl{color:var(--gold)}
+    .pf-hint{font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:.4px;text-transform:uppercase;font-weight:700;line-height:1.2}
+    .pf[aria-pressed="true"] .pf-hint{color:var(--gold)}
+    .pf-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:var(--goldbg);border:1px solid var(--goldbd);border-radius:10px;padding:9px 12px;margin-bottom:10px}
+    .pf-bar-lbl{font-size:12px;font-weight:800;color:var(--gold);min-width:0}
+    #showsListTop{scroll-margin-top:8px}
+
     /* PROGRESS BAR */
     .pbar-wrap{background:var(--card3);border-radius:4px;height:7px;overflow:hidden;margin-top:7px}
     .pbar-fill{height:100%;border-radius:4px;transition:width 0.4s}
@@ -2666,6 +2678,53 @@ function showSortKey(sh){
   if(sh.dates&&sh.dates[0]){const m=sh.dates[0].match(/(\w{3})\s+(\d+)/);if(m&&mo[m[1]])return '2026-'+mo[m[1]]+'-'+String(m[2]).padStart(2,'0');}
   return sh.createdAt||'9999';
 }
+// ---- Booking Pipeline buckets + tap-to-filter (Aug 2026) ----
+// ONE source of truth. The three pipeline cards and the three filtered lists
+// both read pipelineBuckets(), so a card's count can never disagree with the
+// list it opens — they are literally the same array. Read-only: nothing here
+// writes to S or touches a show record.
+var PIPE_FILTERS={paid:{label:'Booth Paid'},owe:{label:'Owe Booth'},pending:{label:'Pending / Applied'}};
+function pipelineBuckets(upcoming){
+  var planned=(upcoming||[]).filter(function(s){return s.status!=='active';});
+  var paid=planned.filter(function(s){return (s.boothCost||0)>0&&boothBalance(s)<=0;});
+  var owe=planned.filter(function(s){return s.confirmed!==false&&(s.boothCost||0)>0&&boothBalance(s)>0;});
+  var pending=planned.filter(function(s){return s.confirmed===false;});
+  return {planned:planned,paid:paid,owe:owe,pending:pending,
+    oweTotal:owe.reduce(function(t,s){return t+boothBalance(s);},0)};
+}
+var PIPE_FILTER_KEY='dd_bs_ui_pipefilter';
+// UI preference only — its own localStorage key, deliberately NOT part of S,
+// so it is never saved into, synced with, or able to alter show data.
+var pipelineFilter=(function(){try{var v=localStorage.getItem(PIPE_FILTER_KEY);return (v&&PIPE_FILTERS[v])?v:null;}catch(e){return null;}})();
+function activePipelineFilter(){return PIPE_FILTERS[pipelineFilter]?pipelineFilter:null;}
+function pipeFilterReset(){pipelineFilter=null;try{localStorage.removeItem(PIPE_FILTER_KEY);}catch(e){}}
+function scrollToShowsList(){
+  try{var t=document.getElementById('showsListTop');
+    if(t&&t.scrollIntoView)t.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){}
+}
+// rShows() replaces the whole page, so a keyboard user would lose their place
+// the instant they pressed Enter. Put focus back on the card they activated.
+// preventScroll so this never fights scrollToShowsList().
+function refocusPipeCard(key){
+  try{var b=key&&document.getElementById('pf-'+key);
+    if(b&&b.focus){try{b.focus({preventScroll:true});}catch(e){b.focus();}}}catch(e){}
+}
+function setPipelineFilter(k){
+  var next=(pipelineFilter===k)?null:(PIPE_FILTERS[k]?k:null);
+  pipelineFilter=next;
+  try{if(next)localStorage.setItem(PIPE_FILTER_KEY,next);else localStorage.removeItem(PIPE_FILTER_KEY);}catch(e){}
+  rShows();
+  refocusPipeCard(PIPE_FILTERS[k]?k:null);
+  if(next)scrollToShowsList();
+  return next;
+}
+function clearPipelineFilter(){
+  var was=activePipelineFilter();
+  pipeFilterReset();rShows();
+  refocusPipeCard(was);
+  scrollToShowsList();
+}
+
 function rShows(){
   if(shows2025Mode){r2025Season();return;}
   // Upcoming = not completed AND not missed (active + future planned). Missed = date passed, never completed.
@@ -2673,35 +2732,50 @@ function rShows(){
   const completed=[...S.shows].filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
   const missed=[...S.shows].filter(s=>isMissed(s)).sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
   const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':'upcoming');
-  const list=tab==='completed'?completed:(tab==='missed'?missed:upcoming);
+  let list=tab==='completed'?completed:(tab==='missed'?missed:upcoming);
+  let pf=null,B=null;
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   h+=`<div style="display:flex;gap:6px;margin-bottom:12px">
-    <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='upcoming';rShows()">📅 Upcoming (${upcoming.length})</button>
-    <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='completed';rShows()">✅ Completed (${completed.length})</button>
-    <button class="btn ${tab==='missed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px${(missed.length&&tab!=='missed')?';border-color:var(--redbd);color:var(--red)':''}" onclick="showsTab='missed';rShows()">⚠️ Missed (${missed.length})</button>
+    <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='upcoming';pipeFilterReset();rShows()">📅 Upcoming (${upcoming.length})</button>
+    <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='completed';pipeFilterReset();rShows()">✅ Completed (${completed.length})</button>
+    <button class="btn ${tab==='missed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px${(missed.length&&tab!=='missed')?';border-color:var(--redbd);color:var(--red)':''}" onclick="showsTab='missed';pipeFilterReset();rShows()">⚠️ Missed (${missed.length})</button>
   </div>`;
   h+=`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="shows2025Mode=true;rShows()">📊 View 2025 Season Results</button>`;
   if(tab==='upcoming'){
-    const planned=upcoming.filter(s=>s.status!=='active');
-    const paidS=planned.filter(s=>(s.boothCost||0)>0&&boothBalance(s)<=0);
-    const oweS=planned.filter(s=>s.confirmed!==false&&(s.boothCost||0)>0&&boothBalance(s)>0);
-    const pendS=planned.filter(s=>s.confirmed===false);
+    B=pipelineBuckets(upcoming);
+    const planned=B.planned, paidS=B.paid, oweS=B.owe, pendS=B.pending;
     const dep=depositAlerts(14);
     if(planned.length){
+      pf=activePipelineFilter();
+      const pfCard=(key,cls,label,count,valCls,sub)=>{
+        const on=pf===key;
+        return `<button type="button" class="sbox ${cls} pf" id="pf-${key}" aria-pressed="${on?'true':'false'}" aria-controls="showsListTop"
+          aria-label="${label}: ${count} show${count===1?'':'s'}. ${on?'Filter active — activate to show all upcoming shows.':'Activate to show only these shows.'}"
+          onclick="setPipelineFilter('${key}')"><div class="sl">${label}</div><div class="sv sm ${valCls}">${count}</div>${sub||''}<div class="pf-hint">${on?'✓ Filtering — tap to clear':'Tap to filter'}</div></button>`;
+      };
       h+=`<div class="card" style="margin-bottom:12px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">📋 Booking Pipeline</div>
         ${dep.length?dep.map(x=>`<div class="sr" style="border:none;padding:3px 0"><span class="srl" style="color:var(--red);font-weight:700">💸 ${x.sh.name}</span><span class="srv red">${fmt(x.bal)} due ${x.days<0?('OVERDUE '+(-x.days)+'d'):x.days===0?'TODAY':'in '+x.days+'d'}</span></div>`).join(''):''}
-        <div class="g3" style="margin-top:${dep.length?'8px':'0'}">
-          <div class="sbox grb"><div class="sl">Booth Paid</div><div class="sv sm g">${paidS.length}</div></div>
-          <div class="sbox ${oweS.length?'rb':''}"><div class="sl">Owe Booth</div><div class="sv sm ${oweS.length?'r':'w'}">${oweS.length}</div><div class="ss">${fmt(oweS.reduce((t,s)=>t+boothBalance(s),0))} total</div></div>
-          <div class="sbox"><div class="sl">Pending / Applied</div><div class="sv sm w">${pendS.length}</div></div>
+        <div class="g3" style="margin-top:${dep.length?'8px':'0'}" role="group" aria-label="Booking pipeline filters">
+          ${pfCard('paid','grb','Booth Paid',paidS.length,'g','')}
+          ${pfCard('owe',oweS.length?'rb':'','Owe Booth',oweS.length,oweS.length?'r':'w',`<div class="ss">${fmt(B.oweTotal)} total</div>`)}
+          ${pfCard('pending','','Pending / Applied',pendS.length,'w','')}
         </div>
         ${oweS.length?`<div style="font-size:11px;color:var(--muted);margin-top:8px">${oweS.map(s=>`${s.name} ${fmt(boothBalance(s))}${s.depositDue?' by '+s.depositDue:''}`).join(' · ')}</div>`:''}
       </div>`;
     }
+    if(pf)list=B[pf];
   }
   if(tab==='missed'&&missed.length){h+=`<div class="wb red" style="margin-bottom:10px">These shows' dates passed but were never completed. Open one to mark it done if you actually did it, or edit/delete it.</div>`;}
+  h+=`<div id="showsListTop"></div>`;
+  if(pf){
+    h+=`<div class="pf-bar" role="status" aria-live="polite">
+      <span class="pf-bar-lbl">Showing: ${PIPE_FILTERS[pf].label} (${list.length})${pf==='owe'?' · '+fmt(B.oweTotal)+' owed':''}</span>
+      <button type="button" class="btn btn-gold btn-xs" onclick="clearPipelineFilter()">✕ Show All (${upcoming.length})</button>
+    </div>`;
+  }
   if(list.length){h+=list.map(s=>showCard(s)).join('');}
+  else if(pf){h+=`<div class="empty"><div class="ei">📋</div>No shows in ${PIPE_FILTERS[pf].label} right now.</div>`;}
   else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':'No upcoming shows. Tap + New Show to start.'}</div>`;}
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
