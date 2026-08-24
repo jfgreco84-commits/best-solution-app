@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v31';
+const APP_VERSION='v32';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -502,7 +502,7 @@ const INIT={
   batmanBorrow:{},
   shows:[],
   supplies:JSON.parse(JSON.stringify(DEFAULT_SUPPLIES)),
-  productDebt:{supplier:'Mark Martone',originalBalance:10000,payments:[]},
+  productDebt:{supplier:'Mark Martone',invoices:[],unassignedPayments:[]},
   otherExpenses:[],
   reps:[],  // global rep roster — reused across all shows
   prices:{'32oz':25.00,'16oz':20.00,'8oz':15.00,'2oz':8.00,'c5s':10.00,'c5l':20.00},
@@ -1022,6 +1022,26 @@ function applyOneTimeUpdates(d){
     if(!pmts.find(p=>p.date==='2026-05-29'))pmts.push({amount:250,date:'2026-05-29',note:'Payment 3'});
     d.productDebt.payments=pmts;
     d._applied['debt_pmt3_20260529']=true;
+  }
+
+  // ===== 2026-08-24: Mark Martone is TWO orders, not one rolling debt =====
+  // The old record carried a single rolling balance with every payment on one
+  // list. That merged a first pallet which was settled in full ($4,048, closed
+  // out on 2026-08-21) with a second, separate order ($5,985) that has not been
+  // paid against at all. Two obligations, so now two invoices.
+  //
+  // Nothing is thrown away. Every payment already on the device is matched to
+  // the confirmed invoice 1 ledger by date+amount and kept (its own note text
+  // survives), and anything that does not match is parked on
+  // productDebt.unassignedPayments, where the page shows it for review rather
+  // than counting it against an invoice it may not belong to. A timestamped
+  // copy of the whole pre-migration state is written to its own localStorage
+  // key first, exactly as prechange_backup_v8 does: it only ADDS a key and
+  // never clears or overwrites the live state.
+  if(!d._applied['mm_sequential_invoices_v1']){
+    try{ localStorage.setItem('dd_bs_pre_pdinvoices_'+Date.now(), JSON.stringify(d)); }catch(e){}
+    pdMigrateMarkMartone(d);
+    d._applied['mm_sequential_invoices_v1']=true;
   }
 
   // Rustic Fox Events — added 2026-05-18
@@ -1714,6 +1734,13 @@ function applyOneTimeUpdates(d){
     if(!sh.workers)sh.workers=[];
     if(!sh.repPayMeta)sh.repPayMeta={};
   });
+
+  // Supplier debt is a list of invoices. This is shape driven and idempotent,
+  // NOT marker gated, so a document arriving from an older build, an older
+  // backup or the cloud is put into the invoice shape whether or not it
+  // carries the migration marker. Runs last so it absorbs anything the seeds
+  // above may have written to the legacy fields.
+  pdNormalize(d);
 }
 
 function buildPlannedShow(e){
@@ -2371,22 +2398,6 @@ function secExpenses(C){
     </div>
   </div>`;
 }
-function secDebt(){
-  const debt=S.productDebt||{supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
-  const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
-  return `<div class="card rb">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div><div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(debtBal)}</div></div>
-      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Total Paid</div><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(debtPaid)}</div></div>
-    </div>
-    <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
-    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
-    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
-  </div>`;
-}
 function secSplit(C){
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -2506,7 +2517,12 @@ function dashSectionGrid(){
     {k:'mileage',icon:'🚚',label:'Mileage &amp; Tax Deduction',sub:fmtN(C.ytd.miles)+' mi · '+fmt(C.mileDeduct)},
     {k:'booth',icon:'🎪',label:'Booth Costs',sub:'2026 season'},
     {k:'expenses',icon:'💸',label:'Other Expenses',sub:fmt(C.ytd.otherSpend)+' YTD'},
-    {k:'debt',icon:'🧾',label:'Product Debt',sub:'Mark Martone'},
+    {k:'debt',icon:'🧾',label:'Product Debt',sub:(function(){
+      const o=pdOpenInvoice(S), T=pdSupplierTotals(S);
+      if(!T.invoices)return 'Mark Martone · no invoices';
+      return o?('Invoice '+o.number+' · '+fmt(pdBalance(o))+' owed')
+              :('Mark Martone · all '+T.invoices+' paid');
+    })()},
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
     {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
@@ -2530,7 +2546,7 @@ function rSection(){
     mileage:{t:'Mileage & Tax Deduction',f:secMileage},
     booth:{t:'Booth Costs — 2026 Season',f:secBooth},
     expenses:{t:'Other Expenses',f:secExpenses},
-    debt:{t:'Product Debt — Mark Martone',f:secDebt},
+    debt:{t:'Product Debt — '+((S.productDebt||{}).supplier||'Mark Martone'),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
     payments:{t:'Payment Breakdown (YTD)',f:secPayments},
     best:{t:'Best Shows This Season',f:secBest},
@@ -4248,29 +4264,505 @@ function confirmEndShow(shId){
 }
 
 // ===================================================
-// PRODUCT DEBT (MARK MARTONE)
+// PRODUCT DEBT — SEQUENTIAL SUPPLIER INVOICES (pd*)
+// ---------------------------------------------------
+// A supplier is NOT one rolling balance. Each product order is its own
+// invoice with its own total, its own payment history and its own status,
+// and an invoice is finished the moment its payments cover its total.
+// Nothing here ever adds two invoices together into a single obligation:
+// pdSupplierTotals() exists only to describe a stack of invoices, and the
+// page labels it as such.
+//
+// Shape (lives inside S.productDebt — no new top-level state key):
+//   productDebt = {
+//     supplier: 'Mark Martone',
+//     invoices: [ {
+//       id, number, total, status:'open'|'paid',
+//       createdDate, paidDate, shipping, note,
+//       items:  [{label, cases}],
+//       payments:[{amount, date, method, note}]
+//     } ],
+//     unassignedPayments: []   // only ever non-empty if a legacy payment
+//   }                          // could not be matched — never dropped silently
+//
+// The legacy shape ({originalBalance, payments}) is absorbed by pdNormalize()
+// on every load, so an old backup, an old cloud copy or an old device all
+// converge on the same structure without a marker having to be present.
 // ===================================================
-function openDebtPmt(){
-  const debt=S.productDebt||{};
-  const paid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const bal=Math.max(0,(debt.originalBalance||0)-paid);
-  const today=_todayKey();
-  mOpen(`<div class="mh"><div class="mt">💳 Log Payment to ${debt.supplier||'Supplier'}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div class="wb red" style="margin-bottom:12px">Current balance: <strong>${fmt(bal)}</strong></div>
-  <div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01"></div>
-  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="${today}"></div>
-  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. Venmo, check #1234"></div>
-  <button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ Save Payment</button>
-  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+var PD_SUPPLIER='Mark Martone';
+var PD_METHODS=['Zelle','Venmo','Cash','Check','Cash App','PayPal','Debit','Square','Other'];
+
+// The Mark Martone ledger, as the owner confirmed it on 2026-08-24.
+// Invoice 1 was settled in full; invoice 2 is a separate, fresh order.
+// createdDate is null on both because the owner did not supply an invoice
+// date, and a payment date is not an invoice date. Nothing is inferred here.
+var PD_MM_SEED=[
+  {id:'pdinv_mm_001', number:1, total:4048, createdDate:null, shipping:'Free',
+   items:[{label:'32 oz',cases:10},{label:'16 oz',cases:10},{label:'8 oz',cases:21},{label:'2 oz',cases:7}],
+   payments:[
+     {amount:250,  date:'2026-05-01', method:'Zelle', note:'Payment 1'},
+     {amount:250,  date:'2026-05-15', method:'Zelle', note:'Payment 2'},
+     {amount:250,  date:'2026-05-29', method:'Zelle', note:'Payment 3'},
+     {amount:250,  date:'2026-07-24', method:'Zelle', note:'Payment 4'},
+     {amount:3000, date:'2026-07-27', method:'Zelle', note:'Payment 5'},
+     {amount:48,   date:'2026-08-21', method:'Zelle', note:'Final payment — invoice 1 settled'}
+   ]},
+  {id:'pdinv_mm_002', number:2, total:5985, createdDate:null, shipping:'',
+   items:[{label:'32 oz',cases:10},{label:'16 oz',cases:15},{label:'8 oz',cases:20},{label:'2 oz',cases:5},{label:'C5X',cases:8}],
+   payments:[]}
+];
+
+function pdNum(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
+function pdRound(n){ return Math.round(n*100)/100; }
+function pdEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function pdDebt(st){ var s=st||(typeof S!=='undefined'?S:null)||{}; return s.productDebt||{}; }
+function pdInvoices(st){ var a=pdDebt(st).invoices; return Array.isArray(a)?a:[]; }
+function pdInvoice(st,id){ return pdInvoices(st).filter(function(i){return i.id===id;})[0]||null; }
+
+function pdPaid(inv){ return pdRound(((inv&&inv.payments)||[]).reduce(function(t,p){return t+pdNum(p.amount);},0)); }
+function pdBalance(inv){ return pdRound(Math.max(0,pdNum(inv&&inv.total)-pdPaid(inv))); }
+// Half a cent of slack so floating point cannot leave a settled invoice open.
+function pdIsPaid(inv){ var t=pdNum(inv&&inv.total); return t>0&&pdPaid(inv)+0.005>=t; }
+function pdPct(inv){ var t=pdNum(inv&&inv.total); return t>0?Math.min(100,Math.round(pdPaid(inv)/t*100)):0; }
+
+// Status is DERIVED, never trusted from storage, so a stale flag written by an
+// older build cannot make a settled invoice look open (or the reverse).
+function pdStatus(inv){ return pdIsPaid(inv)?'paid':'open'; }
+function pdSettledOn(inv){
+  if(!pdIsPaid(inv))return null;
+  // The invoice was settled by the payment that closed it out: the latest
+  // dated payment. Derived from the ledger, never invented.
+  var ds=((inv.payments)||[]).map(function(p){return p.date||'';}).filter(Boolean).sort();
+  return ds.length?ds[ds.length-1]:null;
 }
-function saveDebtPmt(){
-  const amt=parseFloat($$('dpt_amt').value);
+// Writes the derived status back onto the record so exports and backups carry it.
+function pdSyncStatus(inv){
+  if(!inv)return inv;
+  inv.status=pdStatus(inv);
+  inv.paidDate=pdSettledOn(inv);
+  return inv;
+}
+
+// Invoices are worked in order, so the open one is the lowest-numbered unpaid.
+function pdOpenInvoice(st){
+  return pdInvoices(st).filter(function(i){return !pdIsPaid(i);})
+                       .sort(function(a,b){return pdNum(a.number)-pdNum(b.number);})[0]||null;
+}
+function pdClosedInvoices(st){
+  return pdInvoices(st).filter(pdIsPaid).sort(function(a,b){return pdNum(b.number)-pdNum(a.number);});
+}
+function pdNextNumber(st){
+  return pdInvoices(st).reduce(function(m,i){return Math.max(m,pdNum(i.number));},0)+1;
+}
+function pdNextId(st){
+  var n=pdNextNumber(st), pad=('000'+n).slice(-3), base='pdinv_mm_'+pad, id=base, k=1;
+  while(pdInvoice(st,id))id=base+'_'+(++k);
+  return id;
+}
+// A SUMMARY across separate obligations. Deliberately not "the balance":
+// callers must present it as a stack of invoices, never as one debt.
+function pdSupplierTotals(st){
+  var inv=pdInvoices(st), t=0,p=0,b=0;
+  inv.forEach(function(i){ t+=pdNum(i.total); p+=pdPaid(i); b+=pdBalance(i); });
+  return {invoices:inv.length, open:inv.filter(function(i){return !pdIsPaid(i);}).length,
+          paid:inv.filter(pdIsPaid).length,
+          totalInvoiced:pdRound(t), totalPaid:pdRound(p), totalOwed:pdRound(b)};
+}
+function pdPaymentCount(st){
+  return pdInvoices(st).reduce(function(t,i){return t+((i.payments||[]).length);},0)+
+         ((pdDebt(st).unassignedPayments||[]).length);
+}
+
+// Before there was a method field, the method was typed into the note. Both
+// helpers below undo that, so a row never reads "Zelle · Zelle — ...".
+// True when a free-text note carries nothing beyond a payment method.
+function pdNoteIsJustMethod(note){
+  var t=String(note==null?'':note).trim().toLowerCase().replace(/[.\s]+$/,'');
+  if(!t)return true;
+  return PD_METHODS.some(function(m){return m.toLowerCase()===t;});
+}
+// Drops a leading "Zelle — ", "Venmo: ", "Check - " and the like, keeping the
+// rest of the note exactly as the owner typed it.
+function pdStripMethodPrefix(note){
+  var t=String(note==null?'':note);
+  for(var i=0;i<PD_METHODS.length;i++){
+    var m=PD_METHODS[i];
+    var re=new RegExp('^\\s*'+m.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*[—–\\-:·|,]+\\s*','i');
+    if(re.test(t))return t.replace(re,'').trim();
+  }
+  return t.trim();
+}
+function pdSamePayment(a,b){
+  return (a.date||'')===(b.date||'') && Math.abs(pdNum(a.amount)-pdNum(b.amount))<0.005;
+}
+function pdSortPayments(inv){
+  (inv.payments||[]).sort(function(a,b){
+    var d=(a.date||'').localeCompare(b.date||''); return d||(pdNum(a.amount)-pdNum(b.amount));
+  });
+  return inv;
+}
+
+// ---------------------------------------------------
+// NORMALIZE — idempotent, shape driven, never marker gated.
+// Runs on every load and on every restore/import so a document from any
+// older build (or from the cloud) arrives in the invoice shape.
+// ---------------------------------------------------
+function pdNormalize(d){
+  if(!d)return d;
+  var pd=d.productDebt;
+  if(!pd||typeof pd!=='object')pd=d.productDebt={};
+  if(!pd.supplier)pd.supplier=PD_SUPPLIER;
+  if(!Array.isArray(pd.invoices))pd.invoices=[];
+  if(!Array.isArray(pd.unassignedPayments))pd.unassignedPayments=[];
+
+  // --- absorb the legacy single-balance shape, losing nothing ---
+  var legacyPmts=Array.isArray(pd.payments)?pd.payments:null;
+  var legacyTotal=(pd.originalBalance!=null)?pdNum(pd.originalBalance):null;
+  if(legacyPmts||legacyTotal!=null){
+    var target=pd.invoices.filter(function(i){return pdNum(i.number)===1;})[0];
+    if(!target){
+      target={id:'pdinv_mm_001', number:1, total:(legacyTotal!=null?legacyTotal:0),
+              createdDate:null, paidDate:null, status:'open', shipping:'', note:'',
+              items:[], payments:[]};
+      pd.invoices.push(target);
+    }
+    (legacyPmts||[]).forEach(function(p){
+      var already=(target.payments||[]).some(function(q){return pdSamePayment(p,q);});
+      if(already)return;
+      target.payments=target.payments||[];
+      target.payments.push({amount:pdNum(p.amount), date:p.date||'',
+                            method:p.method||'', note:p.note||''});
+    });
+    delete pd.payments;
+    delete pd.originalBalance;
+  }
+
+  // --- coerce every invoice into the canonical field set ---
+  pd.invoices.forEach(function(inv,ix){
+    if(!inv.id)inv.id='pdinv_mm_'+('000'+(ix+1)).slice(-3);
+    if(inv.number==null)inv.number=ix+1;
+    inv.number=pdNum(inv.number);
+    inv.total=pdNum(inv.total);
+    if(!Array.isArray(inv.items))inv.items=[];
+    if(!Array.isArray(inv.payments))inv.payments=[];
+    inv.items=inv.items.map(function(it){return {label:String(it&&it.label||''),cases:pdNum(it&&it.cases)};});
+    inv.payments=inv.payments.map(function(p){
+      return {amount:pdNum(p&&p.amount), date:(p&&p.date)||'',
+              method:(p&&p.method)||'', note:(p&&p.note)||''};
+    });
+    if(inv.createdDate===undefined)inv.createdDate=null;
+    if(inv.shipping==null)inv.shipping='';
+    if(inv.note==null)inv.note='';
+    pdSortPayments(inv);
+    pdSyncStatus(inv);
+  });
+  pd.invoices.sort(function(a,b){return pdNum(a.number)-pdNum(b.number);});
+  return d;
+}
+
+// ---------------------------------------------------
+// ONE-TIME MIGRATION — split the Mark Martone rolling debt into the two
+// real invoices. Called from applyOneTimeUpdates() behind its own marker.
+// ---------------------------------------------------
+function pdMigrateMarkMartone(d){
+  pdNormalize(d);
+  var pd=d.productDebt;
+  pd.supplier=pd.supplier||PD_SUPPLIER;
+
+  PD_MM_SEED.forEach(function(seed){
+    var inv=pd.invoices.filter(function(i){return pdNum(i.number)===seed.number;})[0];
+    if(!inv){
+      inv={id:seed.id, number:seed.number, total:seed.total, createdDate:seed.createdDate,
+           paidDate:null, status:'open', shipping:seed.shipping, note:'', items:[], payments:[]};
+      pd.invoices.push(inv);
+    }
+    inv.total=seed.total;
+    inv.shipping=seed.shipping;
+    inv.items=seed.items.map(function(it){return {label:it.label,cases:it.cases};});
+
+    // Reconcile the ledger against what the device already holds. An existing
+    // record that matches a confirmed payment by date+amount is KEPT (its own
+    // note text survives) and only has its method corrected; a confirmed
+    // payment the device never had is added.
+    var kept=[];
+    seed.payments.forEach(function(sp){
+      var mine=(inv.payments||[]).filter(function(p){return pdSamePayment(p,sp);})[0];
+      var note=(mine&&mine.note)?mine.note:sp.note;
+      // A legacy note was the only place a method could be recorded before
+      // this. There is a real field for it now, so a note that is nothing but
+      // a method word is replaced (an old note reading "Venmo" must not sit
+      // beside method Zelle), and a method typed as a prefix is stripped off
+      // the front while the rest of the owner's own text is kept verbatim.
+      if(pdNoteIsJustMethod(note))note=sp.note; else note=pdStripMethodPrefix(note)||sp.note;
+      kept.push({amount:sp.amount, date:sp.date, method:sp.method, note:note});
+    });
+    // Anything the device holds that is NOT on the confirmed ledger is parked,
+    // visibly, rather than deleted or folded into a total it does not belong to.
+    (inv.payments||[]).forEach(function(p){
+      if(seed.payments.some(function(sp){return pdSamePayment(p,sp);}))return;
+      pd.unassignedPayments.push({amount:pdNum(p.amount), date:p.date||'',
+        method:p.method||'', note:p.note||'', fromInvoice:seed.number});
+    });
+    inv.payments=kept;
+    pdSortPayments(inv);
+    pdSyncStatus(inv);
+  });
+
+  pd.invoices.sort(function(a,b){return pdNum(a.number)-pdNum(b.number);});
+  return d;
+}
+
+// ---------------------------------------------------
+// UI — log a payment against the OPEN invoice
+// ---------------------------------------------------
+// Which completed invoice cards are expanded on the Product Debt page.
+// View state only: never saved, never part of S.
+var pdOpenCards={};
+function pdToggleCard(id){ pdOpenCards[id]=!pdOpenCards[id]; renderCur(); }
+
+function openDebtPmt(invId){
+  var pd=pdDebt(S);
+  var inv=invId?pdInvoice(S,invId):pdOpenInvoice(S);
+  if(!inv){
+    mOpen('<div class="mh"><div class="mt">💳 Log Payment</div><button class="mx" onclick="mClose()">×</button></div>'+
+      '<div class="wb" style="margin-bottom:12px">Every invoice for '+pdEsc(pd.supplier||'this supplier')+
+      ' is paid in full. Create the next invoice before logging a payment against it.</div>'+
+      '<button class="btn btn-gold btn-full" onclick="openNewInvoice()">🧾 New Invoice</button>'+
+      '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+    return;
+  }
+  if(pdIsPaid(inv)){ toast('Invoice '+inv.number+' is already paid in full'); return; }
+  var bal=pdBalance(inv), today=_todayKey();
+  var opts=PD_METHODS.map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
+  mOpen('<div class="mh"><div class="mt">💳 Payment — Invoice '+inv.number+'</div><button class="mx" onclick="mClose()">×</button></div>'+
+  '<div class="wb red" style="margin-bottom:12px">Invoice '+inv.number+' balance: <strong>'+fmt(bal)+'</strong> of '+fmt(pdNum(inv.total))+'</div>'+
+  '<div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="'+bal.toFixed(2)+'" step="0.01" min="0.01"></div>'+
+  '<div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="'+today+'"></div>'+
+  '<div class="fg"><label class="fl">METHOD</label><select class="fi" id="dpt_method">'+opts+'</select></div>'+
+  '<div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. check #1234"></div>'+
+  '<button class="btn btn-green btn-full" onclick="saveDebtPmt(\''+inv.id+'\')">✅ Save Payment</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+}
+function saveDebtPmt(invId){ if(_dupGuard())return;
+  pdNormalize(S);
+  var inv=invId?pdInvoice(S,invId):pdOpenInvoice(S);
+  if(!inv){toast('No open invoice to pay');return;}
+  if(pdIsPaid(inv)){toast('Invoice '+inv.number+' is already paid in full');return;}
+  var amt=parseFloat($$('dpt_amt').value);
   if(!amt||amt<=0){toast('Enter a valid amount');return;}
-  const date=$$('dpt_date').value||_todayKey();
-  const note=$$('dpt_note').value||'';
-  if(!S.productDebt)S.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  S.productDebt.payments.push({amount:amt,date,note});
-  mClose();saveS();toast('✅ Payment logged — '+fmt(amt));
+  var bal=pdBalance(inv);
+  if(amt-bal>0.005&&typeof confirm==='function'&&
+     !confirm(fmt(amt)+' is more than the '+fmt(bal)+' still owed on invoice '+inv.number+
+              '.\n\nLog it anyway? The overpayment is NOT carried to another invoice.'))return;
+  var date=$$('dpt_date').value||_todayKey();
+  var mEl=$$('dpt_method'), method=(mEl&&mEl.value)||'';
+  var note=$$('dpt_note').value||'';
+  inv.payments.push({amount:amt,date:date,method:method,note:note});
+  pdSortPayments(inv); pdSyncStatus(inv);
+  mClose(); saveS();
+  toast(pdIsPaid(inv)?('🎉 Invoice '+inv.number+' PAID IN FULL'):('✅ Payment logged — '+fmt(amt)));
+}
+
+// Remove a payment. Only ever offered on an OPEN invoice: a settled invoice is
+// permanent history and the page gives no way to edit it.
+function pdRemovePayment(invId,idx){
+  pdNormalize(S);
+  var inv=pdInvoice(S,invId);
+  if(!inv){toast('Invoice not found');return;}
+  if(pdIsPaid(inv)){toast('Invoice '+inv.number+' is settled — payments are locked');return;}
+  var p=(inv.payments||[])[idx];
+  if(!p){toast('Payment not found');return;}
+  if(typeof confirm==='function'&&
+     !confirm('Remove the '+fmt(pdNum(p.amount))+' payment dated '+(p.date||'(no date)')+
+              ' from invoice '+inv.number+'?\n\nThis cannot be undone.'))return;
+  inv.payments.splice(idx,1);
+  pdSyncStatus(inv); saveS(); toast('Payment removed — '+fmt(pdNum(p.amount)));
+}
+
+// ---------------------------------------------------
+// UI — create the next invoice
+// ---------------------------------------------------
+var PD_ITEM_ROWS=6;
+function openNewInvoice(){
+  var st=S, open=pdOpenInvoice(st), n=pdNextNumber(st), today=_todayKey();
+  var rows='';
+  for(var i=0;i<PD_ITEM_ROWS;i++){
+    rows+='<div style="display:flex;gap:6px;margin-bottom:6px">'+
+      '<input class="fi" id="ni_lbl'+i+'" style="flex:2" placeholder="'+(i===0?'32 oz':'product')+'">'+
+      '<input class="fi" id="ni_qty'+i+'" style="flex:1" type="number" min="0" step="1" placeholder="cases">'+
+    '</div>';
+  }
+  mOpen('<div class="mh"><div class="mt">🧾 New Invoice — Invoice '+n+'</div><button class="mx" onclick="mClose()">×</button></div>'+
+  (open?'<div class="wb red" style="margin-bottom:12px">Invoice '+open.number+' is still open with '+fmt(pdBalance(open))+
+        ' owed. Normally you settle it before the next order is entered.</div>':'')+
+  '<div class="fg"><label class="fl">INVOICE TOTAL ($)</label><input class="fi" type="number" id="ni_total" step="0.01" min="0.01" placeholder="0.00"></div>'+
+  '<div class="fg"><label class="fl">INVOICE DATE (optional)</label><input class="fi" type="date" id="ni_date" value="'+today+'"></div>'+
+  '<div class="fg"><label class="fl">SHIPPING (optional)</label><input class="fi" id="ni_ship" placeholder="e.g. Free"></div>'+
+  '<div class="fg"><label class="fl">ORDER — PRODUCT / CASES</label>'+rows+'</div>'+
+  '<div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="ni_note" placeholder=""></div>'+
+  '<button class="btn btn-green btn-full" onclick="saveNewInvoice()">✅ Create Invoice '+n+'</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+}
+function saveNewInvoice(){ if(_dupGuard())return;
+  pdNormalize(S);
+  var total=parseFloat($$('ni_total').value);
+  if(!total||total<=0){toast('Enter the invoice total');return;}
+  var open=pdOpenInvoice(S);
+  if(open&&typeof confirm==='function'&&
+     !confirm('Invoice '+open.number+' still owes '+fmt(pdBalance(open))+
+              '.\n\nCreate a second open invoice anyway?'))return;
+  var items=[];
+  for(var i=0;i<PD_ITEM_ROWS;i++){
+    var l=$$('ni_lbl'+i), q=$$('ni_qty'+i);
+    var lbl=((l&&l.value)||'').trim(), cases=pdNum(q&&q.value);
+    if(lbl||cases)items.push({label:lbl,cases:cases});
+  }
+  var inv={id:pdNextId(S), number:pdNextNumber(S), total:pdRound(total),
+    createdDate:($$('ni_date').value||null), paidDate:null, status:'open',
+    shipping:(($$('ni_ship').value)||'').trim(), note:(($$('ni_note').value)||'').trim(),
+    items:items, payments:[]};
+  S.productDebt.invoices.push(inv);
+  S.productDebt.invoices.sort(function(a,b){return pdNum(a.number)-pdNum(b.number);});
+  mClose(); saveS(); toast('🧾 Invoice '+inv.number+' created — '+fmt(inv.total));
+}
+
+// ---------------------------------------------------
+// UI — the Product Debt page
+// ---------------------------------------------------
+function pdItemsHtml(inv){
+  var parts=(inv.items||[]).filter(function(it){return it.label||it.cases;})
+    .map(function(it){return pdEsc(it.label)+' <strong style="color:var(--text)">'+
+      (it.cases?fmtN(it.cases)+(it.cases===1?' case':' cases'):'—')+'</strong>';});
+  if(inv.shipping)parts.push('Shipping <strong style="color:var(--text)">'+pdEsc(inv.shipping)+'</strong>');
+  if(!parts.length)return '';
+  return '<div style="font-size:11px;color:var(--muted);line-height:1.8;margin-bottom:10px;'+
+         'background:var(--card2);border-radius:8px;padding:8px 10px">'+parts.join(' · ')+'</div>';
+}
+function pdPaymentsHtml(inv,editable){
+  var pmts=inv.payments||[];
+  if(!pmts.length)return '<div style="font-size:11px;color:var(--muted);padding:8px 0;border-top:1px solid var(--border)">'+
+    'No payments logged against this invoice yet.</div>';
+  var rows=pmts.slice().reverse().map(function(p){
+    var realIdx=pmts.indexOf(p);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'+
+      '<span style="color:var(--muted);flex:0 0 78px">'+pdEsc(p.date||'—')+'</span>'+
+      '<span style="color:var(--green);font-weight:900;flex:0 0 auto;min-width:74px;text-align:right">+'+fmt(pdNum(p.amount))+'</span>'+
+      '<span style="flex:1;min-width:0;text-align:right;color:var(--muted);font-size:10px;overflow-wrap:anywhere">'+
+        (p.method?'<strong style="color:var(--text)">'+pdEsc(p.method)+'</strong>':'')+
+        (p.method&&p.note?' · ':'')+(p.note?pdEsc(p.note):'')+'</span>'+
+      (editable?'<button class="btn btn-ghost btn-xs" style="flex:0 0 auto;padding:2px 7px" title="Remove this payment" '+
+        'onclick="pdRemovePayment(\''+inv.id+'\','+realIdx+')">✕</button>':'')+
+    '</div>';
+  }).join('');
+  return '<div style="padding-top:6px;border-top:1px solid var(--border)">'+rows+'</div>';
+}
+function pdInvoiceCard(inv,active){
+  var paid=pdPaid(inv), bal=pdBalance(inv), tot=pdNum(inv.total), pct=pdPct(inv), settled=pdIsPaid(inv);
+  var badge=settled
+    ? '<span style="background:var(--greenbg);border:1px solid var(--greenbd);color:var(--green);font-size:10px;font-weight:900;letter-spacing:1px;padding:3px 8px;border-radius:6px">PAID IN FULL</span>'
+    : '<span style="background:var(--redbg);border:1px solid var(--redbd);color:var(--red);font-size:10px;font-weight:900;letter-spacing:1px;padding:3px 8px;border-radius:6px">OPEN</span>';
+  var expanded=settled?!!pdOpenCards[inv.id]:true;
+  var head='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'+
+      '<div style="display:flex;align-items:center;gap:8px;min-width:0">'+
+        '<span style="font-size:15px;font-weight:900">Invoice '+pdEsc(inv.number)+'</span>'+badge+
+      '</div>'+
+      '<span style="font-size:12px;font-weight:800;color:'+(settled?'var(--green)':'var(--red)')+'">'+
+        (settled?fmt(tot)+' settled':fmt(bal)+' owed')+'</span>'+
+    '</div>';
+
+  if(settled&&!expanded){
+    return '<div class="card grb">'+
+      '<button class="btn btn-ghost btn-full" style="height:auto;padding:10px;text-align:left;white-space:normal;display:block" '+
+        'onclick="pdToggleCard(\''+inv.id+'\')">'+head+
+        '<div style="font-size:10px;color:var(--muted);margin-top:6px;font-weight:700">'+
+          (inv.paidDate?'Settled '+pdEsc(inv.paidDate)+' · ':'')+(inv.payments||[]).length+
+          ' payment'+((inv.payments||[]).length===1?'':'s')+' · tap to expand ▾</div>'+
+      '</button></div>';
+  }
+
+  var body='<div style="display:flex;gap:8px;margin:12px 0 10px;flex-wrap:wrap">'+
+      '<div class="sbox" style="flex:1 1 30%;min-width:88px"><div class="sl">Original</div><div class="sv sm w">'+fmt(tot)+'</div></div>'+
+      '<div class="sbox grb" style="flex:1 1 30%;min-width:88px"><div class="sl">Paid</div><div class="sv sm g">'+fmt(paid)+'</div></div>'+
+      '<div class="sbox '+(settled?'grb':'rb')+'" style="flex:1 1 30%;min-width:88px"><div class="sl">Balance</div>'+
+        '<div class="sv sm '+(settled?'g':'r')+'">'+fmt(bal)+'</div></div>'+
+    '</div>'+
+    '<div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:'+pct+'%;background:var(--green)"></div></div>'+
+    '<div style="font-size:10px;color:var(--muted);margin-bottom:10px">'+pct+'% paid'+
+      (inv.createdDate?' · invoiced '+pdEsc(inv.createdDate):'')+
+      (settled&&inv.paidDate?' · settled '+pdEsc(inv.paidDate):'')+'</div>'+
+    pdItemsHtml(inv)+
+    (inv.note?'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'+pdEsc(inv.note)+'</div>':'')+
+    pdPaymentsHtml(inv,!settled)+
+    (settled
+      ? '<div style="font-size:10px;color:var(--muted);text-align:center;padding:10px 0 2px">'+
+        'Settled invoice — kept as permanent history. New payments go to the open invoice.</div>'+
+        '<button class="btn btn-ghost btn-sm btn-full" onclick="pdToggleCard(\''+inv.id+'\')">Collapse ▴</button>'
+      : '<button class="btn btn-green btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt(\''+inv.id+'\')">+ Log Payment to Invoice '+pdEsc(inv.number)+'</button>');
+
+  return '<div class="card '+(settled?'grb':'rb')+'">'+head+body+'</div>';
+}
+function secDebt(){
+  pdNormalize(S);
+  var pd=pdDebt(S), sup=pd.supplier||PD_SUPPLIER;
+  var open=pdOpenInvoice(S), closed=pdClosedInvoices(S), T=pdSupplierTotals(S);
+  var h='';
+
+  if(!T.invoices){
+    return '<div class="card"><div style="font-size:13px;color:var(--muted);margin-bottom:10px">'+
+      'No invoices on file for '+pdEsc(sup)+' yet.</div>'+
+      '<button class="btn btn-gold btn-full" onclick="openNewInvoice()">🧾 New Invoice</button></div>';
+  }
+
+  // Supplier summary. Explicitly a roll-up ACROSS separate invoices — it is
+  // never presented as a single balance, and no invoice is merged into another.
+  h+='<div class="card">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:1px;margin-bottom:8px">'+
+      pdEsc(sup)+' — '+T.invoices+' invoice'+(T.invoices===1?'':'s')+' ('+T.paid+' paid, '+T.open+' open)</div>'+
+    // Deliberately NOT a combined "original invoice total". Adding the orders
+    // together is what made the old page wrong, so the roll-up reports only
+    // what is genuinely supplier-level: how much is still owed, and how much
+    // has been paid over the life of the account.
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<div class="sbox '+(T.totalOwed>0?'rb':'grb')+'" style="flex:1 1 45%;min-width:110px"><div class="sl">Still owed</div>'+
+        '<div class="sv sm '+(T.totalOwed>0?'r':'g')+'">'+fmt(T.totalOwed)+'</div>'+
+        '<div class="ss">'+(T.open?'on '+T.open+' open invoice'+(T.open===1?'':'s'):'nothing outstanding')+'</div></div>'+
+      '<div class="sbox grb" style="flex:1 1 45%;min-width:110px"><div class="sl">Paid to date</div>'+
+        '<div class="sv sm g">'+fmt(T.totalPaid)+'</div>'+
+        '<div class="ss">across '+T.invoices+' invoice'+(T.invoices===1?'':'s')+'</div></div>'+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">'+
+      'Each order is its own invoice, settled on its own. These are account totals across separate orders — not one combined debt.</div>'+
+  '</div>';
+
+  if((pd.unassignedPayments||[]).length){
+    h+='<div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;letter-spacing:1px;margin-bottom:6px">'+
+      'Unassigned payments — needs review</div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">These were on the old combined record but do not match a confirmed invoice payment. '+
+      'They are kept here rather than dropped or counted against an invoice they may not belong to.</div>'+
+      pd.unassignedPayments.map(function(p){
+        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-top:1px solid var(--border);font-size:12px">'+
+          '<span style="color:var(--muted)">'+pdEsc(p.date||'—')+'</span>'+
+          '<span style="color:var(--gold);font-weight:900">'+fmt(pdNum(p.amount))+'</span>'+
+          '<span style="color:var(--muted);font-size:10px;overflow-wrap:anywhere">'+pdEsc(p.note||p.method||'')+'</span></div>';
+      }).join('')+'</div>';
+  }
+
+  // The ACTIVE invoice leads the page; settled invoices are history below it.
+  if(open){
+    h+='<div class="sec-lbl" style="margin-top:2px">ACTIVE INVOICE</div>'+pdInvoiceCard(open,true);
+  }else{
+    h+='<div class="card grb" style="text-align:center">'+
+      '<div style="font-size:14px;font-weight:900;color:var(--green);margin-bottom:4px">✅ '+pdEsc(sup)+' is fully paid</div>'+
+      '<div style="font-size:11px;color:var(--muted)">Every invoice on file is settled. Add the next order when it arrives.</div></div>';
+  }
+  h+='<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:6px" onclick="openNewInvoice()">🧾 New Invoice</button>';
+
+  if(closed.length){
+    h+='<div class="sec-lbl">PAID INVOICES — HISTORY</div>';
+    h+=closed.map(function(i){return pdInvoiceCard(i,false);}).join('');
+  }
+  return h;
 }
 
 // ===================================================
@@ -5054,7 +5546,12 @@ function importData(){
 }
 function _applyStateObj(parsed){
   if(!parsed||!parsed.inventory||!parsed.shows)throw new Error('not a valid backup');
-  parsed.v=INIT.v;S=parsed;
+  parsed.v=INIT.v;
+  // A restored or imported file can predate sequential invoices. Normalising
+  // here (and nowhere else in this path) upgrades the debt shape without
+  // re-running any of the show-seeding migrations, which this path must not do.
+  pdNormalize(parsed);
+  S=parsed;
   localStorage.setItem('dd_bs_v7',JSON.stringify(S));
   renderCur();
 }
@@ -5259,7 +5756,7 @@ const BX_BUILD={
   baseCommit:'42daec5',
   backupBranch:'backup/pre-export-2026-08-20',
   featureCommit:'a90760e',
-  featureBuild:'export-2026-08-20d-phase2a',
+  featureBuild:'export-2026-08-24a-pd-invoices',
   builtOn:'2026-08-20',
   phase:'2A',
   phase2aBaseCommit:'d15efa7',
@@ -5602,7 +6099,9 @@ function bxCounts(st){
     repPaymentRecords:(st.reps||[]).reduce((t,r)=>t+((r.payments||[]).length),0),
     supplies:(st.supplies||[]).length,
     transfers:(st.transfers||[]).length,
-    productDebtPayments:((st.productDebt||{}).payments||[]).length,
+    productDebtInvoices:pdInvoices(st).length,
+    productDebtPayments:pdPaymentCount(st),
+    productDebtUnassigned:((st.productDebt||{}).unassignedPayments||[]).length,
     inventorySkus:Object.keys(st.inventory||{}).length,
     batmanBorrowSkus:Object.keys(st.batmanBorrow||{}).length,
     season2025Rows:(typeof SHOWS_2025!=='undefined'?SHOWS_2025.length:0)
@@ -5697,11 +6196,32 @@ function bxCsvFiles(st,meta){
   (st.transfers||[]).forEach(t=>r.push(['transfer','','',t.date||'',t.sku||'',bxNum(t.qty),t.fromName||'',t.toName||'',t.note||'']));
   put('10_inventory_adjustments.csv',r);
 
-  r=[['supplier','original_balance','payment_date','amount','note','remaining']];
-  const pd=st.productDebt||{}; let rem=bxNum(pd.originalBalance);
-  if(!(pd.payments||[]).length)r.push([pd.supplier||'',rem.toFixed(2),'','','NO PAYMENTS LOGGED',rem.toFixed(2)]);
-  (pd.payments||[]).forEach(p=>{ rem-=bxNum(p.amount);
-    r.push([pd.supplier||'',bxNum(pd.originalBalance).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',rem.toFixed(2)]); });
+  // One row per payment, stamped with the invoice it belongs to. The running
+  // remainder restarts at each invoice: invoices are never summed together.
+  r=[['supplier','invoice_number','invoice_id','invoice_total','invoice_status','invoice_date',
+      'paid_in_full_date','order_detail','shipping','payment_date','amount','method','note',
+      'invoice_paid_to_date','invoice_remaining']];
+  const pd=st.productDebt||{}, pdSup=pd.supplier||'';
+  const pdOrder=inv=>(inv.items||[]).filter(it=>it.label||it.cases)
+    .map(it=>it.label+' '+bxNum(it.cases)).join('; ');
+  pdInvoices(st).forEach(inv=>{
+    const tot=bxNum(inv.total), stat=pdStatus(inv), settled=pdSettledOn(inv)||'';
+    const base=[pdSup,inv.number,inv.id,tot.toFixed(2),stat.toUpperCase(),inv.createdDate||'',
+                settled,pdOrder(inv),inv.shipping||''];
+    let run=0;
+    if(!(inv.payments||[]).length){
+      r.push(base.concat(['','','','NO PAYMENTS LOGGED','0.00',tot.toFixed(2)]));
+      return;
+    }
+    (inv.payments||[]).forEach(pm=>{ run+=bxNum(pm.amount);
+      r.push(base.concat([pm.date||'',bxNum(pm.amount).toFixed(2),pm.method||'',pm.note||'',
+        run.toFixed(2),Math.max(0,tot-run).toFixed(2)])); });
+  });
+  (pd.unassignedPayments||[]).forEach(pm=>{
+    r.push([pdSup,'','','','UNASSIGNED','','','','',pm.date||'',bxNum(pm.amount).toFixed(2),
+            pm.method||'',pm.note||'','','']); });
+  if(!pdInvoices(st).length&&!(pd.unassignedPayments||[]).length)
+    r.push([pdSup,'','','','NO INVOICES ON FILE','','','','','','','','','','']);
   put('11_product_debt.csv',r);
 
   r=[['id','name','qty_on_hand','low_threshold','unit','unit_cost']];
@@ -5844,6 +6364,16 @@ function bxDiagnose(st,snap,meta){
   add('WARN','DUPLICATE_SHOWS','Duplicate or conflicting show records',dupes,
     'Two confirmed shows on the same day cannot both be worked unless a rep covers one.');
 
+  add('CRITICAL','DEBT_UNASSIGNED','Supplier payments not assigned to an invoice',
+    (((st.productDebt||{}).unassignedPayments)||[]).map(p=>
+      (p.date||'no date')+' — '+M(bxNum(p.amount))+(p.note?' ('+p.note+')':'')),
+    'These came off the old combined debt record but did not match a confirmed invoice payment. They are counted against no invoice until a person assigns them.');
+
+  const debtOpen=pdInvoices(st).filter(i=>!pdIsPaid(i));
+  add('WARN','DEBT_MULTI_OPEN','More than one supplier invoice is open at once',
+    debtOpen.length>1?debtOpen.map(i=>'Invoice '+i.number+' — '+M(pdBalance(i))+' of '+M(bxNum(i.total))+' still owed'):[],
+    'Invoices are meant to be worked in order, one open at a time. New payments default to the lowest-numbered open invoice.');
+
   const sch=V.schedule(), sv=V.scheduleValidation();
   add('CRITICAL','COGS_SCHEDULE_INVALID','COGS schedule is not valid, so costs fell back',
     sch?sv.errors:[], 'While the schedule is invalid it is ignored entirely and costs fall back to the cost table, then to the product default. Fix the schedule before trusting any COGS figure.');
@@ -5977,8 +6507,16 @@ function bxSummary(st,meta,diag,snap){
   line('  Tax reserve            '+M(taxRes)+'   (rate '+(V.setting('tax',0.28)*100).toFixed(0)+'%)');
   line('  Total miles            '+miles.toFixed(0));
   line('  IRS mileage deduction  '+M(miles*V.setting('irsRate',0))+'   (rate $'+V.setting('irsRate',0)+'/mi)');
-  const pd=st.productDebt||{}, pdPaid=(pd.payments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-  line('  Product debt remaining '+M(bxNum(pd.originalBalance)-pdPaid)+' of '+M(bxNum(pd.originalBalance))+' to '+(pd.supplier||'supplier'));
+  const pdT=pdSupplierTotals(st), pdSupN=(st.productDebt||{}).supplier||'supplier';
+  line('  Product debt to '+pdSupN+'  '+M(pdT.totalOwed)+' still owed of '+M(pdT.totalInvoiced)+
+       ' invoiced across '+pdT.invoices+' invoice(s) — '+pdT.paid+' paid, '+pdT.open+' open');
+  pdInvoices(st).forEach(inv=>{
+    line('    Invoice '+inv.number+'  '+M(bxNum(inv.total)).padStart(11)+
+         '   paid '+M(pdPaid(inv)).padStart(11)+'   owed '+M(pdBalance(inv)).padStart(11)+
+         '   '+pdStatus(inv).toUpperCase()+
+         (pdIsPaid(inv)&&pdSettledOn(inv)?' on '+pdSettledOn(inv):'')); });
+  if(((st.productDebt||{}).unassignedPayments||[]).length)
+    line('    UNASSIGNED payments needing review: '+(st.productDebt.unassignedPayments||[]).length);
   line('  Inventory at cost      '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.cost(s.key),0)));
   line('  Inventory at retail    '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.price(s.key),0)));
   line('');
@@ -6747,7 +7285,7 @@ function bxShowModal(){
     row('Booth payments',c.boothPayments)+row('Show expenses',c.showExpenses)+
     row('Business expenses',c.otherExpenses)+row('Reps',c.reps+'  ('+c.repPaymentRecords+' payout records)')+
     row('Rep sale entries',c.repSaleEntries)+row('Inventory transfers',c.transfers)+
-    row('Supplies',c.supplies)+row('Product debt payments',c.productDebtPayments)+
+    row('Supplies',c.supplies)+row('Product debt invoices',c.productDebtInvoices)+row('Product debt payments',c.productDebtPayments)+(c.productDebtUnassigned?row('Unassigned debt payments',c.productDebtUnassigned):'')+
     row('2025 season rows',c.season2025Rows)+
   '</div>'+
   '<div class="card '+(crit?'rb':'')+'" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">DIAGNOSTICS</div>'+
