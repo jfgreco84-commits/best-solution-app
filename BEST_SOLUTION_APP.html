@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v31';
+const APP_VERSION='v32';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -502,7 +502,10 @@ const INIT={
   batmanBorrow:{},
   shows:[],
   supplies:JSON.parse(JSON.stringify(DEFAULT_SUPPLIES)),
-  productDebt:{supplier:'Mark Martone',originalBalance:10000,payments:[]},
+  // Sequential supplier invoices. Each product order is its own invoice with
+  // its own total, payments and status; they are never merged into one rolling
+  // balance. See the PRODUCT DEBT section for the helpers every reader uses.
+  productDebt:{supplier:'Mark Martone',invoices:[]},
   otherExpenses:[],
   reps:[],  // global rep roster — reused across all shows
   prices:{'32oz':25.00,'16oz':20.00,'8oz':15.00,'2oz':8.00,'c5s':10.00,'c5l':20.00},
@@ -1003,7 +1006,12 @@ function applyOneTimeUpdates(d){
     d._applied['fix_future_active_v1']=true;
   }
 
-  // Seed Mark Martone product debt
+  // Seed Mark Martone product debt.
+  // SUPERSEDED by debt_invoices_v1 below, and deliberately left in place: it is
+  // still the only record of these three payments for a document that has never
+  // seen them. It writes the pre-invoice {originalBalance,payments} shape, which
+  // pdAbsorbLegacyDebt() folds into Invoice 1 later in this same pass. Nothing
+  // reads that shape at runtime any more.
   if(!d._applied['debt_seed_v1']){
     if(!d.productDebt){
       d.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
@@ -1701,6 +1709,26 @@ function applyOneTimeUpdates(d){
     d._applied['cogs_history_v1']=true;
   }
 
+  // ===== Mark Martone: one rolling debt -> sequential invoices (2026-08-24) =====
+  // The old {originalBalance,payments} record merged two separate product orders
+  // into a single rolling balance, so a payment against the first pallet read as
+  // progress against the second. They are two obligations and are split here:
+  // Invoice 1 ($4,048.00, six Zelle payments, paid in full 2026-08-21) and
+  // Invoice 2 ($5,985.00, no payments). A timestamped copy of the WHOLE document
+  // is written to localStorage first, so the pre-split state stays recoverable
+  // from this device. Nothing outside productDebt is read or touched.
+  if(!d._applied['debt_invoices_v1']){
+    try{ localStorage.setItem('dd_bs_predebt_v1_'+Date.now(),JSON.stringify(d)); }catch(e){}
+    pdSeedCanonicalInvoices(d);
+    d._applied['debt_invoices_v1']=true;
+  }
+  // Not marker-gated on purpose. The two 2026-05 debt seeds above still write the
+  // legacy payments field, and a cloud document adopted from a device that has
+  // not upgraded arrives in the old shape with this marker already set. This
+  // folds any legacy payment into Invoice 1 (carrying over anything not already
+  // there) and drops the legacy fields. Idempotent once they are gone.
+  pdAbsorbLegacyDebt(d);
+
   // Final normalisation pass. The "Ensure new fields on all shows" block above
   // runs before the seeding migrations, so a show created by a seed during THIS
   // load would otherwise not gain workers/repPayMeta until the NEXT load. That
@@ -2371,22 +2399,6 @@ function secExpenses(C){
     </div>
   </div>`;
 }
-function secDebt(){
-  const debt=S.productDebt||{supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  const debtPaid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const debtBal=Math.max(0,(debt.originalBalance||0)-debtPaid);
-  const debtPct=debt.originalBalance>0?Math.min(100,Math.round((debtPaid/debt.originalBalance)*100)):0;
-  return `<div class="card rb">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-      <div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div><div style="font-size:28px;font-weight:900;color:var(--red)">${fmt(debtBal)}</div></div>
-      <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Total Paid</div><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(debtPaid)}</div></div>
-    </div>
-    <div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:${debtPct}%;background:var(--green)"></div></div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">${debtPct}% paid · Original: ${fmt(debt.originalBalance)}</div>
-    ${(debt.payments||[]).length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${[...(debt.payments||[])].reverse().map(p=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${p.date}</span><span style="color:var(--green);font-weight:900">+${fmt(p.amount)}</span>${p.note?`<span style="color:var(--muted);font-size:10px">${p.note}</span>`:''}</div>`).join('')}</div>`:''}
-    <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt()">+ Log Payment to Mark</button>
-  </div>`;
-}
 function secSplit(C){
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -2495,6 +2507,14 @@ function secBatman(){
   return h;
 }
 
+// Sub-line for the Product Debt button. Names the ACTIVE invoice and its own
+// balance, never a merged one.
+function dashDebtSub(){
+  const pd=pdDebt(S), open=pdOpenInvoice(pd), T=pdTotals(pd);
+  if(!T.count)return (pd.supplier||'Supplier')+' — no invoices';
+  if(!open)return (pd.supplier||'Supplier')+' — all '+T.count+' paid';
+  return pdInvLabel(open)+' — '+fmt(pdBalance(open))+' owed';
+}
 // Dashboard button grid — the only thing the data sections leave on Home.
 function dashSectionGrid(){
   const C=homeCtx();
@@ -2506,7 +2526,7 @@ function dashSectionGrid(){
     {k:'mileage',icon:'🚚',label:'Mileage &amp; Tax Deduction',sub:fmtN(C.ytd.miles)+' mi · '+fmt(C.mileDeduct)},
     {k:'booth',icon:'🎪',label:'Booth Costs',sub:'2026 season'},
     {k:'expenses',icon:'💸',label:'Other Expenses',sub:fmt(C.ytd.otherSpend)+' YTD'},
-    {k:'debt',icon:'🧾',label:'Product Debt',sub:'Mark Martone'},
+    {k:'debt',icon:'🧾',label:'Product Debt',sub:dashDebtSub()},
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
     {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
@@ -4248,29 +4268,391 @@ function confirmEndShow(shId){
 }
 
 // ===================================================
-// PRODUCT DEBT (MARK MARTONE)
+// PRODUCT DEBT — SEQUENTIAL SUPPLIER INVOICES (MARK MARTONE)
+// ---------------------------------------------------
+// Every product order is its own invoice, with its own number, original total,
+// payments, payment methods, status and dates. Invoices are NEVER summed into
+// one rolling balance on a card: a supplier roll-up may show the totals side by
+// side, but no progress bar, percentage or payment list ever spans two of them.
+//
+// The workflow this supports, without any further code change:
+//   create Invoice N -> log payments against it -> its balance reaches zero and
+//   it marks itself paid in full -> create Invoice N+1 as a separate
+//   obligation. Completed invoices are read-only history from then on and are
+//   untouched by anything a later invoice does.
+//
+// Only one invoice is normally open. A new payment defaults to that open
+// invoice; landing one on a completed invoice takes a deliberate choice in the
+// modal. Status is DERIVED from the money (pdSyncStatus), never typed in, so a
+// stored status can never disagree with the payments under it.
 // ===================================================
-function openDebtPmt(){
-  const debt=S.productDebt||{};
-  const paid=(debt.payments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);
-  const bal=Math.max(0,(debt.originalBalance||0)-paid);
-  const today=_todayKey();
-  mOpen(`<div class="mh"><div class="mt">💳 Log Payment to ${debt.supplier||'Supplier'}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div class="wb red" style="margin-bottom:12px">Current balance: <strong>${fmt(bal)}</strong></div>
-  <div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01"></div>
-  <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="${today}"></div>
-  <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. Venmo, check #1234"></div>
-  <button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ Save Payment</button>
-  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+const PD_METHODS=['Zelle','Venmo','Cash','Check','Card','PayPal','Cash App','Other'];
+
+// The two real Mark Martone orders, confirmed by Froggy 2026-08-24. Invoice 1
+// was paid off in six Zelle payments (none were Venmo). Invoice 2 is the new
+// pallet and has no payments against it. Every figure here is a stated one;
+// nothing is derived, rounded or filled in.
+//
+// createdDate is EMPTY on both on purpose. The order dates were never stated,
+// and guessing one from the first payment would print a made-up date as fact.
+// The card shows "order date not recorded" with a button to set it. The
+// paid-in-full date is not a guess: it is the date of the closing payment.
+const PD_MM_INVOICES=[
+  {number:1,originalTotal:4048,createdDate:'',paidInFullDate:'2026-08-21',status:'paid',
+   shipping:'Free',note:'First pallet',
+   items:[{label:'32 oz',cases:10},{label:'16 oz',cases:10},{label:'8 oz',cases:21},{label:'2 oz',cases:7}],
+   payments:[
+     {amount:250, date:'2026-05-01',method:'Zelle',note:'Payment 1'},
+     {amount:250, date:'2026-05-15',method:'Zelle',note:'Payment 2'},
+     {amount:250, date:'2026-05-29',method:'Zelle',note:'Payment 3'},
+     {amount:250, date:'2026-07-24',method:'Zelle',note:'Payment 4'},
+     {amount:3000,date:'2026-07-27',method:'Zelle',note:'Payment 5'},
+     {amount:48,  date:'2026-08-21',method:'Zelle',note:'Payment 6 — paid in full'}]},
+  {number:2,originalTotal:5985,createdDate:'',paidInFullDate:null,status:'open',
+   shipping:'',note:'Second pallet',
+   items:[{label:'32 oz',cases:10},{label:'16 oz',cases:15},{label:'8 oz',cases:20},
+          {label:'2 oz',cases:5},{label:'C5X',cases:8}],
+   payments:[]}
+];
+
+function pdNum(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+function pdRound(n){ return Math.round(pdNum(n)*100)/100; }
+function pdDebt(st){ const d=((st||(typeof S!=='undefined'?S:null))||{}).productDebt;
+  return d||{supplier:'Mark Martone',invoices:[]}; }
+
+// Read-time tolerance for the pre-invoice shape. _applyStateObj() (Import /
+// Restore from file) assigns a parsed document straight to S without running
+// applyOneTimeUpdates(), so a legacy {originalBalance,payments} record can still
+// reach a reader. It is presented as a single invoice. Nothing is written back.
+function pdInvoices(pd){
+  pd=pd||{};
+  if(Array.isArray(pd.invoices))return pd.invoices;
+  if(pd.originalBalance!=null||(pd.payments||[]).length){
+    return [pdSyncStatus(pdMakeInvoice({number:1,originalTotal:pdNum(pd.originalBalance),
+      note:'Converted from the pre-invoice record',payments:pd.payments||[]}))];
+  }
+  return [];
 }
-function saveDebtPmt(){
+function pdMakePayment(p){
+  p=p||{};
+  return {id:p.id||('pdp_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8)),
+    amount:pdRound(p.amount),date:p.date||'',method:p.method||'',note:p.note||''};
+}
+function pdMakeInvoice(inv){
+  inv=inv||{};
+  return {id:inv.id||('pdi_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8)),
+    number:pdNum(inv.number)||1,
+    originalTotal:pdRound(inv.originalTotal),
+    createdDate:inv.createdDate||'',
+    paidInFullDate:inv.paidInFullDate||null,
+    items:Array.isArray(inv.items)?inv.items.slice():[],
+    shipping:inv.shipping||'',
+    note:inv.note||'',
+    payments:(Array.isArray(inv.payments)?inv.payments:[]).map(pdMakePayment),
+    status:inv.status==='paid'?'paid':'open'};
+}
+function pdPaid(inv){ return pdRound((((inv||{}).payments)||[]).reduce((t,p)=>t+pdNum(p.amount),0)); }
+function pdBalance(inv){ return pdRound(Math.max(0,pdNum((inv||{}).originalTotal)-pdPaid(inv))); }
+function pdPct(inv){ const tot=pdNum((inv||{}).originalTotal);
+  return tot>0?Math.min(100,Math.round((pdPaid(inv)/tot)*100)):0; }
+function pdIsPaid(inv){ return pdNum((inv||{}).originalTotal)>0&&pdBalance(inv)<=0; }
+
+// Status and paid-in-full date are derived from the payments every time they are
+// touched. The stored fields exist only so an export or a collapsed card can
+// read them without recomputing.
+function pdSyncStatus(inv){
+  if(!inv)return inv;
+  if(pdIsPaid(inv)){
+    inv.status='paid';
+    if(!inv.paidInFullDate){
+      const dates=(inv.payments||[]).map(p=>p.date).filter(Boolean).sort();
+      inv.paidInFullDate=dates.length?dates[dates.length-1]:_todayKey();
+    }
+  }else{ inv.status='open'; inv.paidInFullDate=null; }
+  return inv;
+}
+function pdSorted(pd){ return pdInvoices(pd).slice().sort((a,b)=>pdNum(a.number)-pdNum(b.number)); }
+function pdOpenInvoices(pd){ return pdSorted(pd).filter(i=>!pdIsPaid(i)); }
+function pdOpenInvoice(pd){ return pdOpenInvoices(pd)[0]||null; }
+function pdNextNumber(pd){ return pdInvoices(pd).reduce((m,i)=>Math.max(m,pdNum(i.number)),0)+1; }
+function pdFindInvoice(pd,id){ return pdInvoices(pd).filter(i=>i.id===id)[0]||null; }
+function pdInvLabel(inv){ return 'Invoice '+pdNum((inv||{}).number); }
+
+// Supplier roll-up. Sums of separate invoices, presented as a summary only:
+// never as one invoice, and never divided into a single percentage.
+function pdTotals(pd){
+  const inv=pdInvoices(pd);
+  const original=pdRound(inv.reduce((t,i)=>t+pdNum(i.originalTotal),0));
+  const paid=pdRound(inv.reduce((t,i)=>t+pdPaid(i),0));
+  return {original:original,paid:paid,balance:pdRound(Math.max(0,original-paid)),
+    count:inv.length,openCount:inv.filter(i=>!pdIsPaid(i)).length,
+    payments:inv.reduce((t,i)=>t+((i.payments||[]).length),0)};
+}
+function pdItemsText(inv){
+  return (((inv||{}).items)||[]).map(it=>String(it.label||'')+(it.cases==null||it.cases===''?'':': '+it.cases+' cases'))
+    .filter(Boolean).join(' · ');
+}
+// "32 oz: 10" / "C5X: 8" / "Shipping: free" — one item per line. A line with no
+// colon is kept verbatim as a label with no case count, so nothing typed is
+// dropped and no quantity is ever invented.
+function pdParseItems(txt){
+  return String(txt||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).map(l=>{
+    const m=/^(.*?)[:=]\s*(\d+(?:\.\d+)?)\s*(?:cases?|cs|ea)?$/i.exec(l);
+    return m?{label:m[1].trim(),cases:pdNum(m[2])}:{label:l,cases:null};
+  });
+}
+function pdItemsToText(inv){
+  return (((inv||{}).items)||[]).map(it=>String(it.label||'')+(it.cases==null||it.cases===''?'':': '+it.cases)).join('\n');
+}
+function pdPmtKey(p){ return String((p||{}).date||'')+'|'+pdRound((p||{}).amount).toFixed(2); }
+
+// ---- migration helpers (called from applyOneTimeUpdates) ----
+
+// Build the canonical invoices. Only ever runs on a document that carries no
+// invoices at all; one that already has them is left exactly as it is, so a
+// cloud copy adopted from an already-converted device is never rewritten.
+function pdSeedCanonicalInvoices(d){
+  if(!d)return false;
+  d.productDebt=d.productDebt||{supplier:'Mark Martone'};
+  const pd=d.productDebt;
+  if(Array.isArray(pd.invoices)&&pd.invoices.length)return false;
+  if(!pd.supplier)pd.supplier='Mark Martone';
+  pd.invoices=PD_MM_INVOICES.map(x=>pdSyncStatus(pdMakeInvoice(JSON.parse(JSON.stringify(x)))));
+  return true;
+}
+
+// Fold a pre-invoice {originalBalance,payments} record into the FIRST invoice
+// and drop the legacy fields. A legacy payment that is not already on that
+// invoice (same date and same amount) is CARRIED OVER rather than discarded, so
+// the conversion cannot lose a payment this device recorded. Runs on every
+// load, because the two 2026-05 debt seeds above still write the legacy field
+// and a cloud document adopted from a device that has not upgraded arrives in
+// the old shape. Idempotent: once there are no legacy fields it does nothing.
+function pdAbsorbLegacyDebt(d){
+  const pd=d&&d.productDebt; if(!pd)return null;
+  if(!(('payments' in pd)||('originalBalance' in pd)))return null;
+  const legacy=(pd.payments||[]).map(pdMakePayment);
+  if(!(Array.isArray(pd.invoices)&&pd.invoices.length)){
+    // No invoices to fold into: keep the legacy record as Invoice 1 rather than
+    // deleting it. Dropping the fields here would be record loss.
+    const one=pdInvoices(pd).map(pdMakeInvoice).map(pdSyncStatus);
+    delete pd.payments; delete pd.originalBalance;
+    pd.invoices=one;
+    return {legacy:legacy.length,carried:legacy.length};
+  }
+  const target=pdSorted(pd)[0];
+  const carried=[];
+  const have={}; (target.payments||[]).forEach(p=>{ have[pdPmtKey(p)]=1; });
+  legacy.forEach(p=>{
+    if(have[pdPmtKey(p)])return;
+    have[pdPmtKey(p)]=1;
+    p.note=(p.note?p.note+' ':'')+'(carried over from the pre-invoice record)';
+    target.payments.push(p); carried.push(p);
+  });
+  if(carried.length){
+    target.payments.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+    pdSyncStatus(target);
+  }
+  delete pd.payments; delete pd.originalBalance;
+  return {legacy:legacy.length,carried:carried.length};
+}
+
+// ---- UI ----
+
+// Which completed invoice cards are expanded. Screen state only: never saved,
+// never synced, never written into the state document.
+let _pdExpanded={};
+function pdToggleCard(id){ _pdExpanded[id]=!_pdExpanded[id]; renderCur(); }
+
+function pdInvoiceCard(inv,opts){
+  opts=opts||{};
+  const paid=pdPaid(inv), bal=pdBalance(inv), pct=pdPct(inv), done=pdIsPaid(inv);
+  const expanded=opts.collapsible?!!_pdExpanded[inv.id]:true;
+  const items=pdItemsText(inv);
+  const pmts=[...(inv.payments||[])].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const badge=done
+    ?'<span style="background:rgba(0,210,106,0.16);color:var(--green);border:1px solid rgba(0,210,106,0.45);border-radius:999px;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:0.5px">PAID IN FULL</span>'
+    :'<span style="background:rgba(255,215,0,0.14);color:var(--gold);border:1px solid rgba(255,215,0,0.45);border-radius:999px;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:0.5px">OPEN</span>';
+  let h='<div class="card'+(done?'':' rb')+'" style="margin-bottom:10px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:'+(opts.collapsible&&!expanded?'0':'10px')+'">'+
+     '<div style="font-size:15px;font-weight:900">'+_esc(pdInvLabel(inv))+'</div>'+
+     '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+badge+
+     (opts.collapsible?'<button class="btn btn-ghost btn-sm" style="padding:4px 10px" onclick="pdToggleCard(\''+inv.id+'\')">'+(expanded?'Hide':'View')+'</button>':'')+
+     '</div></div>';
+  if(opts.collapsible&&!expanded){
+    h+='<div style="font-size:11px;color:var(--muted);margin-top:6px">Original '+fmt(inv.originalTotal)+
+       ' · Paid '+fmt(paid)+' · Balance '+fmt(bal)+
+       (inv.paidInFullDate?' · Paid in full '+_esc(inv.paidInFullDate):'')+
+       (inv.createdDate?' · Ordered '+_esc(inv.createdDate):'')+'</div>';
+    return h+'</div>';
+  }
+  h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px">'+
+     '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Balance Owed</div>'+
+     '<div style="font-size:26px;font-weight:900;color:var('+(done?'--green':'--red')+')">'+fmt(bal)+'</div></div>'+
+     '<div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:3px">Paid</div>'+
+     '<div style="font-size:20px;font-weight:900;color:var(--green)">'+fmt(paid)+'</div></div></div>';
+  h+='<div class="pbar-wrap" style="margin-bottom:5px"><div class="pbar-fill" style="width:'+pct+'%;background:var(--green)"></div></div>';
+  h+='<div style="font-size:10px;color:var(--muted);margin-bottom:10px">'+pct+'% paid · Original: '+fmt(inv.originalTotal)+
+     (inv.paidInFullDate?' · Paid in full '+_esc(inv.paidInFullDate):'')+' · '+
+     (inv.createdDate?('Ordered '+_esc(inv.createdDate)):'order date not recorded')+
+     ' <button class="btn btn-ghost btn-sm" style="padding:1px 7px;font-size:10px" onclick="openInvoiceDate(\''+inv.id+'\')">'+
+     (inv.createdDate?'change':'set date')+'</button></div>';
+  if(items||inv.shipping||inv.note){
+    h+='<div style="padding:8px 10px;background:var(--card2);border-radius:8px;margin-bottom:10px">'+
+       '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Order</div>'+
+       (items?'<div style="font-size:12px;line-height:1.5;word-break:break-word">'+_esc(items)+'</div>':'')+
+       (inv.shipping?'<div style="font-size:11px;color:var(--muted);margin-top:3px">Shipping: '+_esc(inv.shipping)+'</div>':'')+
+       (inv.note?'<div style="font-size:11px;color:var(--muted);margin-top:3px">'+_esc(inv.note)+'</div>':'')+
+       '</div>';
+  }
+  h+='<div style="padding-top:8px;border-top:1px solid var(--border)">'+
+     '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">Payments ('+(inv.payments||[]).length+')</div>';
+  h+=pmts.length?pmts.map(p=>
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'+
+      '<span style="color:var(--muted);min-width:82px">'+_esc(p.date||'')+'</span>'+
+      '<span style="color:var(--green);font-weight:900">+'+fmt(p.amount)+'</span>'+
+      '<span style="flex:1;text-align:right;color:var(--muted);font-size:10px;word-break:break-word">'+
+        _esc([p.method||'',p.note||''].filter(Boolean).join(' · '))+'</span>'+
+      '<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" title="Remove this payment" '+
+        'onclick="pdDeletePmt(\''+inv.id+'\',\''+p.id+'\')">✕</button>'+
+      '</div>').join('')
+    :'<div style="font-size:12px;color:var(--muted);padding:4px 0">No payments logged against this invoice.</div>';
+  h+='</div>';
+  h+='<button class="btn '+(done?'btn-ghost':'btn-green')+' btn-sm btn-full" style="margin-top:10px" onclick="openDebtPmt(\''+inv.id+'\')">+ Log Payment to '+
+     _esc(pdDebt(S).supplier||'Supplier').split(' ')[0]+' ('+_esc(pdInvLabel(inv))+')</button>';
+  return h+'</div>';
+}
+
+function secDebt(){
+  const pd=pdDebt(S), invs=pdSorted(pd), T=pdTotals(pd);
+  const supplier=pd.supplier||'Supplier';
+  if(!invs.length){
+    return '<div class="card"><div style="font-size:12px;color:var(--muted);margin-bottom:10px">No invoices recorded for '+
+      _esc(supplier)+' yet.</div><button class="btn btn-gold btn-sm btn-full" onclick="openNewInvoice()">+ New Invoice</button></div>';
+  }
+  const open=pdOpenInvoices(pd).sort((a,b)=>pdNum(b.number)-pdNum(a.number));
+  const done=invs.filter(i=>pdIsPaid(i)).sort((a,b)=>pdNum(b.number)-pdNum(a.number));
+  // Supplier roll-up. Deliberately shows the invoice count and no percentage:
+  // these are separate obligations, and one bar across both would be the very
+  // thing this screen exists to stop.
+  let h='<div class="card" style="margin-bottom:12px">'+
+    '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">'+
+    _esc(supplier)+' — '+T.count+' separate invoice'+(T.count===1?'':'s')+'</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+    '<div class="sbox" style="flex:1;min-width:96px"><div class="sl">Open Balance</div><div class="sv sm r">'+fmt(T.balance)+'</div></div>'+
+    '<div class="sbox" style="flex:1;min-width:96px"><div class="sl">Paid To Date</div><div class="sv sm g">'+fmt(T.paid)+'</div></div>'+
+    '<div class="sbox" style="flex:1;min-width:96px"><div class="sl">Invoiced</div><div class="sv sm">'+fmt(T.original)+'</div></div>'+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--muted);margin-top:8px">Totals across separate invoices. Each invoice below is tracked on its own.</div>'+
+    '</div>';
+  if(open.length){
+    h+='<div class="sec-lbl">ACTIVE INVOICE'+(open.length===1?'':'S')+'</div>';
+    h+=open.map(inv=>pdInvoiceCard(inv,{collapsible:false})).join('');
+  }else{
+    h+='<div class="card" style="margin-bottom:12px;text-align:center"><div style="font-size:12px;color:var(--green);font-weight:800;margin-bottom:8px">'+
+       'All invoices paid in full.</div><div style="font-size:11px;color:var(--muted)">Create the next invoice when the next order arrives.</div></div>';
+  }
+  h+='<button class="btn btn-gold btn-sm btn-full" style="margin-bottom:14px" onclick="openNewInvoice()">+ New Invoice from '+_esc(supplier)+'</button>';
+  if(done.length){
+    h+='<div class="sec-lbl">COMPLETED INVOICES — HISTORY</div>';
+    h+=done.map(inv=>pdInvoiceCard(inv,{collapsible:true})).join('');
+  }
+  return h;
+}
+
+// A payment always belongs to one invoice. The selector defaults to the open
+// one; a completed invoice can still be picked, but only on purpose.
+function openDebtPmt(invId){
+  const pd=pdDebt(S), invs=pdSorted(pd);
+  if(!invs.length){ toast('Create an invoice first'); return; }
+  const target=(invId&&pdFindInvoice(pd,invId))||pdOpenInvoice(pd)||invs[invs.length-1];
+  const today=_todayKey();
+  const opts=invs.slice().reverse().map(i=>'<option value="'+i.id+'"'+(i.id===target.id?' selected':'')+'>'+
+    _esc(pdInvLabel(i))+' — '+(pdIsPaid(i)?'PAID IN FULL':'balance '+fmt(pdBalance(i)))+'</option>').join('');
+  const meth=PD_METHODS.map(m=>'<option value="'+m+'"'+(m==='Zelle'?' selected':'')+'>'+m+'</option>').join('');
+  mOpen('<div class="mh"><div class="mt">💳 Log Payment to '+_esc(pd.supplier||'Supplier')+'</div><button class="mx" onclick="mClose()">×</button></div>'+
+  '<div class="wb red" style="margin-bottom:12px">'+_esc(pdInvLabel(target))+' balance: <strong>'+fmt(pdBalance(target))+'</strong> of '+fmt(target.originalTotal)+'</div>'+
+  '<div class="fg"><label class="fl">INVOICE</label><select class="fi" id="dpt_inv">'+opts+'</select></div>'+
+  '<div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="250.00" step="0.01" min="0.01"></div>'+
+  '<div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="'+today+'"></div>'+
+  '<div class="fg"><label class="fl">METHOD</label><select class="fi" id="dpt_method">'+meth+'</select></div>'+
+  '<div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. check #1234"></div>'+
+  '<button class="btn btn-green btn-full" onclick="saveDebtPmt()">✅ Save Payment</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+}
+function saveDebtPmt(){ if(_dupGuard())return;
   const amt=parseFloat($$('dpt_amt').value);
   if(!amt||amt<=0){toast('Enter a valid amount');return;}
-  const date=$$('dpt_date').value||_todayKey();
-  const note=$$('dpt_note').value||'';
-  if(!S.productDebt)S.productDebt={supplier:'Mark Martone',originalBalance:10000,payments:[]};
-  S.productDebt.payments.push({amount:amt,date,note});
-  mClose();saveS();toast('✅ Payment logged — '+fmt(amt));
+  const pd=S.productDebt=S.productDebt||{supplier:'Mark Martone',invoices:[]};
+  if(!Array.isArray(pd.invoices))pd.invoices=pdInvoices(pd);
+  const inv=pdFindInvoice(pd,$$('dpt_inv').value)||pdOpenInvoice(pd);
+  if(!inv){toast('No invoice to log against');return;}
+  if(pdIsPaid(inv)&&!confirm(pdInvLabel(inv)+' is already paid in full. Log this payment against it anyway?'))return;
+  inv.payments.push(pdMakePayment({amount:amt,date:$$('dpt_date').value||_todayKey(),
+    method:$$('dpt_method').value||'',note:$$('dpt_note').value||''}));
+  inv.payments.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+  pdSyncStatus(inv);
+  mClose();saveS();
+  toast(pdIsPaid(inv)?('✅ '+pdInvLabel(inv)+' PAID IN FULL'):('✅ Payment logged — '+fmt(amt)));
+}
+function pdDeletePmt(invId,pmtId){
+  const pd=pdDebt(S), inv=pdFindInvoice(pd,invId); if(!inv)return;
+  const p=(inv.payments||[]).filter(x=>x.id===pmtId)[0]; if(!p)return;
+  if(!confirm('Remove this payment from '+pdInvLabel(inv)+'?\n\n'+(p.date||'')+'   '+fmt(p.amount)+
+    (p.method?'   '+p.method:'')+'\n\nThis affects only '+pdInvLabel(inv)+'.'))return;
+  inv.payments=(inv.payments||[]).filter(x=>x.id!==pmtId);
+  pdSyncStatus(inv);
+  saveS();toast('Payment removed from '+pdInvLabel(inv));
+}
+
+// A new invoice is a new obligation. It never touches an existing one, and it
+// never inherits a payment.
+function openNewInvoice(){
+  const pd=pdDebt(S);
+  const open=pdOpenInvoices(pd);
+  const n=pdNextNumber(pd);
+  mOpen('<div class="mh"><div class="mt">🧾 New Invoice from '+_esc(pd.supplier||'Supplier')+'</div><button class="mx" onclick="mClose()">×</button></div>'+
+  (open.length?'<div class="wb gold" style="margin-bottom:12px">'+_esc(open.map(pdInvLabel).join(', '))+
+    ' '+(open.length===1?'is':'are')+' still open. Normally you finish the open invoice before starting the next one.</div>':'')+
+  '<div class="fg"><label class="fl">INVOICE NUMBER</label><input class="fi" type="number" id="ninv_num" value="'+n+'" step="1" min="1"></div>'+
+  '<div class="fg"><label class="fl">INVOICE TOTAL ($)</label><input class="fi" type="number" id="ninv_total" placeholder="5985.00" step="0.01" min="0.01"></div>'+
+  '<div class="fg"><label class="fl">DATE RECEIVED</label><input class="fi" type="date" id="ninv_date" value="'+_todayKey()+'"></div>'+
+  '<div class="fg"><label class="fl">ORDER — ONE LINE EACH, e.g. "32 oz: 10"</label><textarea class="fi" id="ninv_items" placeholder="32 oz: 10&#10;16 oz: 15&#10;8 oz: 20&#10;2 oz: 5&#10;C5X: 8"></textarea></div>'+
+  '<div class="fg"><label class="fl">SHIPPING (optional)</label><input class="fi" id="ninv_ship" placeholder="e.g. Free"></div>'+
+  '<div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="ninv_note" placeholder="e.g. Third pallet"></div>'+
+  '<button class="btn btn-green btn-full" onclick="saveNewInvoice()">✅ Create Invoice</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+}
+function saveNewInvoice(){ if(_dupGuard())return;
+  const total=parseFloat($$('ninv_total').value);
+  if(!total||total<=0){toast('Enter the invoice total');return;}
+  const pd=S.productDebt=S.productDebt||{supplier:'Mark Martone',invoices:[]};
+  if(!Array.isArray(pd.invoices))pd.invoices=pdInvoices(pd);
+  const num=parseInt($$('ninv_num').value,10)||pdNextNumber(pd);
+  if(pd.invoices.some(i=>pdNum(i.number)===num)){toast('Invoice '+num+' already exists');return;}
+  const open=pdOpenInvoices(pd);
+  if(open.length&&!confirm(open.map(pdInvLabel).join(', ')+' still open.\n\nCreate Invoice '+num+' as a separate obligation anyway?\n\nNothing on the open invoice changes.'))return;
+  pd.invoices.push(pdMakeInvoice({number:num,originalTotal:total,createdDate:$$('ninv_date').value||_todayKey(),
+    items:pdParseItems($$('ninv_items').value),shipping:$$('ninv_ship').value||'',note:$$('ninv_note').value||'',
+    payments:[]}));
+  mClose();saveS();toast('✅ Invoice '+num+' created — '+fmt(total));
+}
+
+// The order date of an invoice that was already on this device when the split
+// happened was never recorded, so it is asked for rather than guessed. Touches
+// that one field on that one invoice and nothing else.
+function openInvoiceDate(invId){
+  const inv=pdFindInvoice(pdDebt(S),invId); if(!inv)return;
+  mOpen('<div class="mh"><div class="mt">📅 Order Date — '+_esc(pdInvLabel(inv))+'</div><button class="mx" onclick="mClose()">×</button></div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">The date this order was placed or received. Nothing else on the invoice changes.</div>'+
+  '<div class="fg"><label class="fl">ORDER DATE</label><input class="fi" type="date" id="idt_date" value="'+_esc(inv.createdDate||'')+'"></div>'+
+  '<button class="btn btn-green btn-full" onclick="saveInvoiceDate(\''+inv.id+'\')">✅ Save Date</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>');
+}
+function saveInvoiceDate(invId){ if(_dupGuard())return;
+  const inv=pdFindInvoice(pdDebt(S),invId); if(!inv)return;
+  inv.createdDate=$$('idt_date').value||'';
+  mClose();saveS();toast(inv.createdDate?('✅ '+pdInvLabel(inv)+' ordered '+inv.createdDate):('Order date cleared on '+pdInvLabel(inv)));
 }
 
 // ===================================================
@@ -5602,7 +5984,8 @@ function bxCounts(st){
     repPaymentRecords:(st.reps||[]).reduce((t,r)=>t+((r.payments||[]).length),0),
     supplies:(st.supplies||[]).length,
     transfers:(st.transfers||[]).length,
-    productDebtPayments:((st.productDebt||{}).payments||[]).length,
+    productDebtInvoices:pdInvoices(st.productDebt).length,
+    productDebtPayments:pdTotals(st.productDebt).payments,
     inventorySkus:Object.keys(st.inventory||{}).length,
     batmanBorrowSkus:Object.keys(st.batmanBorrow||{}).length,
     season2025Rows:(typeof SHOWS_2025!=='undefined'?SHOWS_2025.length:0)
@@ -5697,11 +6080,22 @@ function bxCsvFiles(st,meta){
   (st.transfers||[]).forEach(t=>r.push(['transfer','','',t.date||'',t.sku||'',bxNum(t.qty),t.fromName||'',t.toName||'',t.note||'']));
   put('10_inventory_adjustments.csv',r);
 
-  r=[['supplier','original_balance','payment_date','amount','note','remaining']];
-  const pd=st.productDebt||{}; let rem=bxNum(pd.originalBalance);
-  if(!(pd.payments||[]).length)r.push([pd.supplier||'',rem.toFixed(2),'','','NO PAYMENTS LOGGED',rem.toFixed(2)]);
-  (pd.payments||[]).forEach(p=>{ rem-=bxNum(p.amount);
-    r.push([pd.supplier||'',bxNum(pd.originalBalance).toFixed(2),p.date||'',bxNum(p.amount).toFixed(2),p.note||'',rem.toFixed(2)]); });
+  // One row per payment, keyed to the invoice it belongs to, and one row for an
+  // invoice with no payments yet. The remaining figure runs down WITHIN an
+  // invoice and resets at the next one: nothing here totals across invoices.
+  r=[['supplier','invoice_number','invoice_status','invoice_total','invoice_created','invoice_paid_in_full',
+      'order_details','shipping','payment_date','amount','method','note','invoice_remaining_after']];
+  const pd=st.productDebt||{};
+  pdSorted(pd).forEach(inv=>{
+    const base=[pd.supplier||'',pdNum(inv.number),pdIsPaid(inv)?'PAID IN FULL':'OPEN',
+      pdNum(inv.originalTotal).toFixed(2),inv.createdDate||'',inv.paidInFullDate||'',
+      pdItemsText(inv),inv.shipping||''];
+    let rem=pdNum(inv.originalTotal);
+    const pmts=(inv.payments||[]).slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+    if(!pmts.length){ r.push(base.concat(['','','','NO PAYMENTS LOGGED',rem.toFixed(2)])); return; }
+    pmts.forEach(pm=>{ rem=pdRound(rem-pdNum(pm.amount));
+      r.push(base.concat([pm.date||'',pdNum(pm.amount).toFixed(2),pm.method||'',pm.note||'',rem.toFixed(2)])); });
+  });
   put('11_product_debt.csv',r);
 
   r=[['id','name','qty_on_hand','low_threshold','unit','unit_cost']];
@@ -5977,8 +6371,13 @@ function bxSummary(st,meta,diag,snap){
   line('  Tax reserve            '+M(taxRes)+'   (rate '+(V.setting('tax',0.28)*100).toFixed(0)+'%)');
   line('  Total miles            '+miles.toFixed(0));
   line('  IRS mileage deduction  '+M(miles*V.setting('irsRate',0))+'   (rate $'+V.setting('irsRate',0)+'/mi)');
-  const pd=st.productDebt||{}, pdPaid=(pd.payments||[]).reduce((a,p)=>a+bxNum(p.amount),0);
-  line('  Product debt remaining '+M(bxNum(pd.originalBalance)-pdPaid)+' of '+M(bxNum(pd.originalBalance))+' to '+(pd.supplier||'supplier'));
+  const pd=st.productDebt||{}, pdT=pdTotals(pd);
+  line('  Product debt           '+M(pdT.balance)+' owed of '+M(pdT.original)+' across '+pdT.count+
+       ' separate invoice'+(pdT.count===1?'':'s')+' to '+(pd.supplier||'supplier'));
+  pdSorted(pd).forEach(inv=>{
+    line('    '+(pdInvLabel(inv)+':').padEnd(14)+M(pdBalance(inv)).padStart(11)+' owed of '+M(pdNum(inv.originalTotal)).padStart(11)+
+         '   paid '+M(pdPaid(inv)).padStart(11)+'   '+(pdIsPaid(inv)?('PAID IN FULL'+(inv.paidInFullDate?' '+inv.paidInFullDate:'')):'OPEN'));
+  });
   line('  Inventory at cost      '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.cost(s.key),0)));
   line('  Inventory at retail    '+M(SKUS.reduce((t,s)=>t+bxNum((st.inventory||{})[s.key])*V.price(s.key),0)));
   line('');
@@ -6747,7 +7146,8 @@ function bxShowModal(){
     row('Booth payments',c.boothPayments)+row('Show expenses',c.showExpenses)+
     row('Business expenses',c.otherExpenses)+row('Reps',c.reps+'  ('+c.repPaymentRecords+' payout records)')+
     row('Rep sale entries',c.repSaleEntries)+row('Inventory transfers',c.transfers)+
-    row('Supplies',c.supplies)+row('Product debt payments',c.productDebtPayments)+
+    row('Supplies',c.supplies)+row('Product debt invoices',c.productDebtInvoices)+
+    row('Product debt payments',c.productDebtPayments)+
     row('2025 season rows',c.season2025Rows)+
   '</div>'+
   '<div class="card '+(crit?'rb':'')+'" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">DIAGNOSTICS</div>'+
