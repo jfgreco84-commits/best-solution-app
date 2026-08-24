@@ -7,6 +7,7 @@ no build step and no package.json. These tests need nothing installed:
 node tests/phase2b.test.js
 node tests/replay-guard.test.js
 node tests/booking-pipeline-filters.test.js
+node tests/product-debt-invoices.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -19,6 +20,15 @@ page refresh that finds a value already on the device.
 Shows page. The invariant it exists to protect is that a card's displayed count
 and the list that card opens are the same array — both come from
 `pipelineBuckets()` — so they can never drift apart.
+
+`product-debt-invoices.test.js` covers the Product Debt page, where a supplier
+is a stack of sequential invoices rather than one rolling balance. The
+invariant it protects is that no figure on the page or in an export is ever
+produced by adding one invoice's total or payments to another's: a settled
+invoice is frozen history, the open invoice is the only one a payment can land
+on, and a new invoice changes neither. The expected ledger is read from the
+app's own `PD_MM_SEED`, and the pre-migration fixture is rebuilt from it, so
+the figures are not duplicated here.
 
 ## Fixtures are synthetic
 
