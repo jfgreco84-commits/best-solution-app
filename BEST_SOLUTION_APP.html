@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v32';
+const APP_VERSION='v33';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -5387,6 +5387,7 @@ function rSettings(){
   <div class="sec-title" style="margin-bottom:12px">⚙️ Settings</div>
   ${cloudCard}
   ${bxSettingsCard()}
+  ${bhSettingsCard()}
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TAX & FEES</div>
   <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
   <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
@@ -7943,6 +7944,360 @@ function p2bSettingsCard(){
   'You download a backup first, confirm every item, and type a phrase before anything is written. This is separate from Sync Now.</div>'+
   '<button class="btn btn-ghost btn-full" onclick="p2bOpen()">☁️ Review what the cloud is missing</button>'+
   '</div>';
+}
+
+// ===================================================
+// BOOKED SHOW HANDOFF (Aug 2026) — paste-in intake for accepted/paid shows.
+//
+// Froggy's booking assistant produces a JSON block when a show moves from
+// applied to accepted or paid. This ingests it. Two stages, always: PREVIEW
+// builds a plan and writes nothing; APPLY writes only what the preview showed.
+//
+// Three rules this module exists to enforce:
+//   1. Identity is mrgShowKey(name,startDate) — the SAME normalized key the
+//      replay guard uses. Matching can never drift from the rest of the app.
+//   2. payment_status and balance_due are NEVER stored. The Booking Pipeline
+//      derives them from boothCost - boothPaid(); a stored copy could disagree
+//      with the cards. They arrive as claims and are checked, not saved.
+//   3. A non-blank field is never overwritten with a blank one.
+// ===================================================
+var BH_STATUS_MAP={
+  'applied':{confirmed:false,label:'Applied'},
+  'pending':{confirmed:false,label:'Applied'},
+  'accepted':{confirmed:true,label:'Accepted'},
+  'approved':{confirmed:true,label:'Accepted'},
+  'booked':{confirmed:true,label:'Booked'},
+  'paid':{confirmed:true,label:'Paid'},
+  'booked / paid':{confirmed:true,label:'Booked / Paid'},
+  'booked/paid':{confirmed:true,label:'Booked / Paid'}
+};
+function bhBlank(v){ return v===null||v===undefined||String(v).trim()===''; }
+function bhStr(v){ return bhBlank(v)?'':String(v).trim(); }
+function bhNum(v){ if(bhBlank(v))return null; var n=parseFloat(String(v).replace(/[$,]/g,'')); return isFinite(n)?n:null; }
+
+/* YYYY-MM-DD, or M/D/YYYY. Rejects an impossible calendar date rather than
+   letting Date() roll it forward — the same strictness showDayKey uses. */
+function bhDate(v){
+  var s=bhStr(v); if(!s)return null;
+  var m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m){ var u=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if(u)m=[null,u[3],('0'+u[1]).slice(-2),('0'+u[2]).slice(-2)]; }
+  if(!m)return null;
+  var y=+m[1],mo=+m[2],d=+m[3];
+  if(mo<1||mo>12||d<1||d>31)return null;
+  var probe=new Date(Date.UTC(y,mo-1,d));
+  if(probe.getUTCFullYear()!==y||probe.getUTCMonth()!==mo-1||probe.getUTCDate()!==d)return null;
+  return m[1]+'-'+m[2]+'-'+m[3];
+}
+function bhT24(h,mi,ap){
+  h=+h; mi=mi==null?0:+mi; ap=(ap||'').toLowerCase();
+  if(ap==='pm'&&h<12)h+=12;
+  if(ap==='am'&&h===12)h=0;
+  if(h<0||h>23||mi<0||mi>59)return null;
+  return ('0'+h).slice(-2)+':'+('0'+mi).slice(-2);
+}
+/* "12:00 PM - 5:00 PM" / "10am-4pm" / "10:00 - 16:00" -> ['12:00','17:00'] */
+function bhHours(v){
+  var s=bhStr(v); if(!s)return null;
+  var re=/(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?/gi, out=[], m;
+  while((m=re.exec(s))&&out.length<2)out.push(m);
+  if(out.length<2)return null;
+  var ap1=(out[0][3]||'').replace(/\./g,''), ap2=(out[1][3]||'').replace(/\./g,'');
+  var c=bhT24(out[1][1],out[1][2],ap2);
+  var o;
+  if(ap1){ o=bhT24(out[0][1],out[0][2],ap1); }
+  else{
+    // No meridiem on the opening time ("10 - 4pm", "7 - 9pm"). Take the closing
+    // time's meridiem when that still runs forwards, otherwise morning. That
+    // reads 10-4pm as 10am and 7-9pm as 7pm, which is how both are meant.
+    var same=bhT24(out[0][1],out[0][2],ap2||'am'), am=bhT24(out[0][1],out[0][2],'am');
+    o=(c&&same&&same<c)?same:am;
+  }
+  if(!o||!c)return null;
+  return [o,c];
+}
+function bhDays(start,end){
+  if(!start)return 1;
+  if(!end||end===start)return 1;
+  var a=new Date(start+'T12:00:00'), b=new Date(end+'T12:00:00');
+  var n=Math.round((b-a)/86400000)+1;
+  return (n>=1&&n<=60)?n:1;
+}
+/* venue + address, de-duplicated, as the app's single `location` string. */
+function bhLocation(r){
+  var v=bhStr(r.venue), a=bhStr(r.address);
+  if(v&&a)return (a.toLowerCase().indexOf(v.toLowerCase())>=0)?a:(v+' · '+a);
+  return v||a||'';
+}
+
+/* Parse the pasted text. Accepts one object or an array. Never throws. */
+function bhParse(text){
+  var t=bhStr(text);
+  if(!t)return {rows:[],error:'Nothing pasted.'};
+  t=t.replace(/^\s*```(?:json)?/i,'').replace(/```\s*$/,'').trim();  // tolerate a fenced block
+  var o;
+  try{ o=JSON.parse(t); }catch(e){ return {rows:[],error:'That is not valid JSON — '+e.message}; }
+  var rows=Array.isArray(o)?o:[o];
+  rows=rows.filter(function(r){ return r&&typeof r==='object'&&!Array.isArray(r); });
+  if(!rows.length)return {rows:[],error:'No show objects found in that JSON.'};
+  return {rows:rows,error:null};
+}
+
+/* Build the plan. PURE: reads S, writes nothing. Every field the apply step
+   would touch is named here, so the preview and the write cannot disagree. */
+function bhPlan(rows){
+  var shows=(S&&S.shows)||[];
+  var plan=[], seen={};
+  rows.forEach(function(r,i){
+    var e={idx:i,raw:r,flags:[],changes:[],action:null,target:null,errors:[]};
+    var name=bhStr(r.event_name);
+    var start=bhDate(r.event_date_start);
+    if(!name)e.errors.push('event_name is required');
+    if(!start)e.errors.push('event_date_start must be a real date (YYYY-MM-DD)');
+    e.name=name; e.startDate=start;
+    if(e.errors.length){ e.action='rejected'; plan.push(e); return; }
+
+    var key=mrgShowKey(name,start);
+    e.key=key;
+    if(Object.prototype.hasOwnProperty.call(seen,key)){
+      e.action='rejected';
+      e.errors.push('duplicate of row '+(seen[key]+1)+' in this same paste');
+      plan.push(e); return;
+    }
+    seen[key]=i;
+
+    var exact=shows.find(function(sh){ return mrgKeyOf(sh)===key; });
+    var byName=exact?null:shows.find(function(sh){ return mrgNormName(sh&&sh.name)===mrgNormName(name); });
+
+    var st=BH_STATUS_MAP[bhStr(r.status).toLowerCase()]||null;
+    if(!bhBlank(r.status)&&!st)e.flags.push('Unrecognised status "'+bhStr(r.status)+'" — confirmed flag left as-is');
+    e.statusLabel=st?st.label:'';
+
+    var end=bhDate(r.event_date_end);
+    var nd=bhDays(start,end);
+    var hrs=bhHours(r.show_hours);
+    if(!bhBlank(r.show_hours)&&!hrs)e.flags.push('Could not read show_hours "'+bhStr(r.show_hours)+'"');
+    var fee=bhNum(r.booth_fee);
+    var paid=bhNum(r.amount_paid);
+    var loc=bhLocation(r);
+
+    e.want={name:name,startDate:start,numDays:nd,location:loc,hours:hrs,boothCost:fee,
+            amountPaid:paid,paymentDate:bhDate(r.payment_date),confirmed:st?st.confirmed:null,
+            notes:bhStr(r.notes)};
+    e.booking={organizer:bhStr(r.organizer),venue:bhStr(r.venue),address:bhStr(r.address),
+      boothType:bhStr(r.booth_type),boothSize:bhStr(r.booth_size),invoiceNumber:bhStr(r.invoice_number),
+      organizerContact:bhStr(r.organizer_contact),sourceReference:bhStr(r.source_reference),
+      staffingNotes:bhStr(r.staffing_notes),setupHours:bhStr(r.setup_hours),handoffStatus:bhStr(r.status)};
+
+    if(byName){
+      e.action='ambiguous'; e.target=byName;
+      e.flags.push('"'+byName.name+'" already exists on '+(byName.startDate||'(no date)')+
+        ', not '+start+'. Same show with a corrected date, or a different one? Nothing will be written for this row.');
+      plan.push(e); return;
+    }
+    e.action=exact?'update':'create';
+    e.target=exact||null;
+    bhDiff(e);
+    bhCheck(e);
+    plan.push(e);
+  });
+  return plan;
+}
+
+/* What would actually change on an existing row. A non-blank value is never
+   replaced by a blank one, so a sparse handoff can only add detail. */
+function bhDiff(e){
+  var w=e.want, t=e.target;
+  var add=function(f,from,to){ e.changes.push({field:f,from:from,to:to}); };
+  if(!t){
+    add('name','—',w.name); add('start date','—',w.startDate);
+    add('days','—',String(w.numDays));
+    if(w.location)add('location','—',w.location);
+    if(w.hours)add('hours','—',w.hours[0]+'–'+w.hours[1]);
+    if(w.boothCost!=null)add('booth cost','—',fmt(w.boothCost));
+    if(w.amountPaid)add('booth payment','—',fmt(w.amountPaid));
+    if(w.confirmed!==null)add('pipeline',' —',w.confirmed?'Confirmed':'Pending / Applied');
+    return;
+  }
+  if(w.numDays!==(t.numDays||1))add('days',String(t.numDays||1),String(w.numDays));
+  if(w.location&&w.location!==(t.location||''))add('location',t.location||'—',w.location);
+  if(w.hours){ var to=t.openTime||'', tc=t.closeTime||'';
+    if(w.hours[0]!==to||w.hours[1]!==tc)add('hours',(to&&tc)?(to+'–'+tc):'—',w.hours[0]+'–'+w.hours[1]); }
+  if(w.boothCost!=null&&w.boothCost!==(t.boothCost||0))add('booth cost',fmt(t.boothCost||0),fmt(w.boothCost));
+  if(w.confirmed!==null&&w.confirmed!==(t.confirmed!==false))
+    add('pipeline',(t.confirmed!==false)?'Confirmed':'Pending / Applied',w.confirmed?'Confirmed':'Pending / Applied');
+  if(w.amountPaid&&w.amountPaid>0&&!bhHasPayment(t,w.amountPaid,w.paymentDate))
+    add('booth payment','—',fmt(w.amountPaid)+(w.paymentDate?(' on '+w.paymentDate):''));
+  if(w.notes&&(t.notes||'').indexOf(w.notes)<0)add('notes',(t.notes?'(appended)':'—'),w.notes);
+  var tb=t.booking||{};
+  Object.keys(e.booking).forEach(function(k){
+    var v=e.booking[k];
+    if(v&&v!==tb[k])add(k,tb[k]||'—',v);
+  });
+}
+function bhHasPayment(sh,amt,date){
+  return ((sh&&sh.boothPayments)||[]).some(function(p){
+    return Math.abs((parseFloat(p.amount)||0)-amt)<0.005 && (!date||!p.date||p.date===date); });
+}
+
+/* Needs Attention. Also cross-checks the handoff's own claims about money
+   against what the app computes, without ever storing those claims. */
+function bhCheck(e){
+  var w=e.want, t=e.target, r=e.raw;
+  var cost=(w.boothCost!=null)?w.boothCost:((t&&t.boothCost)||0);
+  var alreadyPaid=t?boothPaid(t):0;
+  var addPay=(w.amountPaid&&!bhHasPayment(t,w.amountPaid,w.paymentDate))?w.amountPaid:0;
+  var willPay=alreadyPaid+addPay;
+  var bal=Math.max(0,cost-willPay);
+  e.computed={boothCost:cost,paid:willPay,balance:bal};
+
+  var confirmed=(w.confirmed!==null)?w.confirmed:(t?(t.confirmed!==false):true);
+  if(confirmed&&cost<=0)
+    e.flags.push('Accepted but no booth fee yet — it will sit in NO pipeline bucket until a fee is entered.');
+  if(confirmed&&cost>0&&bal>0)
+    e.flags.push('Accepted and unpaid — '+fmt(bal)+' still owed. Lands in Owe Booth.');
+  if(!bhLocation(r)&&!(t&&t.location))e.flags.push('No venue or address.');
+  if(!w.hours&&!(t&&(t.openTime||t.closeTime)))e.flags.push('No show hours — break-even hours will fall back to 10–4.');
+  if(bhBlank(r.setup_hours))e.flags.push('No setup time given — the app will assume call = 1 hr before open.');
+
+  var claimBal=bhNum(r.balance_due);
+  if(claimBal!=null&&Math.abs(claimBal-bal)>0.005)
+    e.flags.push('Handoff says balance '+fmt(claimBal)+' but the app computes '+fmt(bal)+'. The app’s figure wins — check the fee and payments.');
+  var ps=bhStr(r.payment_status).toLowerCase();
+  if(ps.indexOf('paid')>=0&&ps.indexOf('await')<0&&ps.indexOf('unpaid')<0&&bal>0)
+    e.flags.push('Handoff says "'+bhStr(r.payment_status)+'" but '+fmt(bal)+' is still outstanding.');
+
+  var span=bhSpan(w.startDate,w.numDays);
+  var clash=((S&&S.shows)||[]).filter(function(o){
+    if(!o||(t&&o.id===t.id))return false;
+    if(typeof isMissed==='function'&&isMissed(o))return false;
+    var b=bhSpan(o.startDate,o.numDays||1);
+    return b&&span&&span.s<=b.e&&b.s<=span.e; });
+  if(clash.length)e.flags.push('Date conflict with '+clash.map(function(o){return o.name;}).join(', ')+'.');
+}
+function bhSpan(start,nd){
+  if(!start)return null;
+  var s=new Date(start+'T12:00:00'); var e=new Date(s); e.setDate(e.getDate()+((nd||1)-1));
+  return {s:s.getTime(),e:e.getTime()};
+}
+
+// ---- UI ----
+function bhSettingsCard(){
+  return '<div class="card" style="border-color:rgba(79,195,247,0.35)">'+
+  '<div style="font-size:10px;color:#7EB8F7;text-transform:uppercase;font-weight:700;margin-bottom:8px">📥 BOOKED SHOW HANDOFF</div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Paste the JSON block your booking assistant gives you when a show is accepted or paid. '+
+  'Matches on show name + start date: an existing show is updated, a new one is created, and a blank field never wipes one you already filled in. '+
+  'You see exactly what will change before anything is written.</div>'+
+  '<button class="btn btn-ghost btn-full" style="border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="bhOpen()">📥 Paste a Booked Show Handoff</button>'+
+  '</div>';
+}
+function bhOpen(){
+  mOpen('<div class="mh"><div class="mt">📥 Booked Show Handoff</div><button class="mx" onclick="mClose()">&times;</button></div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Paste one show object or an array of them. Nothing is saved until you review the plan and confirm.</div>'+
+  '<textarea class="fi" id="bh_in" style="min-height:150px;font-family:ui-monospace,Menlo,monospace;font-size:12px" placeholder=\'[{"event_name":"...","event_date_start":"2026-11-27", ...}]\'></textarea>'+
+  '<div id="bh_out"></div>'+
+  '<button class="btn btn-gold btn-full" style="margin-top:10px" onclick="bhPreview()">🔍 Preview Changes</button>');
+}
+var BH_PENDING=null;
+function bhPreview(){
+  var el=$$('bh_out'); if(!el)return;
+  var p=bhParse($$('bh_in').value);
+  if(p.error){ BH_PENDING=null; el.innerHTML='<div class="wb red" style="margin-top:10px">'+bhEsc(p.error)+'</div>'; return; }
+  var plan=bhPlan(p.rows);
+  BH_PENDING=plan;
+  var ok=plan.filter(function(e){return e.action==='create'||e.action==='update';});
+  var h='<div style="margin-top:12px">';
+  plan.forEach(function(e,i){
+    var bad=(e.action==='rejected'||e.action==='ambiguous');
+    var col=bad?'var(--redbd)':(e.action==='create'?'var(--greenbd)':'var(--goldbd)');
+    var tag=e.action==='create'?'➕ CREATE':e.action==='update'?'✏️ UPDATE':e.action==='ambiguous'?'⚠️ NEEDS YOUR CALL':'⛔ REJECTED';
+    h+='<div class="card" style="border-color:'+col+';margin-bottom:8px;padding:10px">'+
+       '<div style="font-size:11px;font-weight:900;color:'+(bad?'var(--red)':'var(--gold)')+'">'+tag+'</div>'+
+       '<div style="font-weight:900;font-size:14px;margin-top:2px">'+bhEsc(e.name||'(no name)')+'</div>'+
+       '<div style="font-size:11px;color:var(--muted)">'+bhEsc(e.startDate||'(no date)')+(e.statusLabel?(' · '+bhEsc(e.statusLabel)):'')+'</div>';
+    if(e.errors.length)h+='<div style="font-size:11px;color:var(--red);margin-top:6px">'+e.errors.map(bhEsc).join('<br>')+'</div>';
+    if(e.changes.length)h+='<div style="font-size:11px;margin-top:6px">'+e.changes.map(function(c){
+      return '<div style="padding:2px 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted)">'+bhEsc(c.field)+'</span> '+
+             '<span style="color:var(--muted)">'+bhEsc(c.from)+'</span> → <strong style="color:var(--green)">'+bhEsc(c.to)+'</strong></div>'; }).join('')+'</div>';
+    else if(e.action==='update')h+='<div style="font-size:11px;color:var(--muted);margin-top:6px">Already matches — nothing to change.</div>';
+    if(e.flags.length)h+='<div style="font-size:11px;color:#ffc266;margin-top:6px">'+e.flags.map(function(f){return '⚠️ '+bhEsc(f);}).join('<br>')+'</div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  if(ok.length)h+='<button class="btn btn-green btn-full" style="margin-top:4px" onclick="bhApply()">✅ Apply '+ok.length+' change'+(ok.length===1?'':'s')+'</button>';
+  else h+='<div class="wb red" style="margin-top:8px">Nothing here can be applied.</div>';
+  el.innerHTML=h;
+}
+function bhEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* The only writer. Applies exactly the create/update rows the preview showed. */
+function bhApply(){
+  if(_dupGuard())return;
+  var plan=BH_PENDING;
+  if(!plan){ toast('Preview first'); return; }
+  var receipt=[], now=new Date().toISOString();
+  plan.forEach(function(e){
+    if(e.action!=='create'&&e.action!=='update')return;
+    // A re-paste that changes nothing must not write. Stamping importedAt on a
+    // no-op would dirty the record and queue a cloud push for no reason.
+    if(e.action==='update'&&!e.changes.length){
+      receipt.push({action:'unchanged',name:e.target.name,id:e.target.id,changes:[],flags:e.flags});
+      return;
+    }
+    var before=e.target?JSON.parse(JSON.stringify({numDays:e.target.numDays,location:e.target.location,
+      boothCost:e.target.boothCost,confirmed:e.target.confirmed,openTime:e.target.openTime,closeTime:e.target.closeTime})):null;
+    var sh=e.target||bhNewShow(e);
+    bhWrite(sh,e);
+    if(!e.target)S.shows.push(sh);
+    receipt.push({action:e.action,name:sh.name,id:sh.id,changes:e.changes,flags:e.flags});
+    mrgLog({at:now,action:'handoff-'+e.action,key:e.key,keptId:sh.id,
+      fields:e.changes.map(function(c){return c.field;}),before:before});
+  });
+  BH_PENDING=null;
+  saveS();
+  bhReceipt(receipt);
+}
+function bhNewShow(e){
+  var sh=buildPlannedShow({name:e.want.name,location:e.want.location,numDays:e.want.numDays,
+    startDate:e.want.startDate,boothCost:e.want.boothCost||0,boothPayments:[],miles:0});
+  sh.confirmed=(e.want.confirmed!==null)?e.want.confirmed:true;
+  return sh;
+}
+/* Field-by-field. A blank incoming value is skipped, never written over. */
+function bhWrite(sh,e){
+  var w=e.want;
+  if(w.numDays&&w.numDays!==(sh.numDays||1)&&typeof resizeShowDays==='function')resizeShowDays(sh,w.numDays);
+  if(w.location)sh.location=w.location;
+  if(w.boothCost!=null)sh.boothCost=w.boothCost;
+  if(w.confirmed!==null)sh.confirmed=w.confirmed;
+  if(w.hours){
+    sh.openTime=w.hours[0]; sh.closeTime=w.hours[1];
+    (sh.days||[]).forEach(function(d){ d.openTime=w.hours[0]; d.closeTime=w.hours[1]; });
+    sh.hoursNeedConfirm=false;
+  }
+  if(w.amountPaid&&w.amountPaid>0&&!bhHasPayment(sh,w.amountPaid,w.paymentDate)){
+    sh.boothPayments=sh.boothPayments||[];
+    sh.boothPayments.push({amount:w.amountPaid,date:w.paymentDate||_todayKey(),
+      note:'Booked Show Handoff'+(e.booking.invoiceNumber?(' — invoice #'+e.booking.invoiceNumber):'')});
+  }
+  if(w.notes&&(sh.notes||'').indexOf(w.notes)<0)sh.notes=(sh.notes?(sh.notes+' — '):'')+w.notes;
+  sh.booking=sh.booking||{};
+  Object.keys(e.booking).forEach(function(k){ if(e.booking[k])sh.booking[k]=e.booking[k]; });
+  sh.booking.importedAt=new Date().toISOString();
+}
+function bhReceipt(receipt){
+  var h='<div class="mh"><div class="mt">🧾 Import Receipt</div><button class="mx" onclick="mClose()">&times;</button></div>';
+  if(!receipt.length)h+='<div class="wb">Nothing was written.</div>';
+  receipt.forEach(function(r){
+    h+='<div class="card" style="margin-bottom:8px;padding:10px;border-color:'+(r.action==='create'?'var(--greenbd)':r.action==='unchanged'?'var(--border)':'var(--goldbd)')+'">'+
+      '<div style="font-size:11px;font-weight:900;color:var(--gold)">'+(r.action==='create'?'➕ CREATED':r.action==='unchanged'?'✓ ALREADY UP TO DATE':'✏️ UPDATED')+'</div>'+
+      '<div style="font-weight:900;font-size:14px">'+bhEsc(r.name)+'</div>'+
+      (r.changes.length?('<div style="font-size:11px;color:var(--muted);margin-top:4px">'+r.changes.map(function(c){return bhEsc(c.field)+' → '+bhEsc(c.to);}).join('<br>')+'</div>'):'')+
+      (r.flags.length?('<div style="font-size:11px;color:#ffc266;margin-top:6px">'+r.flags.map(function(f){return '⚠️ '+bhEsc(f);}).join('<br>')+'</div>'):'')+
+      '</div>';
+  });
+  h+='<div style="font-size:11px;color:var(--muted);margin:8px 0">Logged to the seed ledger audit trail. Check the Shows page — the Booking Pipeline counts include these now.</div>';
+  h+='<button class="btn btn-gold btn-full" onclick="mClose();showsTab=\'upcoming\';go(\'shows\')">🎪 Go to Shows</button>';
+  mOpen(h);
 }
 
 function bxSettingsCard(){

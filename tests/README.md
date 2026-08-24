@@ -8,6 +8,7 @@ node tests/phase2b.test.js
 node tests/replay-guard.test.js
 node tests/booking-pipeline-filters.test.js
 node tests/product-debt-invoices.test.js
+node tests/booked-show-handoff.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -15,6 +16,11 @@ runs them in a Node `vm` with a stub DOM, and returns the sandbox so a test can
 call the app's own functions directly. The app file is never modified.
 `boot(seed)` optionally pre-fills localStorage, which is how a test simulates a
 page refresh that finds a value already on the device.
+
+`booked-show-handoff.test.js` covers the JSON intake in Settings. It writes show
+records, so the tests pin the three rules that keep that safe: identity is the
+replay guard's own `mrgShowKey`, derived money (balance, payment status) is
+never stored, and a blank incoming field never overwrites a filled-in one.
 
 `booking-pipeline-filters.test.js` covers the three tap-to-filter cards on the
 Shows page. The invariant it exists to protect is that a card's displayed count
