@@ -297,12 +297,50 @@ R.section('=== NOTHING IS EVER SILENTLY DROPPED ===');
     return g.length===1&&g[0].sev==='CRITICAL'&&g[0].count===1;})(),true);
 }
 
-R.section('=== NO VALUE IS INVENTED ===');
+R.section('=== DATES ARE STATED, NOT INFERRED ===');
 {
-  chk('no invoice date was made up for invoice 1',inv1.createdDate,null);
-  chk('no invoice date was made up for invoice 2',inv2.createdDate,null);
+  // Both invoice dates were supplied by the owner and are read from the app's
+  // own seed, so the test cannot drift from the ledger.
+  chk('invoice 1 carries the stated invoice date',inv1.createdDate,SEED[0].createdDate);
+  chk('and that date is 2026-05-01',inv1.createdDate,'2026-05-01');
+  chk('invoice 2 carries the stated invoice date',inv2.createdDate,SEED[1].createdDate);
+  chk('and that date is 2026-08-21',inv2.createdDate,'2026-08-21');
   chk('the paid-in-full date is the closing payment date, not a guess',
     inv1.paidDate,inv1.payments[inv1.payments.length-1].date);
+  chk('and that date is 2026-08-21',inv1.paidDate,'2026-08-21');
+  chk('an open invoice still gets no paid-in-full date',inv2.paidDate,null);
+  chk('the invoice date is shown on the card',
+    /invoiced 2026-05-01/.test(C.pdInvoiceCard(inv1,false))===false,true); // collapsed card
+  chk('  and appears once the card is expanded',(function(){
+    C.pdOpenCards[inv1.id]=true; const h=C.pdInvoiceCard(inv1,false);
+    C.pdOpenCards[inv1.id]=false;
+    return /invoiced 2026-05-01/.test(h)&&/settled 2026-08-21/.test(h);})(),true);
+  chk('a device that already split but has no dates gets them backfilled',(function(){
+    const wound=JSON.parse(JSON.stringify(C.S));
+    delete wound._applied['mm_invoice_dates_v1'];
+    wound.productDebt.invoices.forEach(i=>{i.createdDate=null;});
+    const after=boot({dd_bs_v7:JSON.stringify(wound)}).ctx.S;
+    return after.productDebt.invoices.map(i=>i.createdDate).join(',');})(),
+    '2026-05-01,2026-08-21');
+  chk('but a date the owner edited on the device is left alone',(function(){
+    const wound=JSON.parse(JSON.stringify(C.S));
+    delete wound._applied['mm_invoice_dates_v1'];
+    wound.productDebt.invoices[0].createdDate='2026-04-28';
+    const after=boot({dd_bs_v7:JSON.stringify(wound)}).ctx.S;
+    return after.productDebt.invoices[0].createdDate;})(),'2026-04-28');
+}
+
+R.section('=== C5X STAYS ITS OWN LINE ITEM ===');
+{
+  chk('C5X is listed verbatim on invoice 2',
+    inv2.items.filter(i=>i.label==='C5X').map(i=>i.cases),[8]);
+  chk('it is not rewritten to a C5 SKU',
+    inv2.items.filter(i=>/^c5-?[sl]$/i.test(i.label)).length,0);
+  chk('no invoice line item touches the SKU table',
+    C.SKUS.some(sk=>inv2.items.some(i=>i.label===sk.key||i.label===sk.short)),false);
+  chk('inventory is untouched by either invoice',
+    JSON.stringify(C.S.inventory).indexOf('c5x'),-1);
+  chk('the page renders it as written',/C5X <strong[^>]*>8 cases/.test(C.secDebt()),true);
 }
 
 R.section('=== 13. MOBILE LAYOUT ===');

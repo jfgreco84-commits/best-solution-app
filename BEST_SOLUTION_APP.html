@@ -1044,6 +1044,19 @@ function applyOneTimeUpdates(d){
     d._applied['mm_sequential_invoices_v1']=true;
   }
 
+  // The owner supplied the two invoice dates after the split shipped, so a
+  // device that already ran the migration above carries them as null. Fill
+  // them in, but ONLY where the field is still empty: a date the owner has
+  // since edited on the device is theirs and is left alone.
+  if(!d._applied['mm_invoice_dates_v1']){
+    PD_MM_SEED.forEach(function(seed){
+      if(!seed.createdDate)return;
+      var inv=pdInvoices(d).filter(function(i){return pdNum(i.number)===seed.number;})[0];
+      if(inv&&!inv.createdDate)inv.createdDate=seed.createdDate;
+    });
+    d._applied['mm_invoice_dates_v1']=true;
+  }
+
   // Rustic Fox Events — added 2026-05-18
   if(!d._applied['rustic_fox_20260518']){
     d.shows=d.shows||[];
@@ -4294,10 +4307,12 @@ var PD_METHODS=['Zelle','Venmo','Cash','Check','Cash App','PayPal','Debit','Squa
 
 // The Mark Martone ledger, as the owner confirmed it on 2026-08-24.
 // Invoice 1 was settled in full; invoice 2 is a separate, fresh order.
-// createdDate is null on both because the owner did not supply an invoice
-// date, and a payment date is not an invoice date. Nothing is inferred here.
+// Both invoice dates were supplied by the owner. They are NOT derived from a
+// payment date — invoice 1's happens to fall on its first payment and invoice
+// 2's on the day invoice 1 closed, but each is a stated fact, not an inference.
+// Invoice 1's paid-in-full date stays derived from the payment that closed it.
 var PD_MM_SEED=[
-  {id:'pdinv_mm_001', number:1, total:4048, createdDate:null, shipping:'Free',
+  {id:'pdinv_mm_001', number:1, total:4048, createdDate:'2026-05-01', shipping:'Free',
    items:[{label:'32 oz',cases:10},{label:'16 oz',cases:10},{label:'8 oz',cases:21},{label:'2 oz',cases:7}],
    payments:[
      {amount:250,  date:'2026-05-01', method:'Zelle', note:'Payment 1'},
@@ -4307,7 +4322,10 @@ var PD_MM_SEED=[
      {amount:3000, date:'2026-07-27', method:'Zelle', note:'Payment 5'},
      {amount:48,   date:'2026-08-21', method:'Zelle', note:'Final payment — invoice 1 settled'}
    ]},
-  {id:'pdinv_mm_002', number:2, total:5985, createdDate:null, shipping:'',
+  // C5X is recorded as the owner wrote it. It is deliberately NOT mapped to
+  // c5s or c5l: invoice line items are descriptive only and touch no SKU,
+  // inventory or COGS figure, so guessing a mapping could only introduce error.
+  {id:'pdinv_mm_002', number:2, total:5985, createdDate:'2026-08-21', shipping:'',
    items:[{label:'32 oz',cases:10},{label:'16 oz',cases:15},{label:'8 oz',cases:20},{label:'2 oz',cases:5},{label:'C5X',cases:8}],
    payments:[]}
 ];
