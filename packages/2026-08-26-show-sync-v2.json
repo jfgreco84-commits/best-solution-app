@@ -1,0 +1,164 @@
+{
+  "format": "bs-show-update-package",
+  "version": 1,
+  "packageId": "pkg_2026-08-26_show-sync_v2",
+  "createdAt": "2026-08-26",
+  "description": "Category 08 Master Show Sheet sync, v2. Corrects the Last Fling operation: the live cloud already holds 'The Last Fling Artisan Market' on 2026-08-30 at Valley Ridge Golf Course, so v1 would have CREATED a duplicate. v2 matches and UPDATES that record instead. All other operations are unchanged from the approved v1.",
+  "source": "Category 08 Master Show Sheet, tab 'Show Master' (rows verified by Scout) + Nicole Kolosowski email 2026-08-10 + receipt 2165 / invoice 0006402",
+  "matchingNote": "Every markPassed operation carries requiredEvidenceAny. A show name alone does not prove whose show it is, so each candidate must ALSO carry the organizer or town in a STRUCTURED field: location or organizer. Notes are deliberately not searched, because prose negates -- a note reading 'nothing to do with The Rustic Fox' would satisfy a substring test as well as one reading 'run by The Rustic Fox'. A record whose name matches but whose location/organizer does not identify it is excluded and reported by name in the preview.",
+  "operations": [
+    {
+      "op": "upsertShow",
+      "label": "The Last Fling Artisan Market - booked and paid (UPDATE the existing record)",
+      "match": {
+        "nameContains": [
+          "last fling"
+        ],
+        "startDate": "2026-08-30",
+        "requiredEvidenceAny": [
+          "valley ridge",
+          "antioch"
+        ]
+      },
+      "show": {
+        "location": "Valley Ridge Golf Course, Antioch, IL",
+        "startDate": "2026-08-30",
+        "numDays": 1,
+        "boothCost": 68.0,
+        "miles": 33,
+        "confirmed": true,
+        "openTime": "12:00",
+        "closeTime": "16:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "THE LAST FLING - Sun Aug 30 2026. Customer hours 12:00pm-4:00pm. Setup 10:00am-12:00pm. Valley Ridge Golf Course, Antioch IL. Booth $68.00 PAID 2026-08-21 (payment method not documented on the Master Show Sheet - do not assume one; confirm and log it). Acceptance complete. Justin is working this show Sunday. Inventory was planned for Aug 26. ~33 mi each way from Waterford (66 mi round trip), about 45 minutes one way. NOTE: this record already existed in the cloud as 'The Last Fling Artisan Market'; the v2 package updates it in place and deliberately keeps that name."
+      },
+      "boothPayments": [
+        {
+          "amount": 68.0,
+          "date": "2026-08-21",
+          "note": "Booth paid in full. Payment method not documented on the Master Show Sheet."
+        }
+      ],
+      "keepExistingName": true
+    },
+    {
+      "op": "upsertShow",
+      "label": "Mistletoe & Martinis \u2014 booked and paid",
+      "match": {
+        "name": "Mistletoe & Martinis",
+        "startDate": "2026-11-27"
+      },
+      "show": {
+        "name": "Mistletoe & Martinis",
+        "location": "Countryside Banquets, Lakemoor, IL",
+        "startDate": "2026-11-27",
+        "numDays": 1,
+        "boothCost": 100.0,
+        "miles": 35,
+        "confirmed": true,
+        "openTime": "12:00",
+        "closeTime": "17:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "MISTLETOE & MARTINIS - Fri Nov 27 2026. Customer hours 12:00pm-5:00pm. Countryside Banquets, Lakemoor IL. Organizer contact: Therese / Chain O' Lakes. Booth $100.00 PAID BY PHONE 2026-08-25 (payment method not otherwise documented on the Master Show Sheet - do not assume one; confirm and log it). TO DO: retain the booth and load-in instructions, and file the receipt if one was issued. ~35 mi each way from Waterford (70 mi round trip), about 45 minutes one way."
+      },
+      "boothPayments": [
+        {
+          "amount": 100.0,
+          "date": "2026-08-25",
+          "note": "Booth paid by phone. Payment method not otherwise documented on the Master Show Sheet."
+        }
+      ]
+    },
+    {
+      "op": "markPassed",
+      "label": "Party on the Pavement \u2014 passed for 2026",
+      "match": {
+        "name": "Party on the Pavement",
+        "startDate": "2026-09-19",
+        "requiredEvidenceAny": [
+          "racine"
+        ]
+      },
+      "expectMax": 1,
+      "reason": "Justin decided not to participate in 2026.",
+      "revisit": "2027 application cycle \u2014 Downtown Racine Corp, watch for the ~Aug 2027 deadline"
+    },
+    {
+      "op": "markPassed",
+      "label": "Rustic Fox 2026 holiday series \u2014 cancelled by organizer (North Aurora)",
+      "note": "requiredEvidenceAny is what proves whose show this is. The event names are generic \u2014 any organizer in the Midwest can run a 'Kris Kringle' market \u2014 so a name match alone must never be enough to act on one organizer's cancellation notice. Split by location so each operation carries a strict, single constraint.",
+      "match": {
+        "nameContains": [
+          "sip and sleigh",
+          "sip sleigh",
+          "sip and shop",
+          "sip shop",
+          "kris kringle"
+        ],
+        "requiredEvidenceAny": [
+          "north aurora",
+          "rustic fox",
+          "fox found"
+        ]
+      },
+      "expectMax": 3,
+      "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
+      "revisit": "2027 \u2014 ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
+    },
+    {
+      "op": "markPassed",
+      "label": "Rustic Fox 2026 holiday series \u2014 cancelled by organizer (Carol Stream)",
+      "match": {
+        "nameContains": [
+          "sip and sleigh",
+          "sip sleigh",
+          "sip and shop",
+          "sip shop",
+          "kris kringle"
+        ],
+        "requiredEvidenceAny": [
+          "carol stream",
+          "rustic fox"
+        ]
+      },
+      "expectMax": 3,
+      "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
+      "revisit": "2027 \u2014 ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
+    },
+    {
+      "op": "upsertShow",
+      "label": "The Rustic Fox Holiday Market (Holiday Weekend) \u2014 replacement, booked and paid",
+      "match": {
+        "name": "The Rustic Fox Holiday Market (Holiday Weekend)",
+        "startDate": "2026-11-07"
+      },
+      "show": {
+        "name": "The Rustic Fox Holiday Market (Holiday Weekend)",
+        "location": "The Rustic Fox, 1790 Towne Center Drive, North Aurora, IL 60542",
+        "startDate": "2026-11-07",
+        "numDays": 1,
+        "boothCost": 100.0,
+        "confirmed": true,
+        "openTime": "09:00",
+        "closeTime": "15:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "THE RUSTIC FOX HOLIDAY MARKET (Holiday Weekend) - Sat Nov 07 2026. Customer hours 9:00am-3:00pm. Vendor arrival/setup 8:00am. Departure/teardown deadline 3:30pm. The Rustic Fox, 1790 Towne Center Drive, North Aurora IL 60542. Organizer: Nicole Kolosowski. Booth $100.00 PAID 2026-08-25 - receipt 2165, invoice 0006402. This is the ONLY 2026 Rustic Fox holiday pop-up market: per Nicole's Aug 10 2026 email there is no outdoor December pop-up and no Carol Stream holiday pop-ups in 2026. Mileage not on the Master Show Sheet - set it in Edit Show before relying on gas or IRS mileage figures."
+      },
+      "boothPayments": [
+        {
+          "amount": 100.0,
+          "date": "2026-08-25",
+          "note": "Booth paid in full - receipt 2165, invoice 0006402"
+        }
+      ]
+    }
+  ],
+  "supersedes": "pkg_2026-08-26_show-sync_v1",
+  "correctionNote": "v1 matched The Last Fling on exact normalized name + startDate. The live record is named 'The Last Fling Artisan Market', which is not equal to 'The Last Fling', so the match missed and the operation fell through to CREATE. v2 matches on nameContains 'last fling' AND startDate 2026-08-30 AND location/organizer evidence identifying Valley Ridge Golf Course or Antioch IL. All three must agree, so a different Last Fling on another date or at another venue is untouched. keepExistingName preserves the organizer's actual event name rather than renaming it to the shorter name on the sheet."
+}

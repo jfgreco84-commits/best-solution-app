@@ -615,4 +615,234 @@ R.check('nothing is left in Pending / Applied', bk.pending.length, 0);
 R.check('no passed show reached any bucket',
   bk.planned.filter(s=>C.isPassed(s)).length, 0);
 
+
+// =======================================================================
+R.section('10. v2 package: update the existing Last Fling, never duplicate it');
+
+// The failure this section exists to prevent, in full: on 2026-08-26 the live
+// cloud held "The Last Fling Artisan Market" on 2026-08-30 at Valley Ridge Golf
+// Course. The v1 package matched on exact normalized name + startDate against
+// the name "The Last Fling". Those two names are not equal, so the match
+// missed, the operation fell through to CREATE, and it would have put a second
+// record on the same day at the same venue.
+//
+// v2 matches on nameContains + startDate + location evidence, all three of
+// which must agree. Everything below asserts one of the two halves: the real
+// record IS found and updated, and anything that is not that record is NOT.
+
+const PKG2=JSON.parse(fs.readFileSync(path.join(__dirname,'..','packages','2026-08-26-show-sync-v2.json'),'utf8'));
+R.check('v2 declares the right format', PKG2.format, 'bs-show-update-package');
+R.check('v2 has a distinct package id', PKG2.packageId, 'pkg_2026-08-26_show-sync_v2');
+R.check('v2 id ends in _v2', /_v2$/.test(PKG2.packageId), true);
+R.check('v2 is not the v1 id', PKG2.packageId===PKG.packageId, false);
+R.check('v2 records what it supersedes', PKG2.supersedes, 'pkg_2026-08-26_show-sync_v1');
+R.check('v2 preserves all six operations', PKG2.operations.length, 6);
+const fl2=PKG2.operations[0];
+R.check('the Last Fling op matches on a name fragment', fl2.match.nameContains, ['last fling']);
+R.check('...AND on the exact start date', fl2.match.startDate, '2026-08-30');
+R.check('...AND on location evidence', fl2.match.requiredEvidenceAny, ['valley ridge','antioch']);
+R.check('it will not rename the live record', fl2.keepExistingName, true);
+R.check('and carries no name to write', fl2.show.name, undefined);
+R.check('every markPassed still carries evidence',
+  PKG2.operations.filter(o=>o.op==='markPassed')
+    .every(o=>((o.match||{}).requiredEvidenceAny||[]).length>0), true);
+
+// ---- the realistic board: what the cloud actually holds ----
+function realBoard(){
+  return [
+    show({name:'The Last Fling Artisan Market',startDate:'2026-08-30',id:'sh_fling',
+      location:'Valley Ridge Golf Course, Antioch, IL',boothCost:0,confirmed:false}),
+    show({name:'Party on the Pavement',startDate:'2026-09-19',id:'sh_pop',confirmed:false,
+      boothCost:450,depositDue:'2026-08-22',location:'Racine, WI'}),
+    show({name:'Sip & Sleigh — Carol Stream',startDate:'2026-11-07',id:'sh_ss1',location:'Carol Stream, IL'}),
+    show({name:'Sip & Sleigh — North Aurora',startDate:'2026-11-20',id:'sh_ss2',location:'North Aurora, IL'}),
+    show({name:'Kris Kringle — Carol Stream',startDate:'2026-12-04',id:'sh_kk1',location:'Carol Stream, IL'}),
+    show({name:'Kris Kringle — North Aurora',startDate:'2026-12-12',id:'sh_kk2',location:'North Aurora, IL'}),
+    show({name:'Kris Kringle Christmas Market',startDate:'2026-12-05',id:'sh_other',
+      location:'Oconomowoc, WI',organizer:'Oconomowoc Chamber',
+      notes:'Unrelated to The Rustic Fox — the note names them on purpose, to prove notes are not evidence.'}),
+    show({name:'Cranberry Fest',startDate:'2026-09-25',id:'sh_cf',location:'Warrens, WI'}),
+    show({name:'Wonderful World of Weddings',startDate:'2027-01-30',id:'sh_www',boothCost:1087.80,
+      location:'West Allis, WI',boothPayments:[{amount:250,date:'2026-08-18',note:'Deposit paid'}],
+      depositDue:'2026-09-30'})
+  ];
+}
+
+// ---- v1 against the real board: the bug was real ----
+setState(realBoard());
+const v1plan=C.pkgPlan(PKG,C.S);
+const v1fling=v1plan.ops.find(o=>/Last Fling/.test(o.label));
+R.check('v1 would NOT have matched the live record', v1fling.action!=='update', true);
+// With the near-duplicate guard now in place v1 is stopped rather than
+// duplicating — but its selector still never finds the record, which is the
+// underlying defect v2 fixes.
+R.check('v1 is now blocked instead of duplicating', v1fling.blocked, true);
+R.check('and the block explains it would duplicate',
+  /WOULD DUPLICATE/.test(v1fling.notes.join(' ')), true);
+
+// ---- v2 against the real board ----
+setState(realBoard());
+const before2=C.S.shows.length;
+let p2=C.pkgPlan(PKG2,C.S);
+R.check('v2 plans cleanly', p2.ok, true);
+R.check('v2 blocks nothing', p2.blockedCount, 0);
+R.check('v2 creates exactly TWO records, not three', p2.createCount, 2);
+const f2=p2.ops.find(o=>/Last Fling/.test(o.label));
+R.check('the Last Fling op is an UPDATE', f2.action, 'update');
+R.check('and it targets the existing record', f2.target.id, 'sh_fling');
+R.check('matched by fragment + date + evidence',
+  /name contains.*last fling.*starts exactly 2026-08-30.*valley ridge/.test(f2.how), true);
+R.check('the update does not touch the name',
+  f2.changes.some(c=>c.field==='name'), false);
+
+const wwwBefore2=JSON.stringify(C.S.shows.find(s=>s.id==='sh_www'));
+const otherBefore2=JSON.stringify(C.S.shows.find(s=>s.id==='sh_other'));
+C.pkgExecute(PKG2,p2,C.S);
+
+R.check('NO DUPLICATE: board grew by exactly 2', C.S.shows.length, before2+2);
+R.check('exactly one Last Fling record exists',
+  C.S.shows.filter(s=>/last fling/i.test(s.name)).length, 1);
+const flingRec=C.S.shows.find(s=>/last fling/i.test(s.name));
+R.check('it is the SAME record, by id', flingRec.id, 'sh_fling');
+R.check('its name was preserved, not overwritten', flingRec.name, 'The Last Fling Artisan Market');
+R.check('booth cost was applied', flingRec.boothCost, 68);
+R.check('mileage was applied', flingRec.miles, 33);
+R.check('it is now confirmed', flingRec.confirmed, true);
+R.check('the payment landed once', flingRec.boothPayments.length, 1);
+R.check('and it is paid in full', C.boothBalance(flingRec), 0);
+R.check('hours were applied', [flingRec.openTime,flingRec.closeTime], ['12:00','16:00']);
+
+R.check('Mistletoe & Martinis was created once',
+  C.S.shows.filter(s=>/Mistletoe/.test(s.name)).length, 1);
+const mm2=C.S.shows.find(s=>/Mistletoe/.test(s.name));
+R.check('Mistletoe paid in full', [mm2.boothCost,C.boothPaid(mm2)], [100,100]);
+R.check('Party on the Pavement is passed', C.isPassed(C.S.shows.find(s=>s.id==='sh_pop')), true);
+R.check('and NOT missed', C.isMissed(C.S.shows.find(s=>s.id==='sh_pop')), false);
+R.check('exactly four Rustic Fox records passed',
+  ['sh_ss1','sh_ss2','sh_kk1','sh_kk2'].filter(id=>C.isPassed(C.S.shows.find(s=>s.id===id))).length, 4);
+R.check('five records passed in total', C.S.shows.filter(s=>C.isPassed(s)).length, 5);
+R.check('the replacement Rustic Fox market was created once',
+  C.S.shows.filter(s=>/Rustic Fox Holiday Market/.test(s.name)).length, 1);
+R.check('Wonderful World of Weddings is byte-for-byte unchanged',
+  JSON.stringify(C.S.shows.find(s=>s.id==='sh_www')), wwwBefore2);
+R.check('the unrelated Kris Kringle is byte-for-byte unchanged',
+  JSON.stringify(C.S.shows.find(s=>s.id==='sh_other')), otherBefore2);
+R.check('Cranberry Fest is still upcoming', C.isUpcoming(C.S.shows.find(s=>s.id==='sh_cf')), true);
+
+// ---- reapply: zero additional changes ----
+R.check('RE-PLANNING v2 FINDS NOTHING LEFT TO DO', C.pkgPlan(PKG2,C.S).changeCount, 0);
+const afterFirst=JSON.stringify(C.S);
+C.pkgExecute(PKG2,C.pkgPlan(PKG2,C.S),C.S);
+R.check('REAPPLYING v2 CHANGES THE STATE NOT AT ALL', JSON.stringify(C.S), afterFirst);
+R.check('still exactly one Last Fling',
+  C.S.shows.filter(s=>/last fling/i.test(s.name)).length, 1);
+R.check('still one payment on it',
+  C.S.shows.find(s=>/last fling/i.test(s.name)).boothPayments.length, 1);
+
+// ---- a DIFFERENT Last Fling must be left completely alone ----
+// Same fragment, wrong date.
+setState([show({name:'The Last Fling Artisan Market',startDate:'2027-08-29',id:'wrongYear',
+  location:'Valley Ridge Golf Course, Antioch, IL'})]);
+p2=C.pkgPlan(PKG2,C.S);
+let fw=p2.ops.find(o=>/Last Fling/.test(o.label));
+R.check('a Last Fling on ANOTHER DATE is not updated', fw.action!=='update', true);
+R.check('and it is reported as considered-and-skipped',
+  /NOT TOUCHED/.test(fw.notes.join(' ')), true);
+C.pkgExecute(PKG2,p2,C.S);
+R.check('the wrong-year record is untouched', C.S.shows.find(s=>s.id==='wrongYear').boothCost, 0);
+
+// Same fragment, same date, wrong venue.
+setState([show({name:'The Last Fling Street Fair',startDate:'2026-08-30',id:'wrongPlace',
+  location:'Naperville, IL',organizer:'Naperville Jaycees'})]);
+p2=C.pkgPlan(PKG2,C.S);
+fw=p2.ops.find(o=>/Last Fling/.test(o.label));
+R.check('a Last Fling at ANOTHER VENUE is not updated', fw.action!=='update', true);
+R.check('and the evidence miss is explained',
+  /NOT TOUCHED/.test(fw.notes.join(' ')), true);
+const wpBefore=JSON.stringify(C.S.shows.find(s=>s.id==='wrongPlace'));
+C.pkgExecute(PKG2,p2,C.S);
+R.check('the other organizer Last Fling is byte-for-byte untouched',
+  JSON.stringify(C.S.shows.find(s=>s.id==='wrongPlace')), wpBefore);
+
+// Both decoys present alongside the real one: only the real one moves.
+setState(realBoard().concat([
+  show({name:'The Last Fling Artisan Market',startDate:'2027-08-29',id:'wrongYear',
+    location:'Valley Ridge Golf Course, Antioch, IL'}),
+  show({name:'The Last Fling Street Fair',startDate:'2026-08-30',id:'wrongPlace',
+    location:'Naperville, IL',organizer:'Naperville Jaycees'})
+]));
+p2=C.pkgPlan(PKG2,C.S);
+fw=p2.ops.find(o=>/Last Fling/.test(o.label));
+R.check('with three Last Flings on the board it still updates', fw.action, 'update');
+R.check('and that one is the right record', fw.target.id, 'sh_fling');
+R.check('v2 still plans cleanly with the decoys present', p2.ok, true);
+C.pkgExecute(PKG2,p2,C.S);
+R.check('decoy: wrong year untouched', C.S.shows.find(s=>s.id==='wrongYear').boothCost, 0);
+R.check('decoy: wrong venue untouched', C.S.shows.find(s=>s.id==='wrongPlace').boothCost, 0);
+R.check('the real record was updated', C.S.shows.find(s=>s.id==='sh_fling').boothCost, 68);
+
+// =======================================================================
+R.section('11. Near-duplicate and multi-match guards');
+
+// The guard that would have caught v1 on its own, independent of any package.
+setState([show({name:'The Last Fling Artisan Market',startDate:'2026-08-30',id:'a',
+  location:'Valley Ridge Golf Course, Antioch, IL'})]);
+R.check('a shorter name on the same date is a near-duplicate',
+  C.pkgNearDuplicates(C.S,'The Last Fling','2026-08-30').length, 1);
+R.check('a longer name on the same date is too',
+  C.pkgNearDuplicates(C.S,'The Last Fling Artisan Market 2026','2026-08-30').length, 1);
+R.check('the SAME date is required — a different date is not a duplicate',
+  C.pkgNearDuplicates(C.S,'The Last Fling','2026-08-31').length, 0);
+R.check('an unrelated name on the same date is not a duplicate',
+  C.pkgNearDuplicates(C.S,'Cranberry Fest','2026-08-30').length, 0);
+R.check('a missing date never reports a duplicate',
+  C.pkgNearDuplicates(C.S,'The Last Fling','').length, 0);
+
+// A create whose name overlaps an existing record on the same date is blocked
+// at plan time AND refused at execute time.
+setState([show({name:'The Last Fling Artisan Market',startDate:'2026-08-30',id:'a',
+  location:'Valley Ridge Golf Course, Antioch, IL'})]);
+const dupOp={op:'upsertShow',label:'dup',
+  match:{name:'The Last Fling',startDate:'2026-08-30'},
+  show:{name:'The Last Fling',startDate:'2026-08-30',numDays:1,boothCost:68}};
+const dupPlan=C.pkgPlan(pkg([dupOp]),C.S);
+R.check('a near-duplicate create is BLOCKED at plan time', dupPlan.ops[0].blocked, true);
+R.check('the package becomes unapplyable', dupPlan.ok, false);
+R.check('and the block names the existing record',
+  /WOULD DUPLICATE.*Last Fling Artisan Market/.test(dupPlan.ops[0].notes.join(' ')), true);
+// Even if a plan were forced through, execute refuses on its own.
+const forced={idx:0,tag:'forced',op:'upsertShow',label:'dup',action:'create',target:null,
+  changes:[],notes:[],blocked:false};
+const forcedRes=C.pkgExecute(pkg([dupOp]),{ops:[forced]},C.S);
+R.check('EXECUTE REFUSES THE DUPLICATE ON ITS OWN', forcedRes[0].status, 'skipped');
+R.check('and the board did not grow', C.S.shows.length, 1);
+
+// An update that matches more than one record must never pick one silently.
+setState([
+  show({name:'Spring Market North',startDate:'2026-05-02',id:'m1',location:'Aurora, IL'}),
+  show({name:'Spring Market South',startDate:'2026-05-02',id:'m2',location:'Aurora, IL'})
+]);
+const multiOp={op:'upsertShow',label:'multi',
+  match:{nameContains:['spring market'],startDate:'2026-05-02',requiredEvidenceAny:['aurora']},
+  show:{boothCost:99}};
+const multiPlan=C.pkgPlan(pkg([multiOp]),C.S);
+R.check('an update matching two records is BLOCKED', multiPlan.ops[0].blocked, true);
+R.check('it names both candidates',
+  /Spring Market North/.test(multiPlan.ops[0].notes.join(' '))&&
+  /Spring Market South/.test(multiPlan.ops[0].notes.join(' ')), true);
+R.check('and nothing was changed', [C.S.shows[0].boothCost,C.S.shows[1].boothCost], [0,0]);
+
+// startDate genuinely narrows a nameContains selector.
+setState([
+  show({name:'Spring Market',startDate:'2026-05-02',id:'y1',location:'Aurora, IL'}),
+  show({name:'Spring Market',startDate:'2027-05-01',id:'y2',location:'Aurora, IL'})
+]);
+const datedPlan=C.pkgPlan(pkg([{op:'upsertShow',label:'dated',
+  match:{nameContains:['spring market'],startDate:'2026-05-02',requiredEvidenceAny:['aurora']},
+  show:{boothCost:55}}]),C.S);
+R.check('startDate narrows nameContains to one record', datedPlan.ops[0].action, 'update');
+R.check('and it is the right year', datedPlan.ops[0].target.id, 'y1');
+R.check('the other year is reported as skipped',
+  /NOT TOUCHED/.test(datedPlan.ops[0].notes.join(' ')), true);
+
 R.done();
