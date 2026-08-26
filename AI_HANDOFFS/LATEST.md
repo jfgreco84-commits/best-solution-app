@@ -8,10 +8,10 @@ Most recent handoff: **[2026-08-26-show-sync.md](2026-08-26-show-sync.md)**
 | **Branch** | `claude/show-sync-2026-08-26` |
 | **Base commit** | `b710a03` |
 | **App version** | v32 → **v33** |
-| **Review state** | Scout round 2 corrections applied. **PR open, awaiting Scout's final review.** |
-| **Merged** | **No.** |
-| **Deployed** | **No.** `main` is untouched; Pages still serves v32. |
-| **Live data changed** | **No.** No real cloud read or write has been made or attempted. |
+| **Review state** | Scout conditionally approved; final clean run **186/186, zero failures**. |
+| **Merged** | **Yes** — PR #27 squashed into `main` as `d4abc73a3e6210ad600d67cb8cd05d682ab6e4ec`. |
+| **Deployed** | **Yes** — GitHub Pages build `built` in 39.9s. https://jfgreco84-commits.github.io/best-solution-app/BEST_SOLUTION_APP.html serves **v33**. |
+| **Live data changed** | **No.** The package has NOT been applied. No real cloud read or write has been made or attempted. |
 
 ## What changed
 
@@ -58,13 +58,20 @@ divergence. Both fixed, both now have regression tests. Details in the handoff.
 
 ## State of play
 
-- **Nothing has reached Justin's live data.** The package still has to be
-  applied by him, inside the app, while signed in and synced. See NEXT ACTION in
-  the full handoff.
-- **Node is not installed on this machine.** `tests/passed-not-doing.test.js`
-  was written but could not be executed. 130 of 131 equivalent checks were run
-  against the fully booted app in a real browser (the one failure is a
-  superseded scratch-fixture assertion, not present in the committed file), plus
-  a full end-to-end apply against a mocked Supabase with 13 cloud verification
-  checks passing. Everything that could not be run is listed in the VERIFIED
-  section of the handoff.
+- **The code is live. The DATA is not.** v33 is deployed and serving. The show
+  package has **not** been applied — Justin still has to do that himself, inside
+  the app, signed in and synced. See NEXT ACTION in the full handoff.
+- **Node is still not installed on this machine.** The committed
+  `tests/passed-not-doing.test.js` cannot be run by `node` here. For the final
+  pre-merge run it was executed **verbatim, unmodified**, in a real browser
+  against a pristine `git archive` export of the reviewed commit, via a browser
+  adapter supplying `require`/`fs`/`boot`/`reporter`. Result: **186/186
+  passing, zero failures**, reproduced identically on three consecutive runs.
+- **Deployment verified:** the file GitHub Pages serves is byte-identical to the
+  committed blob (`7f99a1ca…`), which is the same blob Scout reviewed at the PR
+  head. Reviewed → merged → deployed, same bytes throughout.
+- **Post-deploy checks on the live build:** identifies as v33; the Apply Show
+  Update Package card is present; Apply is unavailable signed out, offline,
+  unsynced, and on sync error; and `pkgApply()` refuses on its own — with an
+  applyable 46-change plan and the confirmation gate forced open — making zero
+  state changes and **zero network calls**.
