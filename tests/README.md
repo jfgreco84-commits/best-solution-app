@@ -8,6 +8,7 @@ node tests/phase2b.test.js
 node tests/replay-guard.test.js
 node tests/booking-pipeline-filters.test.js
 node tests/product-debt-invoices.test.js
+node tests/passed-not-doing.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -29,6 +30,19 @@ invoice is frozen history, the open invoice is the only one a payment can land
 on, and a new invoice changes neither. The expected ledger is read from the
 app's own `PD_MM_SEED`, and the pre-migration fixture is rebuilt from it, so
 the figures are not duplicated here.
+
+`passed-not-doing.test.js` covers the Passed / Not Doing show state and the
+Apply Show Update Package feature. The invariant it protects has two halves
+that pull against each other: a passed show must be invisible to every
+forward-looking surface (Upcoming, the pipeline buckets and owed total,
+deposit alerts, booth owed/due, booked counts, calendar, .ics, conflicts,
+stock transfers) while being completely preserved as a record — including
+booth money already spent, which stays in the books. A change that satisfies
+one half by breaking the other is the failure this file exists to catch, so
+most checks assert both sides of the same fact. It also replays the shipped
+package twice to prove no duplicate show and no duplicate payment can be
+created, and asserts that Wonderful World of Weddings comes through the whole
+sync byte-for-byte unchanged.
 
 ## Fixtures are synthetic
 

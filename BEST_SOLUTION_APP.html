@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v32';
+const APP_VERSION='v33';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -1891,8 +1891,52 @@ function showEndKey(sh){ // last day of the show as YYYY-MM-DD (start + numDays-
   const d=new Date(start+'T12:00:00'); d.setDate(d.getDate()+((sh.numDays||1)-1));
   return d.toISOString().split('T')[0];
 }
-function isMissed(sh){ return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
-function isUpcoming(sh){ return sh.status!=='completed' && !isMissed(sh); } // includes active + future planned
+/* ======================================================================
+   PASSED / NOT DOING  (pnd*)
+   ----------------------------------------------------------------------
+   A show we deliberately decided not to work, or that the organizer
+   cancelled. It is NOT "missed". Missed is derived and means the date went
+   by while the show sat unfinished, which reads as a screw-up. A passed
+   show is a decision, and the app has to say so.
+
+   The state is STORED, never derived, because the reason it exists is that
+   nothing about the record itself can tell you a human chose this:
+
+     sh.passed        true. The only value that means passed.
+     sh.passedReason  why, in the owner's words. Required.
+     sh.passedAt      ISO timestamp the decision was recorded.
+     sh.passedRevisit optional YYYY-MM-DD or free text — the follow-up for
+                      the next application cycle.
+     sh.passedSource  'manual' or the packageId that set it, so a package
+                      apply is distinguishable from a tap in the UI.
+
+   WHAT IT REMOVES IT FROM, and what it deliberately does not.
+
+   Removed: Upcoming, every Booking Pipeline bucket, deposit/payment-due
+   alerts, the booth tally's owed/due figures, booked show + show-day +
+   staffed-hour counts, the calendar grid, the .ics export, schedule
+   conflict detection, and stock-transfer targets. Those are all
+   forward-looking planning surfaces, and a show we are not working has no
+   business steering them.
+
+   NOT removed: money that was actually spent. If a deposit was paid before
+   the decision, that cash left the account and stays in expenses and in
+   the P&L. Dropping it would make the books lie in the owner's favour,
+   which is the one direction an accounting bug must never go. The same
+   applies to any logged show expense. Every passed record also keeps its
+   full history — days, counts, payments, notes, rep assignments — because
+   the record is evidence, not clutter.
+
+   isMissed() returns false for a passed show FIRST, before the date test,
+   so a passed record can never drift into the Missed tab once its date
+   goes by. isUpcoming() excludes it too, so the two are not complements
+   any more: a passed show is neither, and that is the point.
+   ====================================================================== */
+function isPassed(sh){ return !!(sh&&sh.passed===true); }
+function passedReason(sh){ return (sh&&sh.passedReason)?String(sh.passedReason):''; }
+function passedRevisit(sh){ return (sh&&sh.passedRevisit)?String(sh.passedRevisit):''; }
+function isMissed(sh){ if(isPassed(sh))return false; return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
+function isUpcoming(sh){ if(isPassed(sh))return false; return sh.status!=='completed' && !isMissed(sh); } // active + future planned; never a passed show
 function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>u[s.key]+=(sold[s.key]||0)); } }); return u; }
 // ===== Inventory reconciliation / discrepancy trust system =====
 // Continuity rule: each day's ending count MUST equal the next day's opening count, unless the gap is explained.
@@ -1994,6 +2038,10 @@ function calcBoothTally(){
   S.shows.forEach(sh=>{
     if(sh.status==='completed')return;
     const cost=sh.boothCost||0;const p=boothPaid(sh);
+    // A passed show still shows the money that ACTUALLY LEFT the account (paid),
+    // because it did. What it must not do is inflate what we still owe or still
+    // have to book — we are not working it, so its cost is no longer committed.
+    if(isPassed(sh)){ paid+=p; return; }
     paid+=p;owed+=cost;due+=Math.max(0,cost-p);
     if(sh.confirmed)confirmedCnt++;else possibleCnt++;
     if(cost>0){
@@ -2109,7 +2157,7 @@ function todayDayIndex(sh){
 function depositAlerts(withinDays){
   const today=_todayKey(); const out=[];
   (S.shows||[]).forEach(sh=>{
-    if(sh.status==='completed'||isMissed(sh))return;
+    if(sh.status==='completed'||isMissed(sh)||isPassed(sh))return; // a show we passed on owes nobody anything
     if(!sh.depositDue||!/^\d{4}-\d{2}-\d{2}$/.test(sh.depositDue))return;
     const bal=boothBalance(sh); if(bal<=0)return;
     const days=Math.round((new Date(sh.depositDue+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
@@ -2149,7 +2197,7 @@ function rHome(){
   const plannedHours=[...upcomingShows,...activeShows].reduce((t,sh)=>t+showHours(sh),0);
   const completedHours=done.reduce((t,sh)=>t+showHours(sh),0);
   // Quantum staffing: count every staffed show-day's hours per worker, so two simultaneous staffed shows stack
-  const bookedShowsW=(S.shows||[]).filter(sh=>!isMissed(sh));
+  const bookedShowsW=(S.shows||[]).filter(sh=>!isMissed(sh)&&!isPassed(sh));
   const bookedCount=bookedShowsW.length;
   const bookedShowDays=bookedShowsW.reduce((t,sh)=>t+(sh.numDays||1),0);
   const totalStaffedHours=bookedShowsW.reduce((t,sh)=>t+staffedHours(sh),0);
@@ -2331,7 +2379,7 @@ function homeCtx(){
   const completedDays=done.reduce((t,sh)=>t+(sh.numDays||1),0);
   const plannedHours=[...upcomingShows,...activeShows].reduce((t,sh)=>t+showHours(sh),0);
   const completedHours=done.reduce((t,sh)=>t+showHours(sh),0);
-  const bookedShowsW=(S.shows||[]).filter(sh=>!isMissed(sh));
+  const bookedShowsW=(S.shows||[]).filter(sh=>!isMissed(sh)&&!isPassed(sh));
   const bookedCount=bookedShowsW.length;
   const bookedShowDays=bookedShowsW.reduce((t,sh)=>t+(sh.numDays||1),0);
   const totalStaffedHours=bookedShowsW.reduce((t,sh)=>t+staffedHours(sh),0);
@@ -2386,7 +2434,11 @@ function secWorkload(C){
   </div>`;
 }
 function secBooth(){
-  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  // Committed / owed are forward-looking, so a passed show is not in them.
+  // Anything already PAID on a passed show is real money gone, and gets its own
+  // sunk-cost line below rather than quietly disappearing.
+  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed'&&!isPassed(sh)).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
+  const passedSunk=(S.shows||[]).filter(sh=>isPassed(sh)).reduce((t,sh)=>t+boothPaid(sh),0);
   const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
   const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
   const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
@@ -2398,6 +2450,7 @@ function secBooth(){
       <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
     </div>
     ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
+    ${passedSunk>0.005?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">🚫 Not counted above: <strong style="color:#FFA500">${fmt(passedSunk)}</strong> already paid on shows marked Passed / Not Doing. That money is spent and still counts in the P&amp;L — it is just no longer a booking commitment.</div>`:''}
   </div>`;
 }
 function secExpenses(C){
@@ -2714,7 +2767,11 @@ function showSortKey(sh){
 // writes to S or touches a show record.
 var PIPE_FILTERS={paid:{label:'Booth Paid'},owe:{label:'Owe Booth'},pending:{label:'Pending / Applied'}};
 function pipelineBuckets(upcoming){
-  var planned=(upcoming||[]).filter(function(s){return s.status!=='active';});
+  // Belt and braces. Callers pass an already-upcoming list, which excludes
+  // passed shows, but this function is called directly by tests and could be
+  // called directly by future code, and a passed show must never be able to
+  // reach a pipeline bucket or an owed total by any route.
+  var planned=(upcoming||[]).filter(function(s){return s.status!=='active'&&!isPassed(s);});
   var paid=planned.filter(function(s){return (s.boothCost||0)>0&&boothBalance(s)<=0;});
   var owe=planned.filter(function(s){return s.confirmed!==false&&(s.boothCost||0)>0&&boothBalance(s)>0;});
   var pending=planned.filter(function(s){return s.confirmed===false;});
@@ -2760,8 +2817,9 @@ function rShows(){
   const upcoming=[...S.shows].filter(s=>isUpcoming(s)).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
   const completed=[...S.shows].filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
   const missed=[...S.shows].filter(s=>isMissed(s)).sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
-  const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':'upcoming');
-  let list=tab==='completed'?completed:(tab==='missed'?missed:upcoming);
+  const passed=[...S.shows].filter(s=>isPassed(s)).sort((a,b)=>showSortKey(a)>showSortKey(b)?-1:showSortKey(a)<showSortKey(b)?1:0);
+  const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':(showsTab==='passed'?'passed':'upcoming'));
+  let list=tab==='completed'?completed:(tab==='missed'?missed:(tab==='passed'?passed:upcoming));
   let pf=null,B=null;
   let h=`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   h+=`<div style="display:flex;gap:6px;margin-bottom:12px">
@@ -2769,6 +2827,7 @@ function rShows(){
     <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='completed';pipeFilterReset();rShows()">✅ Completed (${completed.length})</button>
     <button class="btn ${tab==='missed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px${(missed.length&&tab!=='missed')?';border-color:var(--redbd);color:var(--red)':''}" onclick="showsTab='missed';pipeFilterReset();rShows()">⚠️ Missed (${missed.length})</button>
   </div>`;
+  h+=`<button class="btn ${tab==='passed'?'btn-gold':'btn-ghost'} btn-full btn-sm" style="margin-bottom:12px" onclick="showsTab='${tab==='passed'?'upcoming':'passed'}';pipeFilterReset();rShows()">🚫 Passed / Not Doing (${passed.length})</button>`;
   h+=`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="shows2025Mode=true;rShows()">📊 View 2025 Season Results</button>`;
   if(tab==='upcoming'){
     B=pipelineBuckets(upcoming);
@@ -2796,6 +2855,7 @@ function rShows(){
     if(pf)list=B[pf];
   }
   if(tab==='missed'&&missed.length){h+=`<div class="wb red" style="margin-bottom:10px">These shows' dates passed but were never completed. Open one to mark it done if you actually did it, or edit/delete it.</div>`;}
+  if(tab==='passed'){h+=`<div class="wb gold" style="margin-bottom:10px">🚫 <strong>Passed / Not Doing.</strong> Shows you decided against, or that the organizer cancelled. They are kept in full — nothing is deleted — but they are out of Upcoming, the Booking Pipeline, payment-due alerts, the calendar and all booking totals. Any booth money already paid still counts in the P&amp;L. Tap <strong>Restore</strong> on a card to put one back.</div>`;}
   h+=`<div id="showsListTop"></div>`;
   if(pf){
     h+=`<div class="pf-bar" role="status" aria-live="polite">
@@ -2805,7 +2865,7 @@ function rShows(){
   }
   if(list.length){h+=list.map(s=>showCard(s)).join('');}
   else if(pf){h+=`<div class="empty"><div class="ei">📋</div>No shows in ${PIPE_FILTERS[pf].label} right now.</div>`;}
-  else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':'No upcoming shows. Tap + New Show to start.'}</div>`;}
+  else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':tab==='passed'?'🚫':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':tab==='passed'?'Nothing passed on. Shows you decide against will be filed here instead of deleted.':'No upcoming shows. Tap + New Show to start.'}</div>`;}
   h+=`<div style="height:10px"></div>`;
   pg('shows').innerHTML=h;
 }
@@ -2981,8 +3041,9 @@ function showCallClose(sh){ return dayCallClose(sh,0); } // back-compat: first d
 function _isoEnd(startDate,nd){ const s=new Date(startDate+'T12:00:00'); s.setDate(s.getDate()+Math.max(1,nd||1)-1); return s.toISOString().split('T')[0]; }
 function showDateSpan(sh){ if(!sh||!sh.startDate)return null; return {start:sh.startDate,end:_isoEnd(sh.startDate,sh.numDays||(sh.days||[]).length||1)}; }
 function showConflicts(sh){
-  const a=showDateSpan(sh); if(!a||isMissed(sh))return [];
-  return (S.shows||[]).filter(o=>o&&o.id!==sh.id&&!isMissed(o)).filter(o=>{ const b=showDateSpan(o); return b&&a.start<=b.end&&b.start<=a.end; });
+  const a=showDateSpan(sh); if(!a||isMissed(sh)||isPassed(sh))return [];
+  // Two shows only conflict if we are actually going to both.
+  return (S.shows||[]).filter(o=>o&&o.id!==sh.id&&!isMissed(o)&&!isPassed(o)).filter(o=>{ const b=showDateSpan(o); return b&&a.start<=b.end&&b.start<=a.end; });
 }
 function showStaffCount(sh){ const reps=(sh.repIds||[]).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active&&!r.isSelf;}).length; return reps + (sh.repOnlyShow?0:1); } // reps (excluding owner) + owner unless rep-only
 function showWorkHoursTotal(sh){ const n=(sh.numDays||((sh.days||[]).length)||1); let t=0; for(let i=0;i<n;i++)t+=dayWorkHours(sh,i); return t; }
@@ -3143,14 +3204,17 @@ const SHOW_EXP_CATS=[
 function showCard(sh){
   const t=calcShow(sh);
   const missed=isMissed(sh);
-  const cls=missed?'sd':(sh.status==='active'?'sa':sh.status==='completed'?'sd':'');
-  const bdg=missed?'❌ MISSED / DID NOT DO':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED');
+  const passed=isPassed(sh);
+  const cls=passed?'sd':(missed?'sd':(sh.status==='active'?'sa':sh.status==='completed'?'sd':''));
+  // "PASSED" wins over every other badge. A show we chose not to work must
+  // never be presented to the owner as MISSED.
+  const bdg=passed?'🚫 PASSED / NOT DOING':(missed?'❌ MISSED / DID NOT DO':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED'));
   const dateStr=sh.dates?sh.dates.join(' → '):'';
   const dateBig=(sh.dates&&sh.dates.length)?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):(sh.startDate||'Date TBD');
   const beO=calcBreakEven(sh),be=beO.dollars;
   const beHit=sh.status==='completed'&&t.gross>=be;
   return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
-    <span class="sc-badge ${sh.status}"${missed?' style="background:var(--redbg);color:var(--red);border:1px solid var(--redbd)"':''}>${bdg}</span>
+    <span class="sc-badge ${sh.status}"${passed?' style="background:rgba(255,165,0,0.14);color:#FFA500;border:1px solid rgba(255,165,0,0.45)"':(missed?' style="background:var(--redbg);color:var(--red);border:1px solid var(--redbd)"':'')}>${bdg}</span>
     <div class="sc-name">${sh.name}${sh.repOnlyShow?' <span style="font-size:11px;font-weight:800;color:#7EB8F7">👥 CREW-RUN</span>':''}</div>
     <div style="font-size:21px;font-weight:900;color:var(--gold);letter-spacing:.3px;margin:3px 0 4px;line-height:1.15">📅 ${dateBig}${sh.numDays>1?` · ${sh.numDays} days`:''}</div>
     <div class="sc-loc">${sh.location||''}</div>
@@ -3160,7 +3224,16 @@ function showCard(sh){
       <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:3px">❌ Why missed?</div>
       <textarea class="fi" style="font-size:12px;min-height:38px" placeholder="e.g. double-booked with Cranberry; weather; booth fell through" onchange="saveMissedReason('${sh.id}',this.value)">${(sh.missedReason||'').replace(/</g,'&lt;')}</textarea>
     </div>`:''}
-    ${(sh.status==='planned'&&!missed)?`
+    ${passed?`<div style="margin-top:8px;padding:8px;background:rgba(255,165,0,0.10);border:1px solid rgba(255,165,0,0.4);border-radius:6px" onclick="event.stopPropagation()">
+      <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700;margin-bottom:3px">🚫 Why we passed</div>
+      <div style="font-size:12px;color:var(--text);font-weight:600">${_esc(passedReason(sh)||'No reason recorded')}</div>
+      ${passedRevisit(sh)?`<div style="font-size:11px;color:var(--muted);margin-top:5px">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}
+      ${sh.passedAt?`<div style="font-size:10px;color:var(--muted);margin-top:3px">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}
+      ${boothPaid(sh)>0.005?`<div style="font-size:11px;color:#ffb3b3;margin-top:5px">💸 ${fmt(boothPaid(sh))} was already paid on this booth. It stays in the P&amp;L as money spent.</div>`:''}
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">History is fully preserved. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div>
+      <button class="btn btn-ghost btn-sm btn-full" style="margin-top:8px;border-color:var(--goldbd);color:var(--gold)" onclick="restoreShowPassed('${sh.id}')">↩️ Restore to Upcoming</button>
+    </div>`:''}
+    ${(sh.status==='planned'&&!missed&&!passed)?`
     <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2)">
       <div style="font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}</div>
       <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Break Even</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(be)}</div><div style="font-size:10px;color:var(--muted)">≈ ${fmtN(beO.units)} units</div></div>
@@ -3214,6 +3287,58 @@ function saveMissedReason(id,val){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
   sh.missedReason=(val||'').trim();
   saveS();
+}
+
+/* ---- Mark Passed / Restore. Fully reversible, and never destructive. ----
+   pndMarkPassed sets four fields and touches NOTHING else. It does not clear
+   days, payments, notes, rep assignments or the booth cost, because the record
+   has to survive intact: the whole reason this state exists instead of a delete
+   is that next year's decision needs this year's evidence.
+   pndRestore removes exactly the fields pndMarkPassed added, so a restore
+   returns the record to the shape it had before, byte for byte. */
+function pndMarkPassed(sh,reason,revisit,source){
+  if(!sh)return false;
+  if(sh.status==='completed'||sh.status==='active')return false; // a worked show is history, not a decision
+  sh.passed=true;
+  sh.passedReason=String(reason==null?'':reason).trim();
+  sh.passedRevisit=String(revisit==null?'':revisit).trim();
+  sh.passedAt=new Date().toISOString();
+  sh.passedSource=source||'manual';
+  return true;
+}
+function pndRestore(sh){
+  if(!sh||!isPassed(sh))return false;
+  delete sh.passed; delete sh.passedReason; delete sh.passedRevisit;
+  delete sh.passedAt; delete sh.passedSource;
+  return true;
+}
+function openMarkPassed(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  if(sh.status==='completed'||sh.status==='active'){toast('That show is already under way or finished — it cannot be passed.');return;}
+  const yr=(sh.startDate&&/^\d{4}/.test(sh.startDate))?(parseInt(sh.startDate.slice(0,4),10)+1):'';
+  mOpen(`<div class="mh"><div class="mt">🚫 Mark Passed / Not Doing</div><button class="mx" onclick="mClose()">&times;</button></div>
+  <div style="padding:8px 0 4px;font-size:13px;color:var(--muted)">${_esc(sh.name)}${sh.startDate?' · '+_esc(sh.startDate):''}</div>
+  <div class="wb gold" style="margin-bottom:12px;font-size:12px">Nothing is deleted. The full record stays exactly as it is, and you can Restore it any time. It comes out of Upcoming, the Booking Pipeline, payment-due alerts, the calendar and every booking total. It will <strong>not</strong> be labelled Missed.${boothPaid(sh)>0.005?`<div style="margin-top:6px;color:#ffb3b3">💸 ${fmt(boothPaid(sh))} already paid on this booth stays in the P&amp;L as money spent.</div>`:''}</div>
+  <div class="fg"><label class="fl">Why are you passing? (required)</label>
+    <textarea class="fi" id="pnd_reason" style="min-height:60px" placeholder="e.g. Decided not to participate in 2026"></textarea></div>
+  <div class="fg"><label class="fl">Revisit / next application cycle (optional)</label>
+    <input class="fi" id="pnd_revisit" placeholder="${yr?('e.g. Apply for '+yr):'e.g. Apply next year'}"></div>
+  <button class="btn btn-gold btn-full" onclick="confirmMarkPassed('${sh.id}')">🚫 Mark Passed / Not Doing</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+function confirmMarkPassed(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  const reason=($$('pnd_reason')&&$$('pnd_reason').value||'').trim();
+  if(!reason){toast('Give a reason first — future you will want to know why.');return;}
+  const revisit=($$('pnd_revisit')&&$$('pnd_revisit').value||'').trim();
+  if(!pndMarkPassed(sh,reason,revisit,'manual')){toast('That show cannot be passed.');return;}
+  mClose(); saveS(); toast('🚫 Marked Passed / Not Doing'); go('shows');
+}
+function restoreShowPassed(id){
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return;
+  if(!confirm('Restore "'+sh.name+'" to Upcoming?\n\nIt goes back into the Booking Pipeline, payment-due alerts, the calendar and booking totals exactly as it was.'))return;
+  if(!pndRestore(sh)){toast('That show is not marked passed.');return;}
+  saveS(); toast('↩️ Restored to Upcoming'); renderCur();
 }
 
 // ===================================================
@@ -3487,7 +3612,7 @@ function delDiscount(shId,id){
 // INVENTORY TRANSFERS (Change 1) — move packed stock between shows.
 // NOT a sale; never touches day counts, payments, revenue, or units-sold.
 // ===================================================
-function transferableShows(){ return (S.shows||[]).filter(s=>s.status==='active'||s.status==='planned'); }
+function transferableShows(){ return (S.shows||[]).filter(s=>(s.status==='active'||s.status==='planned')&&!isPassed(s)); } // no shipping stock to a show we are not working
 function openTransferModal(presetFromId){
   const shows=transferableShows();
   if(shows.length<2){ toast('Need 2+ active/planned shows to transfer between'); return; }
@@ -3692,9 +3817,15 @@ function rShow(){
   if(!curShow)return;
   const sh=S.shows.find(s=>s.id===curShow);if(!sh){go('shows');return;}
   const t=calcShow(sh);
-  const bdgTxt=sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ COMPLETED':'📅 PLANNED';
+  const _pd=isPassed(sh);
+  const bdgTxt=_pd?'🚫 PASSED / NOT DOING':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ COMPLETED':'📅 PLANNED');
   const dateStr=sh.dates?sh.dates.join(' → '):'';
-  const actBtn=sh.status==='planned'?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>`:'';
+  // Packing inventory into a show we are not working would be a real-world
+  // mistake, so the action button is replaced by Restore while it is passed.
+  const actBtn=_pd?`<button class="btn btn-ghost btn-full" style="margin-bottom:12px;border-color:var(--goldbd);color:var(--gold)" onclick="restoreShowPassed('${sh.id}')">↩️ Restore to Upcoming</button>`
+    :(sh.status==='planned'?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>`:'');
+  const passBtn=(sh.status==='completed'||sh.status==='active'||_pd)?''
+    :`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(255,165,0,0.45);color:#FFA500" onclick="openMarkPassed('${sh.id}')">🚫 Mark Passed / Not Doing</button>`;
   const dtabs=sh.days.map((d,i)=>{const ok=d.morningCount&&d.eveningCount&&calcPmt(d.payments)>0;return`<button class="dtab ${i===curDay?'on':''} ${ok&&i!==curDay?'done':''}" onclick="go('show','${sh.id}',${i})">${d.date}${ok?'✓':''}</button>`;}).join('');
 
   pg('show').innerHTML=`
@@ -3729,8 +3860,10 @@ function rShow(){
     <button class="btn btn-xs btn-ghost" style="width:100%;margin-top:8px" onclick="openDiscountModal('${sh.id}')">+ Log Discount / Freebie / Promo</button>
     ${(sh.discounts||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">${[...(sh.discounts||[])].slice().reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0"><span style="color:var(--muted);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.note||'(no note)'} <span style="opacity:.6">${x.date||''}</span></span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--red);font-weight:700">-${fmt(x.amount)}</span><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delDiscount('${sh.id}','${x.id}')">✕</span></span></div>`).join('')}</div>`:''}
   </div>
+  ${_pd?`<div class="wb gold" style="margin-bottom:12px">🚫 <strong>Passed / Not Doing.</strong> ${_esc(passedReason(sh)||'No reason recorded')}${passedRevisit(sh)?`<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}${sh.passedAt?`<div style="font-weight:400;font-size:10px;margin-top:3px;color:var(--muted)">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}<div style="font-weight:400;font-size:11px;margin-top:5px;color:var(--muted)">Everything below is preserved history. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div></div>`:''}
   ${actBtn}
-  ${(sh.status==='active'||sh.status==='planned')?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock to/from Another Show</button>`:''}
+  ${passBtn}
+  ${(!_pd&&(sh.status==='active'||sh.status==='planned'))?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock to/from Another Show</button>`:''}
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
@@ -4878,7 +5011,7 @@ function openManageExpenses(){
 // CALENDAR EXPORT (ICS)
 // ===================================================
 function exportCalICS(){
-  const shows=S.shows.filter(sh=>sh.startDate);
+  const shows=S.shows.filter(sh=>sh.startDate&&!isPassed(sh)); // never put a passed show on the owner's phone calendar
   if(!shows.length){toast('No shows to export');return;}
   const CRLF='\r\n';
   let ics='BEGIN:VCALENDAR'+CRLF+'VERSION:2.0'+CRLF+'PRODID:-//Best Solution//Show Calendar//EN'+CRLF+'CALSCALE:GREGORIAN'+CRLF+'METHOD:PUBLISH'+CRLF;
@@ -4934,7 +5067,9 @@ function rCalendar(){
   const todayStr=_todayKey();
   const mKey=y+'-'+String(m+1).padStart(2,'0');
   const dayMap={};
-  S.shows.forEach(sh=>{getShowDates(sh).forEach(ds=>{(dayMap[ds]=dayMap[ds]||[]).push(sh);});});
+  // Passed shows are off the calendar entirely — the grid answers "where do I
+  // have to be", and we are not going to these.
+  S.shows.filter(sh=>!isPassed(sh)).forEach(sh=>{getShowDates(sh).forEach(ds=>{(dayMap[ds]=dayMap[ds]||[]).push(sh);});});
   let monthDays=0;
   Object.keys(dayMap).forEach(ds=>{if(ds.substring(0,7)===mKey)monthDays++;});
   let h=`<div class="cal-hdr"><button class="cal-nav-btn" onclick="calShift(-1)">&lsaquo;</button><div class="cal-title">${MN[m]} ${y}</div><button class="cal-nav-btn" onclick="calShift(1)">&rsaquo;</button></div>`;
@@ -5386,6 +5521,7 @@ function rSettings(){
   pg('settings').innerHTML=`
   <div class="sec-title" style="margin-bottom:12px">⚙️ Settings</div>
   ${cloudCard}
+  ${pkgSettingsCard()}
   ${bxSettingsCard()}
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TAX & FEES</div>
   <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
@@ -7950,6 +8086,426 @@ function bxSettingsCard(){
   '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 ADMINISTRATIVE — FULL DATA EXPORT</div>'+
   '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Exports every record from this device and the cloud: shows, sales, inventory, adjustments, expenses, booth payments, reps, product debt, supplies and notes. Includes the effective-date COGS schedule, a diagnostic report, and a read-only reconciliation preview of this device against the cloud. Changes nothing.</div>'+
   '<button class="btn btn-gold btn-full" onclick="bxRun()">📦 Export Complete Business Data</button>'+
+  '</div>';
+}
+
+/* ======================================================================
+   APPLY SHOW UPDATE PACKAGE  (pkg*)
+   ----------------------------------------------------------------------
+   A reviewed batch of show changes, prepared off-device as a JSON file and
+   applied by the owner from inside the app, while signed in as himself.
+
+   WHY IT EXISTS. Typing a dozen booth costs, payment dates and mileage
+   figures by thumb on a phone is how transcription errors get into the
+   books. But nobody may write to this data except the owner: the row is
+   guarded by RLS on user_id, and the only key in this file is the
+   publishable anon key. So the package is the reviewed content, and the
+   owner is still the one who performs the write.
+
+   WHAT IT DOES NOT DO, and will not be extended to do:
+     - It does not ask for, store, transmit or read a password. It has no
+       auth code of its own at all. It reuses whatever session the app
+       already established through the normal Sign In screen.
+     - It does not talk to Supabase directly. It mutates S and calls
+       saveS(), which is the same path a tap on any other button takes:
+       localStorage first, then cloudQueuePush() under the owner's own
+       session. No service-role key, no RLS bypass, no second client.
+     - It never deletes a show. The only removal-shaped thing it can do is
+       set the Passed / Not Doing state, which is reversible and keeps the
+       whole record.
+
+   SAFETY MODEL, in the order the guards fire:
+     1. Format + version gate. An unrecognised file is rejected outright.
+     2. Idempotency gate. Every package carries a packageId. Once applied,
+        it is recorded in S._pkgApplied and a second apply is refused. This
+        is what makes a double-tap, a re-import of the same file, or a
+        replay after a cloud adoption harmless.
+     3. Per-operation idempotency, which is the real protection, because a
+        packageId can be missing from an adopted cloud document exactly the
+        way a migration marker was in the 2026-08-20 replay. So each op is
+        independently self-checking: a create becomes a match when the show
+        already exists, a payment is skipped when an equal one is already
+        on the record, and marking an already-passed show is a no-op.
+     4. Dry run. Every op is applied to a DEEP CLONE of the state and
+        verified there. If any op fails verification, nothing is committed.
+     5. One explicit confirmation from the owner, after a preview that
+        shows before and proposed values for every field that changes.
+
+   MATCHING. Show identity is normalized name + startDate, using the same
+   mrgNormName() the replay guard uses, so an em dash typed one way and
+   pasted another are the same show. A name-only match is accepted when it
+   is unique, but it is reported as a DATE DRIFT warning with both dates
+   visible, because later migrations legitimately move seeded dates. Two or
+   more candidates is never resolved by guessing: the op is blocked and
+   listed as ambiguous for the owner to sort out by hand.
+   ====================================================================== */
+const PKG_FORMAT='bs-show-update-package';
+const PKG_VERSION=1;
+
+function pkgAppliedMap(st){
+  const s=st||S;
+  if(!s._pkgApplied||typeof s._pkgApplied!=='object')s._pkgApplied={};
+  return s._pkgApplied;
+}
+function pkgIsApplied(id,st){ return !!pkgAppliedMap(st)[id]; }
+function pkgDeep(o){ return o==null?o:JSON.parse(JSON.stringify(o)); }
+function pkgNum(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
+function pkgNorm(v){ return mrgNormName(v); }
+// Same-payment test as the product-debt ledger uses: a payment is the same
+// payment when it is the same money on the same day. Note text is deliberately
+// NOT part of it — re-wording a note must not let a duplicate through.
+function pkgSamePayment(a,b){
+  return String((a&&a.date)||'')===String((b&&b.date)||'') &&
+         Math.abs(pkgNum(a&&a.amount)-pkgNum(b&&b.amount))<0.005;
+}
+
+/* ---- Candidate resolution. Returns the decision AND the evidence for it,
+   so the preview can show the owner why a record was chosen. ---- */
+function pkgResolve(st,sel){
+  const shows=(st&&st.shows)||[];
+  const wantName=pkgNorm(sel&&sel.name);
+  const wantDate=String((sel&&sel.startDate)||'').trim();
+  const loc=pkgNorm(sel&&sel.location);
+  const contains=((sel&&sel.nameContains)||[]).map(pkgNorm).filter(Boolean);
+  const locOk=sh=>!loc||pkgNorm(sh.location).indexOf(loc)>=0;
+
+  if(contains.length){
+    const hits=shows.filter(sh=>{ const n=pkgNorm(sh.name);
+      return contains.some(c=>n.indexOf(c)>=0)&&locOk(sh); });
+    return {mode:'contains',hits:hits,how:'name contains one of: '+contains.join(', ')+(loc?(' · location contains "'+loc+'"'):'')};
+  }
+  const exact=shows.filter(sh=>pkgNorm(sh.name)===wantName&&String(sh.startDate||'').trim()===wantDate&&locOk(sh));
+  if(exact.length===1)return {mode:'exact',hits:exact,how:'name + start date'};
+  if(exact.length>1)return {mode:'ambiguous',hits:exact,how:'more than one record with this name AND date'};
+  const byName=shows.filter(sh=>pkgNorm(sh.name)===wantName&&locOk(sh));
+  if(byName.length===1)return {mode:'name-drift',hits:byName,how:'name only — stored date '+(byName[0].startDate||'(none)')+' differs from the package date '+(wantDate||'(none)')};
+  if(byName.length>1)return {mode:'ambiguous',hits:byName,how:'more than one record with this name'};
+  return {mode:'none',hits:[],how:'no record matched'};
+}
+
+/* ---- Build the plan. READ ONLY. Touches nothing, allocates no ids, and is
+   safe to run as many times as the owner likes. ---- */
+function pkgPlan(pkg,st){
+  const state=st||S;
+  // Counters are initialised HERE, not at the bottom, because several gates
+  // below return early. A caller reading out.changeCount after a rejection must
+  // get 0, never undefined — undefined fails an === 0 test and would make a
+  // clean verification look like a failure.
+  const out={ok:false,errors:[],warnings:[],ops:[],pkg:pkg,changeCount:0,createCount:0,blockedCount:0};
+  if(!pkg||typeof pkg!=='object'){out.errors.push('That file is not a JSON object.');return out;}
+  if(pkg.format!==PKG_FORMAT){out.errors.push('Wrong file type. Expected format "'+PKG_FORMAT+'", got "'+(pkg.format||'(missing)')+'".');return out;}
+  if(pkgNum(pkg.version)!==PKG_VERSION){out.errors.push('This app understands package version '+PKG_VERSION+'; this file is version '+(pkg.version==null?'(missing)':pkg.version)+'.');return out;}
+  if(!pkg.packageId||typeof pkg.packageId!=='string'){out.errors.push('The package has no packageId, so it cannot be protected against being applied twice.');return out;}
+  if(!Array.isArray(pkg.operations)||!pkg.operations.length){out.errors.push('The package contains no operations.');return out;}
+  const prior=pkgAppliedMap(state)[pkg.packageId];
+  if(prior){out.errors.push('This package was already applied on '+String(prior.appliedAt||'').replace('T',' ').slice(0,16)+'. Applying it again is blocked.');return out;}
+
+  pkg.operations.forEach((op,i)=>{
+    const tag='#'+(i+1)+' '+((op&&op.label)||(op&&op.op)||'operation');
+    const rec={idx:i,tag:tag,op:(op&&op.op)||'',label:(op&&op.label)||'',action:'',target:null,changes:[],notes:[],blocked:false};
+    if(!op||typeof op!=='object'){rec.blocked=true;rec.notes.push('Not an object.');out.ops.push(rec);return;}
+
+    if(op.op==='upsertShow'){
+      const sel=op.match||{name:(op.show||{}).name,startDate:(op.show||{}).startDate};
+      const r=pkgResolve(state,sel);
+      rec.how=r.how;
+      if(r.mode==='ambiguous'){
+        rec.blocked=true;
+        rec.notes.push('AMBIGUOUS: '+r.how+'. Matched: '+r.hits.map(h=>h.name+' ('+(h.startDate||'no date')+')').join(', ')+'. Nothing will be changed — resolve this by hand.');
+        out.ops.push(rec);return;
+      }
+      if(r.mode==='none'){
+        rec.action='create';
+        rec.target=null;
+        Object.keys(op.show||{}).forEach(k=>rec.changes.push({field:k,before:'(new record)',after:pkgFmtVal((op.show||{})[k])}));
+        (op.boothPayments||[]).forEach(p=>rec.changes.push({field:'boothPayment',before:'(none)',after:pkgFmtVal(p)}));
+        out.ops.push(rec);return;
+      }
+      const sh=r.hits[0];
+      rec.action='update';
+      rec.target=sh;
+      if(r.mode==='name-drift')rec.notes.push('DATE DRIFT: '+r.how+'. Matched on name alone. Check this is the right record before applying.');
+      // Field changes: only fields the package names, and only when different.
+      Object.keys(op.show||{}).forEach(k=>{
+        if(k==='name'&&op.keepExistingName)return;
+        const before=sh[k], after=(op.show||{})[k];
+        if(JSON.stringify(before)===JSON.stringify(after))return;
+        rec.changes.push({field:k,before:pkgFmtVal(before),after:pkgFmtVal(after)});
+      });
+      (op.boothPayments||[]).forEach(p=>{
+        const dup=(sh.boothPayments||[]).find(x=>pkgSamePayment(x,p));
+        if(dup)rec.notes.push('DUPLICATE PAYMENT SKIPPED: '+fmt(pkgNum(p.amount))+' on '+(p.date||'no date')+' is already on this record. It will not be added again.');
+        else rec.changes.push({field:'boothPayment',before:'(none)',after:pkgFmtVal(p)});
+      });
+      if(!rec.changes.length)rec.notes.push('Already matches the package. Nothing to change.');
+      out.ops.push(rec);return;
+    }
+
+    if(op.op==='markPassed'){
+      const r=pkgResolve(state,op.match||{});
+      rec.how=r.how;
+      if(r.mode==='ambiguous'){rec.blocked=true;rec.notes.push('AMBIGUOUS: '+r.how+'. Nothing will be changed.');out.ops.push(rec);return;}
+      if(!r.hits.length){rec.action='none';rec.notes.push('UNMATCHED: '+r.how+'. Nothing to do — this is not an error if the show was never on this device.');out.ops.push(rec);return;}
+      if(op.expectMax!=null&&r.hits.length>pkgNum(op.expectMax)){
+        rec.blocked=true;
+        rec.notes.push('TOO MANY MATCHES: the package expected at most '+op.expectMax+' but '+r.hits.length+' matched ('+r.hits.map(h=>h.name).join(', ')+'). Blocked so a broad name rule cannot sweep up an unrelated show.');
+        out.ops.push(rec);return;
+      }
+      rec.action='markPassed';
+      rec.targets=r.hits;
+      r.hits.forEach(sh=>{
+        if(sh.status==='completed'||sh.status==='active'){
+          rec.notes.push('SKIPPED: "'+sh.name+'" is '+sh.status+'. A show that was worked is history and will not be marked passed.');
+          return;
+        }
+        if(isPassed(sh)){rec.notes.push('ALREADY PASSED: "'+sh.name+'" — left exactly as it is.');return;}
+        rec.changes.push({field:'passed · '+sh.name+' ('+(sh.startDate||'no date')+')',
+          before:'in Upcoming'+(sh.confirmed===false?' / Pending':''),
+          after:'PASSED — '+(op.reason||'')+(op.revisit?(' · revisit '+op.revisit):'')});
+      });
+      if(!rec.changes.length&&!rec.notes.length)rec.notes.push('Nothing to change.');
+      out.ops.push(rec);return;
+    }
+
+    rec.blocked=true;
+    rec.notes.push('Unknown operation "'+op.op+'". This app only understands upsertShow and markPassed.');
+    out.ops.push(rec);
+  });
+
+  out.blockedCount=out.ops.filter(o=>o.blocked).length;
+  out.changeCount=out.ops.reduce((t,o)=>t+o.changes.length,0);
+  out.createCount=out.ops.filter(o=>o.action==='create').length;
+  out.ok=out.errors.length===0&&out.blockedCount===0;
+  if(!out.changeCount&&out.ok)out.warnings.push('Nothing in this package would change anything. It is safe to apply, but pointless.');
+  return out;
+}
+function pkgFmtVal(v){
+  if(v==null||v==='')return '(empty)';
+  if(typeof v==='object')return JSON.stringify(v);
+  const s=String(v);
+  return s.length>160?(s.slice(0,157)+'…'):s;
+}
+
+/* ---- Execute a plan against a state object. Pure with respect to S: the
+   caller decides what state to hand it, which is what makes the dry run on a
+   clone possible. Returns per-op results for the verification report. ---- */
+function pkgExecute(pkg,plan,state){
+  const res=[];
+  plan.ops.forEach(rec=>{
+    const op=pkg.operations[rec.idx];
+    if(rec.blocked){res.push({tag:rec.tag,status:'blocked',detail:rec.notes.join(' ')});return;}
+    if(op.op==='upsertShow'){
+      const r=pkgResolve(state,op.match||{name:(op.show||{}).name,startDate:(op.show||{}).startDate});
+      let sh;
+      if(!r.hits.length){
+        // Create. buildPlannedShow gives the standard record shape (days,
+        // dates, id); the package's own fields are then layered on top.
+        const base=op.show||{};
+        sh=buildPlannedShow({
+          name:base.name,location:base.location||'',startDate:base.startDate,
+          numDays:pkgNum(base.numDays)||1,boothCost:pkgNum(base.boothCost),
+          miles:pkgNum(base.miles),boothPayments:[]
+        });
+        Object.keys(base).forEach(k=>{ if(k==='numDays')return; sh[k]=base[k]; });
+        state.shows=state.shows||[];
+        // Last-line duplicate refusal. If anything at all already carries this
+        // identity we do not add a second row, no matter what the plan said.
+        const clash=(state.shows||[]).find(x=>pkgNorm(x.name)===pkgNorm(sh.name)&&String(x.startDate||'')===String(sh.startDate||''));
+        if(clash){res.push({tag:rec.tag,status:'skipped',detail:'A record with this name and date already exists. Not creating a duplicate.'});return;}
+        state.shows.push(sh);
+        res.push({tag:rec.tag,status:'created',id:sh.id,detail:sh.name+' ('+(sh.startDate||'no date')+')'});
+      }else{
+        sh=r.hits[0];
+        const base=op.show||{};
+        Object.keys(base).forEach(k=>{ if(k==='name'&&op.keepExistingName)return; sh[k]=base[k]; });
+        res.push({tag:rec.tag,status:'updated',id:sh.id,detail:sh.name+' ('+(sh.startDate||'no date')+')'});
+      }
+      sh.boothPayments=sh.boothPayments||[];
+      (op.boothPayments||[]).forEach(p=>{
+        if((sh.boothPayments||[]).some(x=>pkgSamePayment(x,p)))return; // never twice
+        sh.boothPayments.push({amount:pkgNum(p.amount),date:p.date||'',note:p.note||''});
+      });
+      return;
+    }
+    if(op.op==='markPassed'){
+      const r=pkgResolve(state,op.match||{});
+      let n=0;
+      r.hits.forEach(sh=>{
+        if(sh.status==='completed'||sh.status==='active')return;
+        if(isPassed(sh))return;
+        if(pndMarkPassed(sh,op.reason,op.revisit,pkg.packageId))n++;
+      });
+      res.push({tag:rec.tag,status:n?'passed':'no-op',detail:n+' record'+(n===1?'':'s')+' marked Passed / Not Doing'});
+      return;
+    }
+    res.push({tag:rec.tag,status:'skipped',detail:'unknown operation'});
+  });
+  return res;
+}
+
+// ---- UI ----
+let _pkgLoaded=null, _pkgPlan=null;
+function openShowPackage(){
+  _pkgLoaded=null;_pkgPlan=null;
+  mOpen(`<div class="mh"><div class="mt">📦 Apply Show Update Package</div><button class="mx" onclick="mClose()">&times;</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">A reviewed batch of show changes, prepared as a JSON file. Loading one changes nothing — you get a full before/after preview first, and nothing is written until you tap Apply.</div>
+  ${(typeof _cloudUser==='undefined'||!_cloudUser)?`<div class="wb red" style="margin-bottom:10px;font-size:12px">☁️ <strong>Not signed in.</strong> You can still apply this to THIS DEVICE, but it will not reach the cloud until you sign in. Best to sign in first (Settings → Sign In) so the change syncs everywhere.</div>`:`<div class="wb green" style="margin-bottom:10px;font-size:12px">☁️ Signed in. Changes save to this device and sync to the cloud under your own login.</div>`}
+  <div class="fg"><label class="fl">Paste the package JSON</label>
+    <textarea class="fi" id="pkg_text" style="min-height:90px;font-family:monospace;font-size:12px" placeholder='{"format":"bs-show-update-package","version":1,...}'></textarea></div>
+  <div class="g2" style="gap:8px">
+    <button class="btn btn-ghost btn-full" onclick="pkgPickFile()">📂 Choose File</button>
+    <button class="btn btn-gold btn-full" onclick="pkgPreviewFromText()">🔍 Preview</button>
+  </div>`);
+}
+function pkgPickFile(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=()=>{
+    const f=inp.files&&inp.files[0]; if(!f)return;
+    const rdr=new FileReader();
+    rdr.onload=()=>{ const el=$$('pkg_text'); if(el)el.value=rdr.result; pkgPreviewFromText(); };
+    rdr.readAsText(f);
+  };
+  inp.click();
+}
+function pkgPreviewFromText(){
+  const raw=($$('pkg_text')&&$$('pkg_text').value||'').trim();
+  if(!raw){toast('Paste a package or choose a file first.');return;}
+  let pkg;
+  try{ pkg=JSON.parse(raw); }catch(e){ toast('That is not valid JSON: '+e.message); return; }
+  _pkgLoaded=pkg;
+  _pkgPlan=pkgPlan(pkg,S);
+  pkgRenderPreview();
+}
+function pkgRenderPreview(){
+  const p=_pkgPlan,pkg=_pkgLoaded;
+  if(!p){toast('Nothing loaded');return;}
+  const row=(l,v)=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">${_esc(l)}</span><span style="font-weight:700;text-align:right;max-width:62%">${_esc(v)}</span></div>`;
+  let h=`<div class="mh"><div class="mt">📦 Preview — nothing written yet</div><button class="mx" onclick="mClose()">&times;</button></div>`;
+  h+=`<div class="card" style="margin-bottom:10px">
+    ${row('Package',pkg.packageId||'(none)')}
+    ${row('Description',pkg.description||'—')}
+    ${row('Operations',String((pkg.operations||[]).length))}
+    ${row('Field changes',String(p.changeCount||0))}
+    ${row('New records',String(p.createCount||0))}
+    ${row('Blocked',String(p.blockedCount||0))}
+  </div>`;
+  if(p.errors.length)h+=`<div class="wb red" style="margin-bottom:10px;font-size:12px">${p.errors.map(_esc).join('<br>')}</div>`;
+  if(p.warnings.length)h+=`<div class="wb gold" style="margin-bottom:10px;font-size:12px">${p.warnings.map(_esc).join('<br>')}</div>`;
+  (p.ops||[]).forEach(o=>{
+    const badge=o.blocked?'<span style="color:var(--red);font-weight:900">⛔ BLOCKED</span>'
+      :o.action==='create'?'<span style="color:var(--green);font-weight:900">➕ CREATE</span>'
+      :o.action==='markPassed'?'<span style="color:#FFA500;font-weight:900">🚫 MARK PASSED</span>'
+      :o.action==='update'?'<span style="color:var(--gold);font-weight:900">✏️ UPDATE</span>'
+      :'<span style="color:var(--muted);font-weight:900">— NO CHANGE</span>';
+    h+=`<div class="card" style="margin-bottom:8px${o.blocked?';border-color:var(--redbd)':''}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+        <div style="font-size:12px;font-weight:800">${_esc(o.label||o.tag)}</div>${badge}
+      </div>
+      ${o.target?`<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Matched: <strong style="color:var(--text)">${_esc(o.target.name)}</strong> · ${_esc(o.target.startDate||'no date')} · id ${_esc(o.target.id)}</div>`:''}
+      ${o.how?`<div style="font-size:10px;color:var(--muted);margin-bottom:4px">Matched by ${_esc(o.how)}</div>`:''}
+      ${o.changes.length?`<div style="border-top:1px solid var(--border);padding-top:5px">${o.changes.map(c=>`<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)"><div style="color:var(--gold);font-weight:700">${_esc(c.field)}</div><div style="color:var(--muted)">before: ${_esc(c.before)}</div><div style="color:var(--green)">after: ${_esc(c.after)}</div></div>`).join('')}</div>`:''}
+      ${o.notes.length?`<div style="font-size:11px;color:#ffc266;margin-top:5px">${o.notes.map(_esc).join('<br>')}</div>`:''}
+    </div>`;
+  });
+  h+=`<div class="wb gold" style="margin:10px 0;font-size:12px">💾 <strong>Download a backup first.</strong> It saves everything on this device as a file you keep. If anything looks wrong afterwards, Settings → Restore from File puts it all back.</div>
+  <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="downloadBackup()">💾 Download Backup File (before change)</button>`;
+  if(p.ok&&p.changeCount>0){
+    h+=`<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;margin:10px 0;cursor:pointer">
+      <input type="checkbox" id="pkg_ack" style="margin-top:2px;width:18px;height:18px">
+      <span>I have read the changes above and I want to apply them to my data.</span></label>
+    <button class="btn btn-gold btn-full" onclick="pkgApply()">✅ Apply ${p.changeCount} Change${p.changeCount===1?'':'s'}</button>`;
+  }else{
+    h+=`<div class="wb red" style="font-size:12px">Apply is disabled. ${p.blockedCount?'Some operations are blocked — resolve them and rebuild the package.':(p.errors.length?'The package was rejected.':'There is nothing to change.')}</div>`;
+  }
+  h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`;
+  mOpen(h);
+}
+function pkgApply(){
+  const p=_pkgPlan,pkg=_pkgLoaded;
+  if(!p||!pkg||!p.ok){toast('Nothing applyable is loaded.');return;}
+  const ack=$$('pkg_ack');
+  if(!ack||!ack.checked){toast('Tick the confirmation box first.');return;}
+  if(pkgIsApplied(pkg.packageId)){toast('Already applied — blocked.');return;}
+
+  // ---- Dry run on a clone. If this throws or verifies badly, the real state
+  // was never touched, because nothing below has run against it yet.
+  let dry;
+  try{
+    dry=pkgDeep(S);
+    const dryPlan=pkgPlan(pkg,dry);
+    if(!dryPlan.ok){toast('Dry run rejected the package. Nothing was changed.');return;}
+    pkgExecute(pkg,dryPlan,dry);
+    const after=pkgPlan(pkg,dry);
+    // After applying, re-planning must find nothing left to do. If it does not,
+    // an operation did not land, and we refuse to touch the real state.
+    if(after.changeCount>0){
+      toast('Dry run did not settle ('+after.changeCount+' changes still pending). Nothing was changed.');
+      return;
+    }
+  }catch(e){ toast('Dry run failed: '+e.message+'. Nothing was changed.'); return; }
+
+  // ---- Commit for real.
+  const before={shows:(S.shows||[]).length,days:(S.shows||[]).reduce((t,sh)=>t+((sh.days||[]).length),0)};
+  let results;
+  try{ results=pkgExecute(pkg,p,S); }
+  catch(e){ toast('Apply failed: '+e.message); return; }
+  pkgAppliedMap(S)[pkg.packageId]={appliedAt:new Date().toISOString(),operations:(pkg.operations||[]).length,appVersion:(typeof APP_VERSION!=='undefined'?APP_VERSION:'')};
+  saveS(); // localStorage + cloudQueuePush under the owner's own session
+
+  // ---- Verify against the COMMITTED state. The idempotency marker is stripped
+  // from a throwaway clone first, otherwise pkgPlan short-circuits on "already
+  // applied" and tells us nothing about whether the operations actually landed.
+  const probe=pkgDeep(S);
+  if(probe._pkgApplied)delete probe._pkgApplied[pkg.packageId];
+  const verify=pkgPlan(pkg,probe);
+  const after={shows:(S.shows||[]).length,days:(S.shows||[]).reduce((t,sh)=>t+((sh.days||[]).length),0)};
+  pkgRenderReport(pkg,results,before,after,verify);
+}
+let _pkgReport=null;
+function pkgDownloadReport(){
+  if(!_pkgReport){toast('No report to save.');return;}
+  dlFile('show-package-report-'+_stamp()+'.json',JSON.stringify(_pkgReport,null,2),'application/json');
+}
+function pkgRenderReport(pkg,results,before,after,verify){
+  // Settled means: re-planning the same package against the committed state
+  // finds nothing left to do and nothing blocked. That is the proof every
+  // operation actually landed, not just that no error was thrown.
+  const settled=!!verify&&verify.changeCount===0&&verify.blockedCount===0&&verify.errors.length===0;
+  const row=(l,v)=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">${_esc(l)}</span><span style="font-weight:700">${_esc(v)}</span></div>`;
+  const lines=results.map(r=>`<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><strong style="color:${r.status==='blocked'?'var(--red)':r.status==='created'?'var(--green)':'var(--gold)'}">${_esc(r.status.toUpperCase())}</strong> · ${_esc(r.tag)}<div style="color:var(--muted)">${_esc(r.detail||'')}</div></div>`).join('');
+  const cloud=(typeof _cloudUser!=='undefined'&&_cloudUser)
+    ?'Queued to the cloud under your login. Watch the sync dot in the header go green.'
+    :'NOT sent to the cloud — you are not signed in. Sign in and the app will push it.';
+  const report={
+    package:pkg.packageId,appliedAt:new Date().toISOString(),
+    appVersion:(typeof APP_VERSION!=='undefined'?APP_VERSION:''),
+    before:before,after:after,results:results,
+    reapplyBlocked:!!pkgIsApplied(pkg.packageId),
+    settled:settled,signedIn:!!(typeof _cloudUser!=='undefined'&&_cloudUser),
+    verifyRemaining:(verify&&verify.changeCount)||0,
+    verifyBlocked:(verify&&verify.blockedCount)||0
+  };
+  _pkgReport=report;
+  mOpen(`<div class="mh"><div class="mt">${settled?'✅':'⚠️'} Applied — verification report</div><button class="mx" onclick="mClose()">&times;</button></div>
+  <div class="card" style="margin-bottom:10px">
+    ${row('Package',pkg.packageId)}
+    ${row('Shows before → after',before.shows+' → '+after.shows)}
+    ${row('Show days before → after',before.days+' → '+after.days)}
+    ${row('Re-apply blocked',report.reapplyBlocked?'yes':'NO — investigate')}
+    ${row('Re-plan settled',settled?'yes — nothing left to do':'NO — '+report.verifyRemaining+' change(s) still pending, '+report.verifyBlocked+' blocked')}
+    ${row('Saved to device','yes')}
+    ${row('Cloud',report.signedIn?'queued':'not signed in')}
+  </div>
+  <div class="card" style="margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">PER-OPERATION RESULT</div>${lines}</div>
+  <div class="wb ${settled?'green':'red'}" style="font-size:12px;margin-bottom:10px">☁️ ${_esc(cloud)}</div>
+  <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="pkgDownloadReport()">📄 Download Verification Report</button>
+  <button class="btn btn-gold btn-full" onclick="mClose();go('shows')">Done — view Shows</button>`);
+}
+function pkgSettingsCard(){
+  return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
+  '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 APPLY SHOW UPDATE PACKAGE</div>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Load a reviewed batch of show changes as a file instead of typing them in. Full before/after preview, one confirmation, a backup prompt, and a verification report. Saves through your own signed-in session — no password is ever asked for or stored.</div>'+
+  '<button class="btn btn-gold btn-full" onclick="openShowPackage()">📦 Apply Show Update Package</button>'+
   '</div>';
 }
 

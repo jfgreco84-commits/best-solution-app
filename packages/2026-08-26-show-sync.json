@@ -1,0 +1,102 @@
+{
+  "format": "bs-show-update-package",
+  "version": 1,
+  "packageId": "pkg_2026-08-26_show-sync_v1",
+  "createdAt": "2026-08-26",
+  "description": "Category 08 Master Show Sheet sync: The Last Fling, Mistletoe & Martinis, Party on the Pavement passed for 2026, Rustic Fox 2026 holiday series cancelled by organizer and replaced with the North Aurora Holiday Market.",
+  "source": "Category 08 Master Show Sheet, tab 'Show Master' (rows verified by Scout) + Nicole Kolosowski email 2026-08-10 + receipt 2165 / invoice 0006402",
+  "operations": [
+    {
+      "op": "upsertShow",
+      "label": "The Last Fling — booked and paid",
+      "match": { "name": "The Last Fling", "startDate": "2026-08-30" },
+      "show": {
+        "name": "The Last Fling",
+        "location": "Valley Ridge Golf Course, Antioch, IL",
+        "startDate": "2026-08-30",
+        "numDays": 1,
+        "boothCost": 68.00,
+        "miles": 33,
+        "confirmed": true,
+        "openTime": "12:00",
+        "closeTime": "16:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "THE LAST FLING - Sun Aug 30 2026. Customer hours 12:00pm-4:00pm. Setup 10:00am-12:00pm. Valley Ridge Golf Course, Antioch IL. Booth $68.00 PAID 2026-08-21 (payment method not documented on the Master Show Sheet - do not assume one; confirm and log it). Acceptance complete. Justin is working this show Sunday. Inventory was planned for Aug 26. ~33 mi each way from Waterford (66 mi round trip), about 45 minutes one way."
+      },
+      "boothPayments": [
+        { "amount": 68.00, "date": "2026-08-21", "note": "Booth paid in full. Payment method not documented on the Master Show Sheet." }
+      ]
+    },
+    {
+      "op": "upsertShow",
+      "label": "Mistletoe & Martinis — booked and paid",
+      "match": { "name": "Mistletoe & Martinis", "startDate": "2026-11-27" },
+      "show": {
+        "name": "Mistletoe & Martinis",
+        "location": "Countryside Banquets, Lakemoor, IL",
+        "startDate": "2026-11-27",
+        "numDays": 1,
+        "boothCost": 100.00,
+        "miles": 35,
+        "confirmed": true,
+        "openTime": "12:00",
+        "closeTime": "17:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "MISTLETOE & MARTINIS - Fri Nov 27 2026. Customer hours 12:00pm-5:00pm. Countryside Banquets, Lakemoor IL. Organizer contact: Therese / Chain O' Lakes. Booth $100.00 PAID BY PHONE 2026-08-25 (payment method not otherwise documented on the Master Show Sheet - do not assume one; confirm and log it). TO DO: retain the booth and load-in instructions, and file the receipt if one was issued. ~35 mi each way from Waterford (70 mi round trip), about 45 minutes one way."
+      },
+      "boothPayments": [
+        { "amount": 100.00, "date": "2026-08-25", "note": "Booth paid by phone. Payment method not otherwise documented on the Master Show Sheet." }
+      ]
+    },
+    {
+      "op": "markPassed",
+      "label": "Party on the Pavement — passed for 2026",
+      "match": { "name": "Party on the Pavement", "startDate": "2026-09-19" },
+      "expectMax": 1,
+      "reason": "Justin decided not to participate in 2026.",
+      "revisit": "2027 application cycle — Downtown Racine Corp, watch for the ~Aug 2027 deadline"
+    },
+    {
+      "op": "markPassed",
+      "label": "Rustic Fox 2026 holiday series — cancelled by organizer (Carol Stream + North Aurora)",
+      "match": {
+        "nameContains": [
+          "sip and sleigh",
+          "sip sleigh",
+          "sip and shop",
+          "sip shop",
+          "kris kringle"
+        ]
+      },
+      "expectMax": 6,
+      "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
+      "revisit": "2027 — ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
+    },
+    {
+      "op": "upsertShow",
+      "label": "The Rustic Fox Holiday Market (Holiday Weekend) — replacement, booked and paid",
+      "match": { "name": "The Rustic Fox Holiday Market (Holiday Weekend)", "startDate": "2026-11-07" },
+      "show": {
+        "name": "The Rustic Fox Holiday Market (Holiday Weekend)",
+        "location": "The Rustic Fox, 1790 Towne Center Drive, North Aurora, IL 60542",
+        "startDate": "2026-11-07",
+        "numDays": 1,
+        "boothCost": 100.00,
+        "confirmed": true,
+        "openTime": "09:00",
+        "closeTime": "15:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "THE RUSTIC FOX HOLIDAY MARKET (Holiday Weekend) - Sat Nov 07 2026. Customer hours 9:00am-3:00pm. Vendor arrival/setup 8:00am. Departure/teardown deadline 3:30pm. The Rustic Fox, 1790 Towne Center Drive, North Aurora IL 60542. Organizer: Nicole Kolosowski. Booth $100.00 PAID 2026-08-25 - receipt 2165, invoice 0006402. This is the ONLY 2026 Rustic Fox holiday pop-up market: per Nicole's Aug 10 2026 email there is no outdoor December pop-up and no Carol Stream holiday pop-ups in 2026. Mileage not on the Master Show Sheet - set it in Edit Show before relying on gas or IRS mileage figures."
+      },
+      "boothPayments": [
+        { "amount": 100.00, "date": "2026-08-25", "note": "Booth paid in full - receipt 2165, invoice 0006402" }
+      ]
+    }
+  ]
+}
