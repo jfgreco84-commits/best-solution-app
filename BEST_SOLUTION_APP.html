@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v33';
+const APP_VERSION='v34';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -8221,12 +8221,25 @@ function pkgResolve(st,sel){
   const locOk=sh=>!loc||pkgNorm(sh.location).indexOf(loc)>=0;
 
   if(contains.length){
+    // A startDate on a nameContains selector is a CONSTRAINT, not decoration.
+    // Without it a fragment like "last fling" reaches every year's instance of
+    // a recurring event; with it the selector names one occurrence. It stays
+    // optional because a cancellation sweep legitimately spans several dates.
+    const dateOk=sh=>!wantDate||String(sh.startDate||'').trim()===wantDate;
     const named=shows.filter(sh=>{ const n=pkgNorm(sh.name);
-      return contains.some(c=>n.indexOf(c)>=0)&&locOk(sh); });
+      return contains.some(c=>n.indexOf(c)>=0)&&locOk(sh)&&dateOk(sh); });
     const hits=named.filter(sh=>pkgHasEvidence(sh,evidence));
     const rejected=named.filter(sh=>!pkgHasEvidence(sh,evidence));
-    return {mode:'contains',hits:hits,rejected:rejected,
+    // Anything the fragment reached but a constraint threw out, so the preview
+    // can show it was considered and deliberately left alone.
+    const offDate=wantDate?shows.filter(sh=>{ const n=pkgNorm(sh.name);
+      return contains.some(c=>n.indexOf(c)>=0)&&locOk(sh)&&!dateOk(sh); }):[];
+    // No survivors is 'none', the same as every other selector reports, so a
+    // caller testing the mode string cannot mistake "nothing matched" for
+    // "something matched" and go looking for hits[0].
+    return {mode:hits.length?'contains':'none',hits:hits,rejected:rejected.concat(offDate),
       how:'name contains one of: '+contains.join(', ')+
+          (wantDate?(' · AND starts exactly '+wantDate):'')+
           (loc?(' · location contains "'+loc+'"'):'')+
           (evidence.length?(' · AND location/organizer contains one of: '+evidence.join(', ')):' · NO identifying evidence required')};
   }
@@ -8282,7 +8295,11 @@ function pkgPlan(pkg,st){
         out.ops.push(rec);return;
       }
       pkgNoteRejected(rec,r);
-      if(r.mode==='none'){
+      // Keyed on the hit COUNT, not on the mode string. A resolver that says
+      // "contains" while returning nothing would otherwise send this branch
+      // looking for hits[0] and crash on an undefined record — which is
+      // exactly what a wrong-date or wrong-venue decoy produces.
+      if(!r.hits.length){
         // Fail closed. If the name DID match records and only the evidence test
         // rejected them, creating a new row would quietly add a near-duplicate
         // beside a record the owner probably meant. Make them look instead.
@@ -8291,10 +8308,34 @@ function pkgPlan(pkg,st){
           rec.notes.push('BLOCKED: refusing to create a new record when '+r.rejected.length+' existing record(s) already carry this name. Either add the identifying evidence to the right record, or correct the package.');
           out.ops.push(rec);return;
         }
+        // Before creating anything, look for a record that is plainly the same
+        // real-world event under a drifted name. This is the guard the v1
+        // package needed and did not have.
+        const near=pkgNearDuplicates(state,(op.show||{}).name,(op.show||{}).startDate);
+        if(near.length){
+          rec.blocked=true;
+          rec.notes.push('BLOCKED — WOULD DUPLICATE: the board already holds '+near.length+' record(s) on '+((op.show||{}).startDate||'that date')+' whose name overlaps this one: '+
+            near.map(h=>'"'+h.name+'"'+(h.location?(' · '+h.location):'')).join(', ')+
+            '. Point this operation at the existing record with a nameContains + startDate match instead of creating a second one.');
+          out.ops.push(rec);return;
+        }
         rec.action='create';
         rec.target=null;
         Object.keys(op.show||{}).forEach(k=>rec.changes.push({field:k,before:'(new record)',after:pkgFmtVal((op.show||{})[k])}));
         (op.boothPayments||[]).forEach(p=>rec.changes.push({field:'boothPayment',before:'(none)',after:pkgFmtVal(p)}));
+        out.ops.push(rec);return;
+      }
+      // An upsert targets exactly ONE record. `ambiguous` above covers the
+      // name/date selectors, but a nameContains selector can legitimately
+      // return several and would previously have had hits[0] picked for it
+      // silently. Writing a package's fields into whichever record happened to
+      // sort first is never the right answer, so more than one candidate stops
+      // here too.
+      if(r.hits.length>1){
+        rec.blocked=true;
+        rec.notes.push('AMBIGUOUS: this update matched '+r.hits.length+' records ('+
+          r.hits.map(h=>h.name+' ('+(h.startDate||'no date')+')').join(', ')+
+          '). An update must name exactly one. Nothing will be changed — narrow the match with a start date or more specific evidence.');
         out.ops.push(rec);return;
       }
       const sh=r.hits[0];
@@ -8356,6 +8397,31 @@ function pkgPlan(pkg,st){
   if(!out.changeCount&&out.ok)out.warnings.push('Nothing in this package would change anything. It is safe to apply, but pointless.');
   return out;
 }
+/* NEAR-DUPLICATE DETECTION for creates.
+   The original last-line refusal compared normalized name + startDate exactly,
+   which is precisely the test that let the 2026-08-26 v1 package through: the
+   cloud held "The Last Fling Artisan Market" and the package named "The Last
+   Fling", so the names were unequal and it planned a second record on the same
+   day at the same venue.
+
+   Real-world show names drift — an organizer adds "Artisan Market", or drops
+   "Annual", or the sheet abbreviates. What does NOT drift is the date. So on
+   the same start date, one normalized name containing the other is treated as
+   the same event, and the create is refused rather than guessed at.
+
+   This is deliberately blunt. Two genuinely different shows on one date where
+   one name contains the other would be blocked too — and being told to look is
+   the right outcome there, because a silent duplicate in the books is far
+   worse than a stopped package. */
+function pkgNearDuplicates(state,name,startDate){
+  const want=pkgNorm(name), date=String(startDate||'').trim();
+  if(!want||!date)return [];
+  return ((state&&state.shows)||[]).filter(sh=>{
+    if(String(sh.startDate||'').trim()!==date)return false;
+    const n=pkgNorm(sh.name); if(!n)return false;
+    return n===want||n.indexOf(want)>=0||want.indexOf(n)>=0;
+  });
+}
 /* A record the name matched but the evidence test threw out. Reported by name
    and date on every operation, because "we considered this show and
    deliberately left it alone" is information the owner needs in order to trust
@@ -8395,10 +8461,12 @@ function pkgExecute(pkg,plan,state){
         });
         Object.keys(base).forEach(k=>{ if(k==='numDays')return; sh[k]=base[k]; });
         state.shows=state.shows||[];
-        // Last-line duplicate refusal. If anything at all already carries this
-        // identity we do not add a second row, no matter what the plan said.
-        const clash=(state.shows||[]).find(x=>pkgNorm(x.name)===pkgNorm(sh.name)&&String(x.startDate||'')===String(sh.startDate||''));
-        if(clash){res.push({tag:rec.tag,status:'skipped',detail:'A record with this name and date already exists. Not creating a duplicate.'});return;}
+        // Last-line duplicate refusal, and it now uses the same near-duplicate
+        // test the plan does rather than exact name equality — exact equality
+        // is what let the v1 "The Last Fling" vs "The Last Fling Artisan
+        // Market" duplicate through.
+        const clash=pkgNearDuplicates(state,sh.name,sh.startDate);
+        if(clash.length){res.push({tag:rec.tag,status:'skipped',detail:'Refused to create a duplicate: '+clash.map(x=>'"'+x.name+'"').join(', ')+' already exists on '+(sh.startDate||'that date')+'.'});return;}
         state.shows.push(sh);
         res.push({tag:rec.tag,status:'created',id:sh.id,detail:sh.name+' ('+(sh.startDate||'no date')+')'});
       }else{
@@ -8685,6 +8753,14 @@ function pkgVerifyCloud(pkg,cloudDoc,wwwBefore){
       const r=pkgResolve(probe,op.match||{name:(op.show||{}).name,startDate:(op.show||{}).startDate});
       const sh=r.hits[0];
       add(tag+' — record in cloud',!!sh,sh?(sh.name+' ('+(sh.startDate||'no date')+')'):'not found in the cloud copy');
+      // EXACTLY one. A second record is the failure mode that started all this:
+      // an over-narrow selector creating a near-duplicate beside the real show.
+      if(sh){
+        const dupes=pkgNearDuplicates(probe,sh.name,sh.startDate);
+        add(tag+' — no duplicate in cloud',dupes.length===1,
+          dupes.length===1?'exactly one record on '+(sh.startDate||'that date'):
+          (dupes.length+' overlapping records on '+(sh.startDate||'that date')+': '+dupes.map(x=>'"'+x.name+'"').join(', ')));
+      }
       if(sh){
         const want=(op.boothPayments||[]);
         const allThere=want.every(pmt=>(sh.boothPayments||[]).some(x=>pkgSamePayment(x,pmt)));
