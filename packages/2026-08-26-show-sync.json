@@ -3,8 +3,9 @@
   "version": 1,
   "packageId": "pkg_2026-08-26_show-sync_v1",
   "createdAt": "2026-08-26",
-  "description": "Category 08 Master Show Sheet sync: The Last Fling, Mistletoe & Martinis, Party on the Pavement passed for 2026, Rustic Fox 2026 holiday series cancelled by organizer and replaced with the North Aurora Holiday Market.",
+  "description": "Category 08 Master Show Sheet sync: The Last Fling, Mistletoe & Martinis, Party on the Pavement passed for 2026, Rustic Fox 2026 holiday series cancelled by organizer (split North Aurora / Carol Stream) and replaced with the North Aurora Holiday Market.",
   "source": "Category 08 Master Show Sheet, tab 'Show Master' (rows verified by Scout) + Nicole Kolosowski email 2026-08-10 + receipt 2165 / invoice 0006402",
+  "matchingNote": "Every markPassed operation carries requiredEvidenceAny. A show name alone does not prove whose show it is, so each candidate must ALSO carry the organizer or town in a STRUCTURED field: location or organizer. Notes are deliberately not searched, because prose negates -- a note reading 'nothing to do with The Rustic Fox' would satisfy a substring test as well as one reading 'run by The Rustic Fox'. A record whose name matches but whose location/organizer does not identify it is excluded and reported by name in the preview.",
   "operations": [
     {
       "op": "upsertShow",
@@ -55,14 +56,19 @@
     {
       "op": "markPassed",
       "label": "Party on the Pavement — passed for 2026",
-      "match": { "name": "Party on the Pavement", "startDate": "2026-09-19" },
+      "match": {
+        "name": "Party on the Pavement",
+        "startDate": "2026-09-19",
+        "requiredEvidenceAny": ["racine"]
+      },
       "expectMax": 1,
       "reason": "Justin decided not to participate in 2026.",
       "revisit": "2027 application cycle — Downtown Racine Corp, watch for the ~Aug 2027 deadline"
     },
     {
       "op": "markPassed",
-      "label": "Rustic Fox 2026 holiday series — cancelled by organizer (Carol Stream + North Aurora)",
+      "label": "Rustic Fox 2026 holiday series — cancelled by organizer (North Aurora)",
+      "note": "requiredEvidenceAny is what proves whose show this is. The event names are generic — any organizer in the Midwest can run a 'Kris Kringle' market — so a name match alone must never be enough to act on one organizer's cancellation notice. Split by location so each operation carries a strict, single constraint.",
       "match": {
         "nameContains": [
           "sip and sleigh",
@@ -70,9 +76,34 @@
           "sip and shop",
           "sip shop",
           "kris kringle"
+        ],
+        "requiredEvidenceAny": [
+          "north aurora",
+          "rustic fox",
+          "fox found"
         ]
       },
-      "expectMax": 6,
+      "expectMax": 3,
+      "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
+      "revisit": "2027 — ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
+    },
+    {
+      "op": "markPassed",
+      "label": "Rustic Fox 2026 holiday series — cancelled by organizer (Carol Stream)",
+      "match": {
+        "nameContains": [
+          "sip and sleigh",
+          "sip sleigh",
+          "sip and shop",
+          "sip shop",
+          "kris kringle"
+        ],
+        "requiredEvidenceAny": [
+          "carol stream",
+          "rustic fox"
+        ]
+      },
+      "expectMax": 3,
       "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
       "revisit": "2027 — ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
     },

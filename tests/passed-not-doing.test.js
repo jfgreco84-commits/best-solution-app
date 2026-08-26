@@ -196,6 +196,18 @@ R.check('unknown operation is BLOCKED, not ignored',
 R.check('a rejected plan reports changeCount 0, never undefined',
   C.pkgPlan({format:'nope',version:1,packageId:'x',operations:[]},C.S).changeCount, 0);
 
+// pkgPlan() is documented read-only, and the pre-write cloud check depends on
+// that being literally true. If merely PREVIEWING a package added a field to
+// the state, the local document would no longer match the cloud copy and every
+// apply would abort as a false divergence.
+setState([show({name:'Untouched',startDate:FUTURE})]);
+const preSnap=JSON.stringify(C.S);
+C.pkgPlan(pkg([{op:'markPassed',match:{name:'Nope'},reason:'x'}]),C.S);
+C.pkgPlan(pkg([{op:'upsertShow',match:{name:'Nope',startDate:FUTURE},show:{boothCost:1}}]),C.S);
+R.check('PLANNING MUTATES NOTHING', JSON.stringify(C.S), preSnap);
+R.check('and does not create the _pkgApplied map', C.S._pkgApplied, undefined);
+R.check('pkgIsApplied works on a state that has no map', C.pkgIsApplied('anything',C.S), false);
+
 // Idempotency marker
 setState([]);
 C.S._pkgApplied={pkg_test_1:{appliedAt:'2026-08-26T10:00:00.000Z'}};
@@ -324,23 +336,199 @@ R.check('an unmatched markPassed does not block the package', plan.ops[0].blocke
 R.check('and says so plainly', /UNMATCHED/.test(plan.ops[0].notes.join(' ')), true);
 
 // =======================================================================
+R.section('8b. Identifying evidence — a name is not proof of whose show it is');
+
+// "Kris Kringle" is a generic Christmas-market name. One organizer's
+// cancellation notice must never be able to reach another organizer's
+// identically-named show, and expectMax cannot help: it caps quantity, not
+// ownership. This is the negative test that proves it.
+setState([
+  show({name:'Kris Kringle — North Aurora',startDate:FUTURE,id:'rf1',location:'North Aurora, IL'}),
+  show({name:'Kris Kringle Christmas Market',startDate:FUTURE,id:'other1',
+    location:'Oconomowoc, WI',notes:'Run by the Oconomowoc Chamber. Nothing to do with The Rustic Fox.'})
+]);
+const evOp={op:'markPassed',label:'RF cancellation',
+  match:{nameContains:['kris kringle'],requiredEvidenceAny:['north aurora','rustic fox']},
+  expectMax:3,reason:'Organizer canceled the 2026 holiday pop-up series.'};
+plan=C.pkgPlan(pkg([evOp]),C.S);
+R.check('only the Rustic Fox record is targeted', plan.ops[0].changes.length, 1);
+R.check('the unrelated organizer is NOT targeted',
+  plan.ops[0].targets.some(t=>t.id==='other1'), false);
+R.check('and the preview names the record it deliberately left alone',
+  /NOT TOUCHED .*Oconomowoc|NOT TOUCHED \(name matched/.test(plan.ops[0].notes.join(' ')), true);
+C.pkgExecute(pkg([evOp]),plan,C.S);
+R.check('THE UNRELATED KRIS KRINGLE SHOW IS COMPLETELY UNTOUCHED',
+  C.isPassed(C.S.shows.find(s=>s.id==='other1')), false);
+R.check('and it is still upcoming', C.isUpcoming(C.S.shows.find(s=>s.id==='other1')), true);
+R.check('the Rustic Fox one was passed', C.isPassed(C.S.shows.find(s=>s.id==='rf1')), true);
+
+// Evidence may live in location OR organizer — the organizer name alone is
+// enough when the town is not on the record.
+setState([show({name:'Kris Kringle Market',startDate:FUTURE,id:'byOrg',location:'Somewhere, IL',
+  organizer:'The Rustic Fox'})]);
+plan=C.pkgPlan(pkg([evOp]),C.S);
+R.check('evidence found in the organizer field', plan.ops[0].changes.length, 1);
+
+// NOTES ARE NOT EVIDENCE, and this is the check that proves why. Prose
+// negates: a note saying the show has nothing to do with The Rustic Fox
+// contains the string "rustic fox" and would satisfy a substring test exactly
+// as well as one saying it IS a Rustic Fox show. Searching notes would sweep
+// up the unrelated show this whole constraint exists to protect.
+setState([show({name:'Kris Kringle Market',startDate:FUTURE,id:'byNote',location:'Oconomowoc, WI',
+  notes:'Run by the Oconomowoc Chamber. Nothing to do with The Rustic Fox.'})]);
+plan=C.pkgPlan(pkg([evOp]),C.S);
+R.check('a NEGATING note is not treated as evidence', plan.ops[0].changes.length, 0);
+setState([show({name:'Kris Kringle Market',startDate:FUTURE,id:'byNote2',location:'Somewhere, IL',
+  notes:'Booked through The Rustic Fox as usual.'})]);
+plan=C.pkgPlan(pkg([evOp]),C.S);
+R.check('and a CONFIRMING note is not evidence either — notes are never read',
+  plan.ops[0].changes.length, 0);
+
+// With NO evidence anywhere, nothing is targeted at all.
+setState([show({name:'Kris Kringle Market',startDate:FUTURE,id:'noEv',location:'Somewhere, IL'})]);
+plan=C.pkgPlan(pkg([evOp]),C.S);
+R.check('a name-only match with no evidence targets nothing', plan.ops[0].changes.length, 0);
+R.check('and it does not block the package either', plan.ops[0].blocked, false);
+
+// The evidence rule also guards single-record selectors, and there it fails
+// CLOSED: refusing to create a near-duplicate beside a record it would not touch.
+setState([show({name:'Party on the Pavement',startDate:'2026-09-19',id:'popX',location:'Somewhere Else, IA'})]);
+plan=C.pkgPlan(pkg([{op:'upsertShow',
+  match:{name:'Party on the Pavement',startDate:'2026-09-19',requiredEvidenceAny:['racine']},
+  show:{boothCost:450}}]),C.S);
+R.check('an upsert whose only name match fails the evidence test is BLOCKED',
+  plan.ops[0].blocked, true);
+R.check('it does not silently create a second record',
+  /refusing to create/.test(plan.ops[0].notes.join(' ')), true);
+
+// =======================================================================
+R.section('8c. The apply gate — signed out, offline, unsynced');
+
+// pkgGate() is the single source of truth for "can this reach the account".
+// pkgApply() re-tests it itself: a disabled button is a courtesy, never the
+// enforcement.
+function gateWith(user,online,sync){
+  C.ctxSetGate?C.ctxSetGate():null;
+  C.sb=user?{}:null;
+  C._cloudUser=user;
+  C.navigator.onLine=online;
+  C._syncState=sync;
+  return C.pkgGate();
+}
+R.check('signed out fails the gate', gateWith(null,true,'synced').ok, false);
+R.check('and says why', /not signed in/i.test(gateWith(null,true,'synced').reasons.join(' ')), true);
+R.check('offline fails the gate', gateWith({id:'u1'},false,'synced').ok, false);
+R.check('and says why', /offline/i.test(gateWith({id:'u1'},false,'synced').reasons.join(' ')), true);
+R.check('not-synced fails the gate', gateWith({id:'u1'},true,'syncing').ok, false);
+R.check('and says why', /not fully synced/i.test(gateWith({id:'u1'},true,'syncing').reasons.join(' ')), true);
+R.check('sync error fails the gate', gateWith({id:'u1'},true,'error').ok, false);
+R.check('signed out AND offline reports BOTH reasons', gateWith(null,false,'off').reasons.length>=3, true);
+R.check('signed in, online and synced passes', gateWith({id:'u1'},true,'synced').ok, true);
+
+// =======================================================================
+R.section('8d. Cloud divergence is detected before anything is written');
+
+const localDoc={_updatedAt:'2026-08-26T10:00:00.000Z',shows:[show({name:'A',id:'a'})]};
+R.check('no cloud row yet is not divergence', C.pkgCloudDivergence(null,localDoc), null);
+R.check('an identical cloud copy is not divergence',
+  C.pkgCloudDivergence(JSON.parse(JSON.stringify(localDoc)),localDoc), null);
+const newerCloud=JSON.parse(JSON.stringify(localDoc)); newerCloud._updatedAt='2026-08-26T11:00:00.000Z';
+R.check('a NEWER cloud copy is divergence', /NEWER/.test(C.pkgCloudDivergence(newerCloud,localDoc)||''), true);
+// The case _updatedAt cannot catch: same timestamp, different content.
+const sneaky=JSON.parse(JSON.stringify(localDoc)); sneaky.shows.push(show({name:'B',id:'b'}));
+R.check('same timestamp but different content is still divergence',
+  /differs/.test(C.pkgCloudDivergence(sneaky,localDoc)||''), true);
+// Key order must NOT count as a difference — Supabase reorders jsonb keys.
+const reordered={shows:JSON.parse(JSON.stringify(localDoc.shows)),_updatedAt:localDoc._updatedAt};
+R.check('a key-reordered cloud copy is NOT divergence',
+  C.pkgCloudDivergence(reordered,localDoc), null);
+
+// =======================================================================
+R.section('8e. Cloud verification reads the server back, and fails honestly');
+
+const vPkg=pkg([{op:'upsertShow',label:'V',
+  match:{name:'Verify Me',startDate:FUTURE},
+  show:{name:'Verify Me',startDate:FUTURE,numDays:1,boothCost:10},
+  boothPayments:[{amount:10,date:'2026-08-21',note:'paid'}]}],'pkg_verify_1');
+setState([]);
+let vPlan=C.pkgPlan(vPkg,C.S);
+C.pkgExecute(vPkg,vPlan,C.S);
+C.pkgAppliedEnsure(C.S)['pkg_verify_1']={appliedAt:'2026-08-26T12:00:00.000Z'};
+const goodCloud=JSON.parse(JSON.stringify(C.S));
+
+R.check('a cloud copy that really has the change verifies',
+  C.pkgVerifyCloud(vPkg,goodCloud,null).ok, true);
+R.check('a MISSING cloud read never verifies',
+  C.pkgVerifyCloud(vPkg,null,null).ok, false);
+R.check('and says the write is unverified',
+  /UNVERIFIED/.test(C.pkgVerifyCloud(vPkg,null,null).note), true);
+
+// The cloud accepted the write but the marker is absent: not verified.
+const noMarker=JSON.parse(JSON.stringify(goodCloud)); delete noMarker._pkgApplied;
+R.check('a cloud copy missing the package id does NOT verify',
+  C.pkgVerifyCloud(vPkg,noMarker,null).ok, false);
+// The marker is there but the records never landed: not verified. This is the
+// exact shape of a partial write, and the one a naive check would pass.
+const markerOnly={_updatedAt:goodCloud._updatedAt,shows:[],_pkgApplied:goodCloud._pkgApplied};
+R.check('marker present but records missing does NOT verify',
+  C.pkgVerifyCloud(vPkg,markerOnly,null).ok, false);
+// The record is there but its payment is not.
+const noPmt=JSON.parse(JSON.stringify(goodCloud));
+noPmt.shows[0].boothPayments=[];
+R.check('a record present without its payment does NOT verify',
+  C.pkgVerifyCloud(vPkg,noPmt,null).ok, false);
+// A duplicated payment in the cloud is a failure, not a pass.
+const dupPmt=JSON.parse(JSON.stringify(goodCloud));
+dupPmt.shows[0].boothPayments.push({amount:10,date:'2026-08-21',note:'paid again'});
+R.check('a DUPLICATED payment in the cloud does NOT verify',
+  C.pkgVerifyCloud(vPkg,dupPmt,null).ok, false);
+
+// The Wonderful World of Weddings invariant, checked against the cloud copy.
+const wwwState={shows:[show({name:'Wonderful World of Weddings',id:'w',boothCost:1087.80,
+  boothPayments:[{amount:250,date:'2026-08-18',note:'Deposit paid'}]})]};
+const wwwSnap=C.pkgWwwSnapshot(wwwState);
+const wwwCloudSame=JSON.parse(JSON.stringify(wwwState));
+wwwCloudSame._pkgApplied={pkg_verify_1:{appliedAt:'x'}};
+R.check('WWW unchanged in the cloud passes its check',
+  C.pkgVerifyCloud(pkg([],'pkg_verify_1'),wwwCloudSame,wwwSnap).checks
+    .filter(c=>/Wonderful World/.test(c.name)).every(c=>c.ok), true);
+const wwwCloudChanged=JSON.parse(JSON.stringify(wwwCloudSame));
+wwwCloudChanged.shows[0].boothCost=999;
+R.check('WWW ALTERED in the cloud fails its check',
+  C.pkgVerifyCloud(pkg([],'pkg_verify_1'),wwwCloudChanged,wwwSnap).checks
+    .filter(c=>/Wonderful World/.test(c.name)).every(c=>c.ok), false);
+const wwwCloudGone=JSON.parse(JSON.stringify(wwwCloudSame)); wwwCloudGone.shows=[];
+R.check('WWW MISSING from the cloud fails its check',
+  C.pkgVerifyCloud(pkg([],'pkg_verify_1'),wwwCloudGone,wwwSnap).checks
+    .filter(c=>/Wonderful World/.test(c.name)).every(c=>c.ok), false);
+
+// =======================================================================
 R.section('9. The real shipped package plans correctly against a synthetic board');
 
 const PKG=JSON.parse(fs.readFileSync(path.join(__dirname,'..','packages','2026-08-26-show-sync.json'),'utf8'));
 R.check('shipped package declares the right format', PKG.format, 'bs-show-update-package');
 R.check('shipped package declares version 1', PKG.version, 1);
-R.check('shipped package has five operations', PKG.operations.length, 5);
+R.check('shipped package has six operations', PKG.operations.length, 6);
+// Every markPassed in the shipped package must prove whose show it is.
+R.check('EVERY markPassed carries identifying evidence',
+  PKG.operations.filter(o=>o.op==='markPassed')
+    .every(o=>((o.match||{}).requiredEvidenceAny||[]).length>0), true);
 
 // A synthetic board shaped like the real one: the two new shows absent, Party
-// on the Pavement pending, the four Rustic Fox holiday shows present.
+// on the Pavement pending, the four Rustic Fox holiday shows present — plus an
+// unrelated Kris Kringle run by someone else, which must survive untouched.
 setState([
-  show({name:'Party on the Pavement',startDate:'2026-09-19',id:'sh_pop',confirmed:false,boothCost:450,depositDue:'2026-08-22'}),
-  show({name:'Sip & Sleigh — Carol Stream',startDate:'2026-11-07',id:'sh_ss1'}),
-  show({name:'Sip & Sleigh — North Aurora',startDate:'2026-11-20',id:'sh_ss2'}),
-  show({name:'Kris Kringle — Carol Stream',startDate:'2026-12-04',id:'sh_kk1'}),
-  show({name:'Kris Kringle — North Aurora',startDate:'2026-12-12',id:'sh_kk2'}),
-  show({name:'Cranberry Fest',startDate:'2026-09-25',id:'sh_cf'}),
+  show({name:'Party on the Pavement',startDate:'2026-09-19',id:'sh_pop',confirmed:false,boothCost:450,depositDue:'2026-08-22',location:'Racine, WI'}),
+  show({name:'Sip & Sleigh — Carol Stream',startDate:'2026-11-07',id:'sh_ss1',location:'Carol Stream, IL'}),
+  show({name:'Sip & Sleigh — North Aurora',startDate:'2026-11-20',id:'sh_ss2',location:'North Aurora, IL'}),
+  show({name:'Kris Kringle — Carol Stream',startDate:'2026-12-04',id:'sh_kk1',location:'Carol Stream, IL'}),
+  show({name:'Kris Kringle — North Aurora',startDate:'2026-12-12',id:'sh_kk2',location:'North Aurora, IL'}),
+  show({name:'Kris Kringle Christmas Market',startDate:'2026-12-05',id:'sh_other',
+    location:'Oconomowoc, WI',organizer:'Oconomowoc Chamber of Commerce',
+    notes:'Unrelated to The Rustic Fox — the note deliberately names them, to prove notes are not read as evidence.'}),
+  show({name:'Cranberry Fest',startDate:'2026-09-25',id:'sh_cf',location:'Warrens, WI'}),
   show({name:'Wonderful World of Weddings',startDate:'2027-01-30',id:'sh_www',boothCost:1087.80,
+    location:'West Allis, WI',
     boothPayments:[{amount:250,date:'2026-08-18',note:'Deposit paid'}],depositDue:'2026-09-30'})
 ]);
 plan=C.pkgPlan(PKG,C.S);
@@ -350,18 +538,28 @@ R.check('it creates exactly three shows', plan.createCount, 3);
 const popOp=plan.ops.find(o=>/Pavement/.test(o.label));
 R.check('Party on the Pavement is a markPassed', popOp.action, 'markPassed');
 R.check('and matches exactly one record', popOp.changes.length, 1);
-const rfOp=plan.ops.find(o=>/Rustic Fox 2026 holiday series/.test(o.label));
-R.check('the Rustic Fox sweep matches four records', rfOp.changes.length, 4);
-R.check('the sweep does not touch Cranberry Fest',
-  rfOp.targets.some(t=>t.id==='sh_cf'), false);
-R.check('the sweep does not touch Wonderful World of Weddings',
-  rfOp.targets.some(t=>t.id==='sh_www'), false);
+const rfNA=plan.ops.find(o=>/North Aurora\)/.test(o.label));
+const rfCS=plan.ops.find(o=>/Carol Stream\)/.test(o.label));
+R.check('the North Aurora operation matches two records', rfNA.changes.length, 2);
+R.check('the Carol Stream operation matches two records', rfCS.changes.length, 2);
+R.check('neither sweep touches Cranberry Fest',
+  rfNA.targets.concat(rfCS.targets).some(t=>t.id==='sh_cf'), false);
+R.check('neither sweep touches Wonderful World of Weddings',
+  rfNA.targets.concat(rfCS.targets).some(t=>t.id==='sh_www'), false);
+R.check('NEITHER SWEEP TOUCHES THE UNRELATED KRIS KRINGLE',
+  rfNA.targets.concat(rfCS.targets).some(t=>t.id==='sh_other'), false);
+R.check('and the preview reports it as deliberately left alone',
+  /NOT TOUCHED/.test(rfNA.notes.concat(rfCS.notes).join(' ')), true);
 
 const wwwBefore=JSON.stringify(C.S.shows.find(s=>s.id==='sh_www'));
+const otherBefore=JSON.stringify(C.S.shows.find(s=>s.id==='sh_other'));
 C.pkgExecute(PKG,plan,C.S);
-R.check('board grew from 7 to 10 shows', C.S.shows.length, 10);
+R.check('board grew from 8 to 11 shows', C.S.shows.length, 11);
 R.check('Wonderful World of Weddings is byte-for-byte untouched',
   JSON.stringify(C.S.shows.find(s=>s.id==='sh_www')), wwwBefore);
+R.check('THE UNRELATED KRIS KRINGLE IS BYTE-FOR-BYTE UNTOUCHED',
+  JSON.stringify(C.S.shows.find(s=>s.id==='sh_other')), otherBefore);
+R.check('and it is still upcoming', C.isUpcoming(C.S.shows.find(s=>s.id==='sh_other')), true);
 R.check('Party on the Pavement is passed', C.isPassed(C.S.shows.find(s=>s.id==='sh_pop')), true);
 R.check('Party on the Pavement is NOT missed', C.isMissed(C.S.shows.find(s=>s.id==='sh_pop')), false);
 R.check('Party on the Pavement keeps its booth cost', C.S.shows.find(s=>s.id==='sh_pop').boothCost, 450);
@@ -391,14 +589,16 @@ R.check('replacement is not passed', C.isPassed(rfNew), false);
 
 R.check('re-planning the shipped package settles to nothing', C.pkgPlan(PKG,C.S).changeCount, 0);
 C.pkgExecute(PKG,C.pkgPlan(PKG,C.S),C.S);
-R.check('REPLAYING the shipped package creates no duplicates', C.S.shows.length, 10);
+R.check('REPLAYING the shipped package creates no duplicates', C.S.shows.length, 11);
 R.check('REPLAY adds no duplicate payments',
   [C.boothPaid(C.S.shows.find(s=>/Last Fling/.test(s.name))),
    C.boothPaid(C.S.shows.find(s=>/Mistletoe/.test(s.name)))], [68,100]);
 
 // The three new shows must be real bookings on every forward-looking surface.
 const upNow=C.S.shows.filter(s=>C.isUpcoming(s));
-R.check('five shows upcoming after the sync', upNow.length, 5);
+// Six: the three new bookings, Cranberry Fest, Wonderful World of Weddings,
+// and the unrelated Kris Kringle that was correctly left alone.
+R.check('six shows upcoming after the sync', upNow.length, 6);
 const bk=C.pipelineBuckets(upNow);
 R.check('three of them sit in Booth Paid', bk.paid.length, 3);
 R.check('and they are the three we just booked',
