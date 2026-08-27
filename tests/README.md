@@ -8,6 +8,7 @@ node tests/phase2b.test.js
 node tests/replay-guard.test.js
 node tests/booking-pipeline-filters.test.js
 node tests/product-debt-invoices.test.js
+node tests/passed-not-doing.test.js
 node tests/booked-show-handoff.test.js
 ```
 
@@ -35,6 +36,41 @@ invoice is frozen history, the open invoice is the only one a payment can land
 on, and a new invoice changes neither. The expected ledger is read from the
 app's own `PD_MM_SEED`, and the pre-migration fixture is rebuilt from it, so
 the figures are not duplicated here.
+
+`passed-not-doing.test.js` covers the Passed / Not Doing show state, the
+Apply Show Update Package feature, and the v2 package correction. The invariant it protects has two halves
+that pull against each other: a passed show must be invisible to every
+forward-looking surface (Upcoming, the pipeline buckets and owed total,
+deposit alerts, booth owed/due, booked counts, calendar, .ics, conflicts,
+stock transfers) while being completely preserved as a record — including
+booth money already spent, which stays in the books. A change that satisfies
+one half by breaking the other is the failure this file exists to catch, so
+most checks assert both sides of the same fact. It also replays the shipped
+package twice to prove no duplicate show and no duplicate payment can be
+created, and asserts that Wonderful World of Weddings comes through the whole
+sync byte-for-byte unchanged.
+
+Sections 10 and 11 pin the v2 correction. The live cloud held "The Last Fling
+Artisan Market" while the v1 package named "The Last Fling"; those normalize
+differently, so v1's exact name+date match missed and the operation fell
+through to CREATE a second record on the same day at the same venue. Section 10
+runs both packages against a board carrying the real record and asserts v2
+updates it in place while two decoys - the same event name on another date, and
+a same-named event at another organizer - are left byte-for-byte untouched.
+Section 12 pins the v3 correction. Party on the Pavement is absent from the
+real board while its migration marker still suppresses re-seeding, so v2's
+markPassed - which only ever matches an existing record - returned UNMATCHED
+and the decision left no trace. Section 12 covers create-when-absent,
+update-in-place-when-pending, no-change-when-already-passed, blocked-and-
+untouched when a same-named show sits in the wrong town, and reapply producing
+nothing. It also pins each half of the passed contract separately: out of every
+bucket, alert, total, calendar, conflict and transfer target, AND present in
+Passed / Not Doing history.
+
+Section 11 covers the guards that make that class of bug hard to reintroduce:
+near-duplicate detection on same-date overlapping names, an update refusing to
+proceed when it matches more than one record, and startDate genuinely narrowing
+a nameContains selector.
 
 ## Fixtures are synthetic
 

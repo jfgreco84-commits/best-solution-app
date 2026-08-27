@@ -1,0 +1,190 @@
+{
+  "format": "bs-show-update-package",
+  "version": 1,
+  "packageId": "pkg_2026-08-26_show-sync_v3",
+  "createdAt": "2026-08-26",
+  "description": "Category 08 Master Show Sheet sync, v3. Corrects the Party on the Pavement operation: the record is absent from Justin's board while the pop_racine_20260818 migration marker still records it as seeded, so the marker suppresses re-seeding and v2's markPassed found nothing to mark. v3 replaces it with a create-or-update that reinstates the historical record already in the Passed / Not Doing state. The other five operations are byte-for-byte v2's.",
+  "source": "Category 08 Master Show Sheet, tab 'Show Master' (rows verified by Scout) + Nicole Kolosowski email 2026-08-10 + receipt 2165 / invoice 0006402",
+  "matchingNote": "Every markPassed operation carries requiredEvidenceAny. A show name alone does not prove whose show it is, so each candidate must ALSO carry the organizer or town in a STRUCTURED field: location or organizer. Notes are deliberately not searched, because prose negates -- a note reading 'nothing to do with The Rustic Fox' would satisfy a substring test as well as one reading 'run by The Rustic Fox'. A record whose name matches but whose location/organizer does not identify it is excluded and reported by name in the preview.",
+  "operations": [
+    {
+      "op": "upsertShow",
+      "label": "The Last Fling Artisan Market - booked and paid (UPDATE the existing record)",
+      "match": {
+        "nameContains": [
+          "last fling"
+        ],
+        "startDate": "2026-08-30",
+        "requiredEvidenceAny": [
+          "valley ridge",
+          "antioch"
+        ]
+      },
+      "show": {
+        "location": "Valley Ridge Golf Course, Antioch, IL",
+        "startDate": "2026-08-30",
+        "numDays": 1,
+        "boothCost": 68.0,
+        "miles": 33,
+        "confirmed": true,
+        "openTime": "12:00",
+        "closeTime": "16:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "THE LAST FLING - Sun Aug 30 2026. Customer hours 12:00pm-4:00pm. Setup 10:00am-12:00pm. Valley Ridge Golf Course, Antioch IL. Booth $68.00 PAID 2026-08-21 (payment method not documented on the Master Show Sheet - do not assume one; confirm and log it). Acceptance complete. Justin is working this show Sunday. Inventory was planned for Aug 26. ~33 mi each way from Waterford (66 mi round trip), about 45 minutes one way. NOTE: this record already existed in the cloud as 'The Last Fling Artisan Market'; the v2 package updates it in place and deliberately keeps that name."
+      },
+      "boothPayments": [
+        {
+          "amount": 68.0,
+          "date": "2026-08-21",
+          "note": "Booth paid in full. Payment method not documented on the Master Show Sheet."
+        }
+      ],
+      "keepExistingName": true
+    },
+    {
+      "op": "upsertShow",
+      "label": "Mistletoe & Martinis \u2014 booked and paid",
+      "match": {
+        "name": "Mistletoe & Martinis",
+        "startDate": "2026-11-27"
+      },
+      "show": {
+        "name": "Mistletoe & Martinis",
+        "location": "Countryside Banquets, Lakemoor, IL",
+        "startDate": "2026-11-27",
+        "numDays": 1,
+        "boothCost": 100.0,
+        "miles": 35,
+        "confirmed": true,
+        "openTime": "12:00",
+        "closeTime": "17:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "MISTLETOE & MARTINIS - Fri Nov 27 2026. Customer hours 12:00pm-5:00pm. Countryside Banquets, Lakemoor IL. Organizer contact: Therese / Chain O' Lakes. Booth $100.00 PAID BY PHONE 2026-08-25 (payment method not otherwise documented on the Master Show Sheet - do not assume one; confirm and log it). TO DO: retain the booth and load-in instructions, and file the receipt if one was issued. ~35 mi each way from Waterford (70 mi round trip), about 45 minutes one way."
+      },
+      "boothPayments": [
+        {
+          "amount": 100.0,
+          "date": "2026-08-25",
+          "note": "Booth paid by phone. Payment method not otherwise documented on the Master Show Sheet."
+        }
+      ]
+    },
+    {
+      "op": "upsertShow",
+      "label": "Party on the Pavement - passed for 2026 (create the historical record if absent, else update in place)",
+      "note": "Create-or-update, not markPassed: the record is absent from the board while its migration marker still suppresses re-seeding, so nothing exists for markPassed to match. The match requires the name, the exact 2026-09-19 date and Racine evidence, so a same-named event elsewhere is refused rather than updated or duplicated. No boothPayment is created: this show was never approved and never paid.",
+      "match": {
+        "nameContains": [
+          "party on the pavement"
+        ],
+        "startDate": "2026-09-19",
+        "requiredEvidenceAny": [
+          "racine"
+        ]
+      },
+      "keepExistingName": true,
+      "show": {
+        "name": "Party on the Pavement",
+        "location": "Racine, WI",
+        "startDate": "2026-09-19",
+        "numDays": 1,
+        "boothCost": 450,
+        "miles": 24,
+        "confirmed": false,
+        "depositDue": "2026-08-22",
+        "openTime": "12:00",
+        "closeTime": "19:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "passed": true,
+        "passedReason": "Justin decided not to participate in 2026.",
+        "passedRevisit": "2027 application cycle",
+        "passedAt": "2026-08-26T00:00:00.000Z",
+        "passedSource": "pkg_2026-08-26_show-sync_v3",
+        "notes": "PARTY ON THE PAVEMENT (23rd annual) \u2014 Sat Sep 19 2026, 12:00pm-7:00pm. ONLY 7 SELLING HOURS. Downtown Racine: Main St from State St to 7th St, plus 6th St from Lake Ave to City Hall, 12+ blocks. Run by Downtown Racine Corporation. STATUS: PENDING \u2014 not approved, not paid. APPLICATION DUE AUG 22 2026. Late or incomplete applications are not accepted, space is limited, and applying does not guarantee a spot. BOOTH: $450 retail/commercial rate, up from $300 in 2025 (DRC raised fees for entertainment, insurance and operations). $450 over 7 hours is about $64/hour in booth rent alone before gas and parking. FREE BOOTH OPTION: if your group puts in 16+ volunteer hours at the event, the booth rental is free. Email eventsmanager@racinedowntown.com to set that up. TRAFFIC: about 23,000 attendees in 2025 (geofenced), $1,125,741 in direct downtown spending, ~$85 average per attendee. 83% of 2025 vendors said sales or engagement met or beat expectations. PARKING $4 all day: Lake Ave Ramp (300 Lake Ave), Civic Centre Ramp (501 Lake Ave), McMynn Ramp (120 7th St), or Shoop (Main & State). RAIN OR SHINE, NO REFUNDS for vendors. ~24 mi each way from Waterford, 1 round trip."
+      }
+    },
+    {
+      "op": "markPassed",
+      "label": "Rustic Fox 2026 holiday series \u2014 cancelled by organizer (North Aurora)",
+      "note": "requiredEvidenceAny is what proves whose show this is. The event names are generic \u2014 any organizer in the Midwest can run a 'Kris Kringle' market \u2014 so a name match alone must never be enough to act on one organizer's cancellation notice. Split by location so each operation carries a strict, single constraint.",
+      "match": {
+        "nameContains": [
+          "sip and sleigh",
+          "sip sleigh",
+          "sip and shop",
+          "sip shop",
+          "kris kringle"
+        ],
+        "requiredEvidenceAny": [
+          "north aurora",
+          "rustic fox",
+          "fox found"
+        ]
+      },
+      "expectMax": 3,
+      "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
+      "revisit": "2027 \u2014 ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
+    },
+    {
+      "op": "markPassed",
+      "label": "Rustic Fox 2026 holiday series \u2014 cancelled by organizer (Carol Stream)",
+      "match": {
+        "nameContains": [
+          "sip and sleigh",
+          "sip sleigh",
+          "sip and shop",
+          "sip shop",
+          "kris kringle"
+        ],
+        "requiredEvidenceAny": [
+          "carol stream",
+          "rustic fox"
+        ]
+      },
+      "expectMax": 3,
+      "reason": "Organizer canceled the 2026 holiday pop-up series and replaced it with one North Aurora Holiday Market.",
+      "revisit": "2027 \u2014 ask Nicole Kolosowski whether the Carol Stream and December pop-ups return"
+    },
+    {
+      "op": "upsertShow",
+      "label": "The Rustic Fox Holiday Market (Holiday Weekend) \u2014 replacement, booked and paid",
+      "match": {
+        "name": "The Rustic Fox Holiday Market (Holiday Weekend)",
+        "startDate": "2026-11-07"
+      },
+      "show": {
+        "name": "The Rustic Fox Holiday Market (Holiday Weekend)",
+        "location": "The Rustic Fox, 1790 Towne Center Drive, North Aurora, IL 60542",
+        "startDate": "2026-11-07",
+        "numDays": 1,
+        "boothCost": 100.0,
+        "confirmed": true,
+        "openTime": "09:00",
+        "closeTime": "15:00",
+        "hoursVerified": true,
+        "hoursNeedConfirm": false,
+        "datesNeedConfirm": false,
+        "notes": "THE RUSTIC FOX HOLIDAY MARKET (Holiday Weekend) - Sat Nov 07 2026. Customer hours 9:00am-3:00pm. Vendor arrival/setup 8:00am. Departure/teardown deadline 3:30pm. The Rustic Fox, 1790 Towne Center Drive, North Aurora IL 60542. Organizer: Nicole Kolosowski. Booth $100.00 PAID 2026-08-25 - receipt 2165, invoice 0006402. This is the ONLY 2026 Rustic Fox holiday pop-up market: per Nicole's Aug 10 2026 email there is no outdoor December pop-up and no Carol Stream holiday pop-ups in 2026. Mileage not on the Master Show Sheet - set it in Edit Show before relying on gas or IRS mileage figures."
+      },
+      "boothPayments": [
+        {
+          "amount": 100.0,
+          "date": "2026-08-25",
+          "note": "Booth paid in full - receipt 2165, invoice 0006402"
+        }
+      ]
+    }
+  ],
+  "supersedes": "pkg_2026-08-26_show-sync_v2",
+  "correctionNote": "v2 used markPassed, which only ever MATCHES an existing record. Against the real board that returned UNMATCHED and skipped, leaving no Party on the Pavement record at all - neither active nor in Passed / Not Doing history. v3 uses upsertShow so the record is created if absent and updated in place if present, carrying the passed fields directly. Factual fields come from the app's own pop_racine_20260818 seed. Two deliberate departures from that seed are listed in seedDepartures.",
+  "seedDepartures": [
+    "showExpenses omitted. The seed carries a projected $4 ramp-parking expense. calcYTD adds a non-completed show's showExpenses to YTD spend regardless of passed state (measured: $4), so including it would put money we will never spend into the P&L for a show we are not attending. The parking facts stay verbatim in notes.",
+    "Per-day openTime/closeTime not set - a package's show object cannot reach into days[]. Verified equivalent: dayCallClose() falls back to show-level openTime/closeTime, and a created record reports identical hours (call 11 AM, open 12 PM, close 7 PM) and identical showHours (8) to the seeded record."
+  ]
+}
