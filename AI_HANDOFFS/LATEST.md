@@ -44,6 +44,24 @@ already-current screen offers no Apply; and signed out, Apply is withheld and
 four suites the browser adapter cannot run are **not** provably unaffected and
 need a Node run.
 
+## v3 is already applied — nothing left to apply
+
+Justin applied v3 successfully, under the underscore spelling
+`pkg_2026-08-26_show_sync_v3`. From **his saved application report**: local
+verification passed, cloud write completed, cloud verification passed, update
+complete **true**, shows **44 → 46**, reapply blocked **true**. The 44 → 46
+matches the two creations in the **6 / 50 / 2 / 0** preview derived for his
+board.
+
+**This comes from Justin's saved application report, not from a new live
+Supabase read.** Nothing in this round queried, read or wrote his account. The
+report is not committed — it is his business data and this repository is public.
+
+**After v35 deploys**, Justin opens the synced app and taps **Load Latest
+Approved Package**. It must show **You already have the latest approved show
+update**, identify that it was recorded under **`pkg_2026-08-26_show_sync_v3`**,
+and offer **no Apply control**. **Do not reapply the package.**
+
 ---
 
 # Previous rounds
@@ -76,8 +94,11 @@ records - 0 blocked** (Scout's measured v2 figure of 31/1 plus the measured
 **Deployed and byte-verified.** The v3 JSON GitHub Pages serves is
 byte-identical to the committed blob (`c3f2e0c7`, SHA-256 `bb2c65ea...`,
 11,300 bytes), and that blob id is the same one at the reviewed commit. The app
-is untouched at v34, and the v1 and v2 packages are unchanged. **Neither
-package has been applied.**
+is untouched at v34, and the v1 and v2 packages are unchanged.
+
+**v3 has since been applied by Justin**, under the underscore spelling
+`pkg_2026-08-26_show_sync_v3` — see the v35 section above. v1 and v2 were never
+applied and are superseded.
 
 ---
 
@@ -153,10 +174,9 @@ without touching its name.
 
 ## Next
 
-**The code is live. The data is not.** Justin applies **v2** — not v1 — himself,
-from a signed-in and synced device, after downloading a backup. The preview must
-read **6 / 42 / 2 / 0** with operation 1 showing **UPDATE**; if it shows CREATE,
-stop.
+**SUPERSEDED — v2 was never applied.** Its Party on the Pavement operation
+turned out to be a no-op against the real board, so it was replaced by **v3**,
+which Justin has since applied. See the v35 section at the top. Do not apply v2.
 
 Still outstanding from the sheet: the payment method for The Last Fling
 ($68, 2026-08-21) and Mistletoe & Martinis ($100 by phone, 2026-08-25), and the

@@ -162,6 +162,33 @@ now matches those blobs byte for byte too.
 
 ---
 
+## The v3 package has already been applied
+
+Recorded here because two earlier drafts of this handoff said the opposite, and
+a stale instruction to "apply v3" is exactly the kind of thing that gets a
+package applied twice.
+
+Justin applied v3 successfully. From **his saved application report**:
+
+| | |
+|---|---|
+| Package | `pkg_2026-08-26_show_sync_v3` (the underscore spelling) |
+| Local verification | passed |
+| Cloud write | completed |
+| Cloud verification | passed |
+| Update complete | **true** |
+| Shows | **44 → 46** |
+| Reapply blocked | true |
+
+44 → 46 is the two creations this package makes, which matches the preview
+figure of **6 / 50 / 2 / 0** derived for his board. The numbers corroborate each
+other.
+
+**Provenance, stated plainly: this comes from Justin's saved application report,
+not from a new live Supabase read.** Nothing in this round queried, read or
+wrote his account. The report itself is not committed — it is his business data,
+and this repository is public.
+
 ## BLOCKED
 
 Nothing.
@@ -174,10 +201,18 @@ Scout reviews, ideally with a Node run of all five suites — this round touches
 app code, so the four suites I cannot execute here matter more than they did for
 v3.
 
-After merge and deploy, the flow for Justin becomes: open the app on a synced
-device, Settings → **⬇️ Load Latest Approved Package**, read the preview
-(**6 / 50 / 2 / 0**, operation 3 **CREATE** for Party on the Pavement), tick the
-box, Apply. Everything after the button is exactly the v34 flow.
+**v3 is already applied. There is nothing left to apply.**
+
+After v35 deploys, Justin opens the synced app and taps **Load Latest Approved
+Package**. It must show **You already have the latest approved show update**,
+identify that it was recorded under **`pkg_2026-08-26_show_sync_v3`**, and offer
+**no Apply control**. Do not reapply the package.
+
+This is the first real use of the alias table: Justin's board recorded the
+package under the underscore spelling, and the catalog names the hyphen
+spelling. Without the alias the button would have offered to apply a package he
+already has, and the idempotency gate would have had to catch it one screen
+later. Seeing the already-current screen instead is the feature working.
 
 Two open items carried forward from v3, neither a blocker: a status constraint
 on the matcher so an `upsertShow` cannot set `passed` on a completed show, and
