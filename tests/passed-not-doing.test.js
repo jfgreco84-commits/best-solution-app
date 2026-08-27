@@ -1048,4 +1048,220 @@ R.check('and exactly one more creation',
 R.check('every other operation plans identically',
   V3_UNCHANGED.every(i=>v2plan.ops[i].changes.length===v3plan.ops[i].changes.length), true);
 
+
+// =======================================================================
+R.section('13. v35 Load Latest Approved Package: catalog, origin, checksum, aliases');
+
+// One button replaces "find the file, download it, open the app, choose it".
+// It removes handling, not gates — so the things worth testing are the three
+// rules that make a one-tap fetch safe at all: it will only fetch from this
+// app's own packages folder, it will only accept bytes whose SHA-256 matches
+// the reviewed value, and it refuses to offer Apply for a package already on
+// the board under either of its names.
+
+const CAT=JSON.parse(fs.readFileSync(path.join(__dirname,'..','packages','approved-show-packages.json'),'utf8'));
+
+// ---- the shipped catalog ----
+R.check('catalog declares the right format', CAT.format, 'bs-approved-package-catalog');
+R.check('catalog declares version 1', CAT.version, 1);
+R.check('the shipped catalog validates', C.pkgCatalogValidate(CAT).ok, true);
+R.check('it names v3 as latest', CAT.latest.packageId, 'pkg_2026-08-26_show-sync_v3');
+R.check('with the underscore spelling as an alias', CAT.latest.aliases, ['pkg_2026-08-26_show_sync_v3']);
+R.check('the file is a bare filename', /^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/.test(CAT.latest.file), true);
+R.check('the sha256 is 64 hex characters', /^[0-9a-f]{64}$/.test(CAT.latest.sha256), true);
+R.check('and a byte count is declared', CAT.latest.bytes, 11300);
+// The catalog must describe the package that is actually committed beside it.
+const V3TXT=fs.readFileSync(path.join(__dirname,'..','packages',CAT.latest.file),'utf8');
+const V3BYTES=new TextEncoder().encode(V3TXT).length;
+R.check('the named file exists and parses',
+  JSON.parse(V3TXT).packageId, CAT.latest.packageId);
+// The declared byte count is of the COMMITTED bytes (LF). A Windows checkout
+// with core.autocrlf=true holds the same file with CRLF and is larger — the
+// same condition that makes the button refuse a local copy, so it is tolerated
+// here rather than reported as a broken catalog.
+R.check('the declared byte count matches the committed file (or this is a CRLF checkout)',
+  V3BYTES===CAT.latest.bytes || V3TXT.indexOf('\r\n')>=0, true);
+R.check('every history entry also names a bare filename',
+  (CAT.history||[]).every(h=>/^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/.test(h.file)), true);
+R.check('and a valid checksum',
+  (CAT.history||[]).every(h=>/^[0-9a-f]{64}$/.test(h.sha256)), true);
+
+// ---- catalog validation refuses malformed input ----
+const goodCat=()=>JSON.parse(JSON.stringify(CAT));
+R.check('a non-object is refused', C.pkgCatalogValidate('nope').ok, false);
+R.check('null is refused', C.pkgCatalogValidate(null).ok, false);
+R.check('an array is refused', C.pkgCatalogValidate([]).ok, false);
+let bad=goodCat(); bad.format='something-else';
+R.check('the wrong format is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); bad.version=99;
+R.check('a future version is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); delete bad.latest;
+R.check('a missing latest entry is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); delete bad.latest.packageId;
+R.check('a latest entry with no packageId is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); delete bad.latest.file;
+R.check('a latest entry with no file is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); bad.latest.sha256='abc';
+R.check('a short checksum is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); delete bad.latest.sha256;
+R.check('a missing checksum is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); bad.latest.sha256='z'.repeat(64);
+R.check('a non-hex checksum is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); bad.latest.bytes=0;
+R.check('a zero byte count is refused', C.pkgCatalogValidate(bad).ok, false);
+bad=goodCat(); bad.latest.aliases='not-a-list';
+R.check('a non-list aliases field is refused', C.pkgCatalogValidate(bad).ok, false);
+// The catalog is data, and its errors have to be readable.
+R.check('refusals explain themselves', C.pkgCatalogValidate({format:'x',version:1}).errors.length>0, true);
+
+// ---- same-origin and packages-folder enforcement ----
+const BASE='https://jfgreco84-commits.github.io/best-solution-app/BEST_SOLUTION_APP.html';
+const ok=f=>C.pkgResolveInPackages(f,BASE);
+R.check('a plain filename resolves inside packages/',
+  ok('2026-08-26-show-sync-v3.json').url.pathname,
+  '/best-solution-app/packages/2026-08-26-show-sync-v3.json');
+R.check('and it carries no error', ok('2026-08-26-show-sync-v3.json').error, undefined);
+R.check('the catalog file itself resolves', !!ok('approved-show-packages.json').url, true);
+
+// Everything below must be refused. These are the shapes an attacker-supplied
+// or corrupted catalog would use to point the app somewhere else.
+const REFUSE=[
+  ['another host','https://evil.example/pkg.json'],
+  ['http on another host','http://evil.example/pkg.json'],
+  ['protocol-relative','//evil.example/pkg.json'],
+  ['an absolute path','/etc/passwd.json'],
+  ['a root-relative path into another repo','/other-repo/packages/pkg.json'],
+  ['parent traversal','../secrets.json'],
+  ['nested traversal','../../packages/pkg.json'],
+  ['traversal that lands back inside','../packages/pkg.json'],
+  ['a subdirectory','sub/pkg.json'],
+  ['a backslash path','..\\\\secrets.json'],
+  ['percent-encoded traversal','%2e%2e%2fsecrets.json'],
+  ['a data: URL','data:application/json,{}'],
+  ['a javascript: URL','javascript:alert(1)'],
+  ['a file: URL','file:///etc/passwd.json'],
+  ['a query string','pkg.json?x=1'],
+  ['a fragment','pkg.json#x'],
+  ['a non-json extension','pkg.txt'],
+  ['no extension','pkg'],
+  ['an empty name',''],
+  ['whitespace only','   '],
+  ['a leading dot','.hidden.json'],
+  ['a leading dash','-pkg.json'],
+  ['null',null],
+  ['a number',12345]
+];
+let refusedAll=true, leaked=[];
+REFUSE.forEach(pair=>{
+  const r=C.pkgResolveInPackages(pair[1],BASE);
+  if(!r.error||r.url){refusedAll=false;leaked.push(pair[0]);}
+});
+R.check('EVERY off-limits path shape is refused', refusedAll, true);
+R.check('and none of them leaked through', leaked, []);
+R.check('refusals say what was refused',
+  /will not fetch/.test(C.pkgResolveInPackages('../secrets.json',BASE).error||''), true);
+// The origin test is on the RESULT, not just the input pattern.
+R.check('a same-name file under a different origin base still resolves to that origin',
+  C.pkgResolveInPackages('pkg.json','https://elsewhere.test/app/x.html').url.origin,
+  'https://elsewhere.test');
+
+// ---- checksum: everything that is not a clean match refuses ----
+const HASH='bb2c65eac49074e58f553711c385bc3856381d20a19dc8421f81a2d353fc8abb';
+R.check('an exact match passes', C.pkgChecksumMatches(HASH,HASH), true);
+R.check('an uppercase expectation still matches', C.pkgChecksumMatches(HASH,HASH.toUpperCase()), true);
+R.check('a one-character difference REFUSES',
+  C.pkgChecksumMatches(HASH,HASH.slice(0,63)+(HASH[63]==='b'?'c':'b')), false);
+R.check('a null digest refuses', C.pkgChecksumMatches(null,HASH), false);
+R.check('an undefined digest refuses', C.pkgChecksumMatches(undefined,HASH), false);
+R.check('an empty digest refuses', C.pkgChecksumMatches('',HASH), false);
+R.check('a truncated digest refuses', C.pkgChecksumMatches(HASH.slice(0,32),HASH), false);
+R.check('an uppercase digest refuses (we normalise to lowercase before comparing)',
+  C.pkgChecksumMatches(HASH.toUpperCase(),HASH), false);
+R.check('a non-string digest refuses', C.pkgChecksumMatches(12345,HASH), false);
+R.check('a missing expectation refuses', C.pkgChecksumMatches(HASH,null), false);
+R.check('a malformed expectation refuses', C.pkgChecksumMatches(HASH,'abc'), false);
+R.check('two nulls still refuse', C.pkgChecksumMatches(null,null), false);
+// The failure this rule exists to prevent: "could not compute" must never
+// read as "fine".
+R.check('an uncomputable digest is a refusal, not a pass', C.pkgChecksumMatches(null,HASH), false);
+
+// ---- alias recognition ----
+const V3='pkg_2026-08-26_show-sync_v3', V3U='pkg_2026-08-26_show_sync_v3';
+R.check('the hyphen id knows the underscore id', C.pkgAliasSet(V3).indexOf(V3U)>=0, true);
+R.check('and the underscore id knows the hyphen id', C.pkgAliasSet(V3U).indexOf(V3)>=0, true);
+R.check('an id always includes itself', C.pkgAliasSet(V3)[0], V3);
+R.check('the set has no duplicates', C.pkgAliasSet(V3,[V3,V3U]).length, 2);
+R.check('catalog-declared aliases are honoured',
+  C.pkgAliasSet('pkg_other',['pkg_other_alt']), ['pkg_other','pkg_other_alt']);
+R.check('an unrelated id gets no aliases', C.pkgAliasSet('pkg_unrelated'), ['pkg_unrelated']);
+// Deliberately NOT a general hyphen/underscore normaliser: two different
+// packages whose ids happen to differ that way must stay different.
+R.check('a lookalike pair not in the table is NOT merged',
+  C.pkgAliasSet('pkg_some-thing_v9').indexOf('pkg_some_thing_v9'), -1);
+
+// ---- already applied, under either name ----
+setState([]);
+C.S._pkgApplied={}; C.S._pkgApplied[V3]={appliedAt:'2026-08-27T10:00:00.000Z'};
+R.check('applied under the hyphen id is seen', !!C.pkgAppliedRecord(V3,C.S), true);
+R.check('and is ALSO seen when asked about the underscore id',
+  !!C.pkgAppliedRecord(V3U,C.S), true);
+R.check('the alias hit reports which id actually carried it',
+  C.pkgAppliedRecord(V3U,C.S).id, V3);
+R.check('and flags that it matched via an alias', C.pkgAppliedRecord(V3U,C.S).viaAlias, true);
+R.check('a direct hit is not flagged as an alias', C.pkgAppliedRecord(V3,C.S).viaAlias, false);
+
+setState([]);
+C.S._pkgApplied={}; C.S._pkgApplied[V3U]={appliedAt:'2026-08-27T10:00:00.000Z'};
+R.check('applied under the UNDERSCORE id is seen from the hyphen id',
+  !!C.pkgAppliedRecord(V3,C.S), true);
+R.check('and reports the underscore id as the carrier', C.pkgAppliedRecord(V3,C.S).id, V3U);
+
+setState([]);
+R.check('an untouched board reports nothing applied', C.pkgAppliedRecord(V3,C.S), null);
+R.check('and pkgIsApplied agrees', C.pkgIsApplied(V3,C.S), false);
+
+// The idempotency gate must hold through the alias on the PASTE path too, not
+// only through the new button.
+setState(realBoard());
+C.S._pkgApplied={}; C.S._pkgApplied[V3U]={appliedAt:'2026-08-27T10:00:00.000Z'};
+const aliasPlan=C.pkgPlan(PKG3,C.S);
+R.check('a pasted v3 is refused when the alias is already recorded', aliasPlan.ok, false);
+R.check('and it plans zero changes', aliasPlan.changeCount, 0);
+R.check('the refusal names the other id',
+  /other id/.test(aliasPlan.errors.join(' ')), true);
+// While an unrelated package is unaffected by the alias table.
+const otherPkg=pkg([{op:'markPassed',match:{name:'Nothing'},reason:'x'}],'pkg_unrelated_v1');
+R.check('an unrelated package is not blocked by it', C.pkgPlan(otherPkg,C.S).ok, true);
+
+// ---- the friendly already-current screen ----
+// pkgRenderAlreadyCurrent must not offer Apply. It is a courtesy screen for a
+// board that is already up to date, and an Apply button there would invite a
+// double-apply that the gates would then have to refuse.
+setState([]);
+C.S._pkgApplied={}; C.S._pkgApplied[V3U]={appliedAt:'2026-08-27T10:00:00.000Z'};
+const hit=C.pkgAppliedRecord(CAT.latest.packageId,C.S,CAT.latest.aliases);
+R.check('the shipped catalog entry is recognised as already applied via its alias',
+  !!hit&&hit.viaAlias, true);
+let rendered='';
+const realMOpen=C.mOpen; C.mOpen=h=>{rendered=h;};
+C.pkgRenderAlreadyCurrent(CAT.latest,hit);
+C.mOpen=realMOpen;
+R.check('the screen says you already have the latest approved show update',
+  /You already have the latest approved show update/.test(rendered), true);
+R.check('it offers NO Apply control', /Apply \d+ Change|onclick="pkgApply\(\)/.test(rendered), false);
+R.check('and no confirmation checkbox', /pkg_ack/.test(rendered), false);
+R.check('it names the package', rendered.indexOf(CAT.latest.packageId)>=0, true);
+R.check('it explains the id it was recorded under', rendered.indexOf(V3U)>=0, true);
+R.check('it shows when it was applied', /2026-08-27 10:00/.test(rendered), true);
+R.check('and it offers a way onward', /View Shows/.test(rendered), true);
+R.check('rendering it changed no show data', C.S.shows.length, 0);
+
+// ---- the gates the button hands off to are untouched ----
+R.check('pkgApply is still async', C.pkgApply.constructor.name, 'AsyncFunction');
+R.check('the apply gate still exists', typeof C.pkgGate, 'function');
+R.check('the cloud divergence check still exists', typeof C.pkgCloudDivergence, 'function');
+R.check('the cloud verification still exists', typeof C.pkgVerifyCloud, 'function');
+R.check('the manual fallback is still available', typeof C.pkgPreviewFromText, 'function');
+R.check('and so is file upload', typeof C.pkgPickFile, 'function');
+
 R.done();

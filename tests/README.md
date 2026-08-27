@@ -61,6 +61,17 @@ nothing. It also pins each half of the passed contract separately: out of every
 bucket, alert, total, calendar, conflict and transfer target, AND present in
 Passed / Not Doing history.
 
+Section 13 covers the v35 one-tap loader. The rules that make a one-tap fetch
+safe at all are the ones under test: the catalog is validated before it is
+trusted, a catalog-supplied filename can only ever resolve inside the app's own
+packages/ folder (a table of two dozen off-limits shapes -- other hosts,
+protocol-relative, absolute, traversal, encoded traversal, data:, javascript:,
+file:, query, fragment -- must all be refused), a SHA-256 that is anything other
+than a clean 64-hex match refuses (including a null digest, which must never
+read as 'fine'), the two spellings of the v3 package id are recognised as one
+package in both directions, and the already-current screen offers no Apply
+control.
+
 Section 11 covers the guards that make that class of bug hard to reintroduce:
 near-duplicate detection on same-date overlapping names, an update refusing to
 proceed when it matches more than one record, and startDate genuinely narrowing

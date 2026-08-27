@@ -1,0 +1,41 @@
+{
+  "format": "bs-approved-package-catalog",
+  "version": 1,
+  "updatedAt": "2026-08-27",
+  "note": "The one package the app's Load Latest Approved Package button will fetch. Every sha256 below is of the COMMITTED bytes (LF line endings) — the same bytes GitHub Pages serves. A working copy checked out on Windows with core.autocrlf=true will hash differently, which is why the button refuses a local copy rather than trusting it. file must be a bare filename: the app resolves it inside its own packages/ folder and refuses anything that resolves elsewhere.",
+  "latest": {
+    "packageId": "pkg_2026-08-26_show-sync_v3",
+    "aliases": [
+      "pkg_2026-08-26_show_sync_v3"
+    ],
+    "file": "2026-08-26-show-sync-v3.json",
+    "sha256": "bb2c65eac49074e58f553711c385bc3856381d20a19dc8421f81a2d353fc8abb",
+    "bytes": 11300,
+    "title": "Category 08 show sync v3",
+    "summary": "The Last Fling updated in place, Mistletoe & Martinis added, Party on the Pavement reinstated as Passed / Not Doing, the 2026 Rustic Fox holiday series passed, and its replacement North Aurora market added. Wonderful World of Weddings deliberately untouched.",
+    "reviewedBy": "Scout",
+    "reviewedCommit": "858a6428cf435021b6f6b608d1bbcb7f71ba4d6f",
+    "mergedCommit": "b293ecc188969ee40ad97a2a1f785e9174849c4b",
+    "supersedes": "pkg_2026-08-26_show-sync_v2"
+  },
+  "history": [
+    {
+      "packageId": "pkg_2026-08-26_show-sync_v2",
+      "file": "2026-08-26-show-sync-v2.json",
+      "sha256": "f232b02cbf41310d035b8d5ea76766ea3c53552ca77b34c9b2dd15e3c61fd2ec",
+      "bytes": 8389,
+      "status": "superseded",
+      "supersededBy": "pkg_2026-08-26_show-sync_v3",
+      "why": "Its Party on the Pavement operation was a markPassed, which only matches an existing record. The record is absent from the board while its migration marker still suppresses re-seeding, so the operation returned UNMATCHED and the decision left no trace."
+    },
+    {
+      "packageId": "pkg_2026-08-26_show-sync_v1",
+      "file": "2026-08-26-show-sync.json",
+      "sha256": "d6380e9abf2087cfabba5cd212430b590c19914477bb9cd0416b052f7344605d",
+      "bytes": 7133,
+      "status": "superseded",
+      "supersededBy": "pkg_2026-08-26_show-sync_v2",
+      "why": "Its Last Fling operation matched on exact name + date against 'The Last Fling' while the board holds 'The Last Fling Artisan Market', so it would have created a duplicate on the same day at the same venue."
+    }
+  ]
+}
