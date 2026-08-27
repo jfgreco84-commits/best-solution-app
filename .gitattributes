@@ -1,0 +1,7 @@
+# The approved-package catalog pins a SHA-256 of each package file, and the app
+# refuses anything that does not match. GitHub Pages serves the committed bytes,
+# so the committed bytes are what the hash describes. Without this, a checkout on
+# Windows (core.autocrlf=true) rewrites these files with CRLF, they hash
+# differently, and the Load Latest Approved Package button refuses a clone that is
+# in fact correct. Pin them to LF so the working copy matches what is served.
+packages/*.json text eol=lf

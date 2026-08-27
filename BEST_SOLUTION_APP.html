@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v34';
+const APP_VERSION='v35';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -8146,6 +8146,39 @@ function bxSettingsCard(){
 const PKG_FORMAT='bs-show-update-package';
 const PKG_VERSION=1;
 
+/* ---- PACKAGE ID ALIASES ----
+   The same reviewed package has been referred to by two spellings that differ
+   only in a hyphen against an underscore. They are one package, and applying
+   it twice under two names would be a double-apply that every other guard here
+   exists to prevent, so the pair is declared explicitly and both directions are
+   listed.
+
+   This is a TABLE, not a normaliser. Folding every '-' and '_' together would
+   also merge two genuinely different packages whose ids happened to differ that
+   way, and silently refusing a package the owner actually needs is its own
+   failure. Adding a pair here is a deliberate act. */
+const PKG_ALIASES={
+  'pkg_2026-08-26_show-sync_v3':['pkg_2026-08-26_show_sync_v3'],
+  'pkg_2026-08-26_show_sync_v3':['pkg_2026-08-26_show-sync_v3']
+};
+// Every id that means this package, including any the catalog declares.
+function pkgAliasSet(id,extra){
+  const out=[], seen={};
+  const add=v=>{ const s=String(v==null?'':v).trim(); if(s&&!seen[s]){seen[s]=1;out.push(s);} };
+  add(id);
+  (PKG_ALIASES[id]||[]).forEach(add);
+  (extra||[]).forEach(a=>{ add(a); (PKG_ALIASES[a]||[]).forEach(add); });
+  return out;
+}
+/* The applied-record for an id, matched through its aliases. Returns which id
+   actually carried it, so the UI can say so rather than leaving the owner
+   wondering why a package he has not seen before is reported as applied. */
+function pkgAppliedRecord(id,st,extra){
+  const map=pkgAppliedRead(st), ids=pkgAliasSet(id,extra);
+  for(let i=0;i<ids.length;i++){ if(map[ids[i]])return {id:ids[i],record:map[ids[i]],viaAlias:ids[i]!==id}; }
+  return null;
+}
+
 /* READ. Must never write, because pkgPlan() calls it and pkgPlan() runs on
    every preview. A read that lazily initialised `_pkgApplied = {}` would add a
    field to the live state just by LOOKING at a package — and then the pre-write
@@ -8163,7 +8196,9 @@ function pkgAppliedEnsure(st){
   if(!s._pkgApplied||typeof s._pkgApplied!=='object')s._pkgApplied={};
   return s._pkgApplied;
 }
-function pkgIsApplied(id,st){ return !!pkgAppliedRead(st)[id]; }
+// Alias-aware on purpose: the idempotency gate must hold no matter which of a
+// package's names it arrives under, including through paste or file upload.
+function pkgIsApplied(id,st){ return !!pkgAppliedRecord(id,st); }
 function pkgDeep(o){ return o==null?o:JSON.parse(JSON.stringify(o)); }
 function pkgNum(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
 function pkgNorm(v){ return mrgNormName(v); }
@@ -8277,8 +8312,11 @@ function pkgPlan(pkg,st){
   if(pkgNum(pkg.version)!==PKG_VERSION){out.errors.push('This app understands package version '+PKG_VERSION+'; this file is version '+(pkg.version==null?'(missing)':pkg.version)+'.');return out;}
   if(!pkg.packageId||typeof pkg.packageId!=='string'){out.errors.push('The package has no packageId, so it cannot be protected against being applied twice.');return out;}
   if(!Array.isArray(pkg.operations)||!pkg.operations.length){out.errors.push('The package contains no operations.');return out;}
-  const prior=pkgAppliedRead(state)[pkg.packageId];
-  if(prior){out.errors.push('This package was already applied on '+String(prior.appliedAt||'').replace('T',' ').slice(0,16)+'. Applying it again is blocked.');return out;}
+  // Alias-aware: a package already applied under one of its other names is
+  // still already applied.
+  const hit=pkgAppliedRecord(pkg.packageId,state,pkg.aliases);
+  if(hit){out.errors.push('This package was already applied on '+String(hit.record.appliedAt||'').replace('T',' ').slice(0,16)+
+    (hit.viaAlias?(', recorded under its other id "'+hit.id+'"'):'')+'. Applying it again is blocked.');return out;}
 
   pkg.operations.forEach((op,i)=>{
     const tag='#'+(i+1)+' '+((op&&op.label)||(op&&op.op)||'operation');
@@ -8498,6 +8536,217 @@ function pkgExecute(pkg,plan,state){
   return res;
 }
 
+/* ======================================================================
+   LOAD LATEST APPROVED PACKAGE  (pkgCat*)
+   ----------------------------------------------------------------------
+   One button instead of "find the file, download it, open the app, choose
+   it". Everything it removes is handling; nothing it removes is a gate.
+
+   WHAT IT WILL FETCH, and nothing else. A committed catalog at
+   packages/approved-show-packages.json names the one reviewed package. The
+   catalog's `file` is a BARE FILENAME — no slashes, no scheme, no dots-dots —
+   and the app resolves it inside its OWN packages/ directory, derived from
+   location, never from the catalog. Then it checks the resolved URL again:
+   same origin, and pathname still inside that directory. A catalog that has
+   been tampered with cannot point the app at another host, another repo, or
+   anywhere outside packages/, because the only thing it contributes to the URL
+   is a filename that must survive a character-class test first.
+
+   CHECKSUM BEFORE PARSE. The package is fetched as BYTES, hashed with
+   SHA-256, and compared to the catalog before anything parses it. A mismatch
+   refuses without JSON.parse ever running on the payload. This is the point of
+   the feature: the button is only safe if what it loads is provably the file
+   that was reviewed.
+
+   The hash is of the COMMITTED bytes, which is what GitHub Pages serves. A
+   Windows working copy with core.autocrlf=true holds the same file with CRLF
+   and therefore hashes differently, so the button refuses a local checkout.
+   That is correct — fail closed — and the refusal text says so, because a
+   confusing refusal is otherwise indistinguishable from a real tamper.
+
+   WHAT IT DOES NOT TOUCH. It ends by calling the existing preview. Every gate
+   downstream is unchanged: signed in, online, synced, backup prompt, one
+   explicit confirmation, fresh cloud preflight, awaited push, cloud
+   verification. Paste and Choose File remain, as the manual fallback for when
+   the catalog itself is the problem.
+   ====================================================================== */
+const PKG_CATALOG_FORMAT='bs-approved-package-catalog';
+const PKG_CATALOG_VERSION=1;
+const PKG_CATALOG_FILE='approved-show-packages.json';
+const PKG_DIR='packages/';
+
+/* The app's own directory, from location — never from anything fetched.
+   baseHref is a TEST SEAM only: production calls pass nothing and get
+   window.location. It exists because the same-origin rules below are the part
+   of this feature most worth testing, and a test cannot assign to
+   window.location in a real browser. */
+function pkgAppDir(baseHref){
+  try{ return new URL('.',baseHref||window.location.href); }catch(e){ return null; }
+}
+// The packages/ directory inside it. Everything this feature fetches must live here.
+function pkgPackagesDir(baseHref){
+  const base=pkgAppDir(baseHref); if(!base)return null;
+  try{ return new URL(PKG_DIR,base); }catch(e){ return null; }
+}
+function pkgSelfOrigin(baseHref){
+  try{ return baseHref?(new URL(baseHref)).origin:window.location.origin; }catch(e){ return null; }
+}
+/* Resolve a catalog-supplied filename, or refuse. Returns {url} or {error}. */
+function pkgResolveInPackages(file,baseHref){
+  const dir=pkgPackagesDir(baseHref);
+  if(!dir)return {error:'This browser did not give the app a usable address to resolve from.'};
+  const name=String(file==null?'':file).trim();
+  if(!name)return {error:'The catalog entry has no file name.'};
+  // A bare filename and nothing else. This is what makes traversal, absolute
+  // URLs and protocol-relative URLs unrepresentable rather than merely caught.
+  if(!/^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/.test(name))
+    return {error:'The catalog names a file the app will not fetch: "'+name+'". It must be a plain .json filename inside the app’s own packages folder, with no slashes, no scheme and no dot-dot.'};
+  if(name.indexOf('..')>=0)return {error:'The catalog file name contains "..", which the app will not resolve.'};
+  let url; try{ url=new URL(name,dir); }catch(e){ return {error:'The catalog file name could not be resolved.'}; }
+  // Belt and braces: check the RESULT, not just the input.
+  const self=pkgSelfOrigin(baseHref);
+  if(!self)return {error:'This browser did not give the app a usable origin to compare against.'};
+  if(url.origin!==self)
+    return {error:'That package resolves to a different site ('+url.origin+'). The app only loads packages served from itself.'};
+  if(url.pathname.indexOf(dir.pathname)!==0)
+    return {error:'That package resolves outside the app’s packages folder ('+url.pathname+'). Refused.'};
+  return {url:url};
+}
+/* The checksum decision, isolated so it can be tested directly and so there is
+   exactly one place that decides what "matches" means.
+
+   Everything that is not a clean 64-hex-character match REFUSES: a null digest
+   (no subtle crypto), a short or malformed value, a non-string, an empty
+   string. There is no branch here that treats "could not compute" as "fine" —
+   that is the failure mode this whole feature would otherwise have. */
+function pkgChecksumMatches(got,want){
+  if(typeof got!=='string'||!/^[0-9a-f]{64}$/.test(got))return false;
+  if(typeof want!=='string'||!/^[0-9a-fA-F]{64}$/.test(want))return false;
+  return got===want.toLowerCase();
+}
+// SHA-256 of raw bytes, lowercase hex. Null when the browser cannot do it,
+// which is treated as a refusal rather than a reason to skip the check.
+async function pkgSha256Hex(buf){
+  try{
+    if(!(window.crypto&&window.crypto.subtle&&window.crypto.subtle.digest))return null;
+    const d=await window.crypto.subtle.digest('SHA-256',buf);
+    return Array.prototype.map.call(new Uint8Array(d),b=>('0'+b.toString(16)).slice(-2)).join('');
+  }catch(e){ return null; }
+}
+/* Validate the catalog's shape. Returns {ok,errors,latest}. */
+function pkgCatalogValidate(cat){
+  const errors=[];
+  if(!cat||typeof cat!=='object'||Array.isArray(cat))return {ok:false,errors:['The catalog is not a JSON object.'],latest:null};
+  if(cat.format!==PKG_CATALOG_FORMAT)errors.push('Wrong catalog type. Expected "'+PKG_CATALOG_FORMAT+'", got "'+(cat.format||'(missing)')+'".');
+  if(pkgNum(cat.version)!==PKG_CATALOG_VERSION)errors.push('This app understands catalog version '+PKG_CATALOG_VERSION+'; this file is version '+(cat.version==null?'(missing)':cat.version)+'.');
+  const L=cat.latest;
+  if(!L||typeof L!=='object'||Array.isArray(L))errors.push('The catalog has no "latest" entry.');
+  else{
+    if(!L.packageId||typeof L.packageId!=='string')errors.push('The latest entry has no packageId.');
+    if(!L.file||typeof L.file!=='string')errors.push('The latest entry has no file.');
+    if(!L.sha256||typeof L.sha256!=='string'||!/^[0-9a-fA-F]{64}$/.test(L.sha256))
+      errors.push('The latest entry has no valid SHA-256 (64 hex characters).');
+    if(L.bytes!=null&&!(isFinite(pkgNum(L.bytes))&&pkgNum(L.bytes)>0))errors.push('The latest entry has an unusable byte count.');
+    if(L.aliases!=null&&!Array.isArray(L.aliases))errors.push('The latest entry’s aliases must be a list.');
+  }
+  return {ok:errors.length===0,errors:errors,latest:errors.length?null:L};
+}
+
+let _pkgCatalogEntry=null;
+async function pkgLoadApproved(){
+  const fail=(title,lines,footer)=>pkgRenderRefusal(title,lines,footer||'Nothing was loaded and nothing was changed.');
+  // ---- the catalog itself is fetched from the app's own packages folder
+  const catRes=pkgResolveInPackages(PKG_CATALOG_FILE);
+  if(catRes.error)return fail('Cannot load the approved package',[catRes.error]);
+  toast('Checking for the approved package…',4000);
+  let cat;
+  try{
+    const r=await fetch(catRes.url.href,{cache:'no-store'});
+    if(!r.ok)return fail('Cannot reach the approved-package list',
+      ['The app asked for '+catRes.url.pathname+' and the server answered '+r.status+'.'],
+      'Nothing was loaded. If this keeps happening, use Choose File or Paste below with a package you have been sent directly.');
+    cat=JSON.parse(await r.text());
+  }catch(e){ return fail('Cannot read the approved-package list',[String(e&&e.message||e)],
+    'Nothing was loaded. You can still use Choose File or Paste below.'); }
+
+  const v=pkgCatalogValidate(cat);
+  if(!v.ok)return fail('The approved-package list is not usable',v.errors);
+  const L=v.latest;
+  _pkgCatalogEntry=L;
+
+  // ---- already applied? Answer before fetching anything else.
+  const already=pkgAppliedRecord(L.packageId,S,L.aliases);
+  if(already)return pkgRenderAlreadyCurrent(L,already);
+
+  // ---- resolve + fetch the package as BYTES
+  const pkgRes=pkgResolveInPackages(L.file);
+  if(pkgRes.error)return fail('Cannot load the approved package',[pkgRes.error]);
+  let buf,bytes;
+  try{
+    const r=await fetch(pkgRes.url.href,{cache:'no-store'});
+    if(!r.ok)return fail('Cannot reach the approved package',
+      ['The app asked for '+pkgRes.url.pathname+' and the server answered '+r.status+'.']);
+    buf=await r.arrayBuffer(); bytes=buf.byteLength;
+  }catch(e){ return fail('Cannot read the approved package',[String(e&&e.message||e)]); }
+
+  // ---- CHECKSUM BEFORE PARSE
+  const got=await pkgSha256Hex(buf);
+  if(got===null)return fail('Cannot verify the approved package',
+    ['This browser will not compute a SHA-256 checksum, so the app cannot prove the file is the one that was reviewed.'],
+    'Nothing was loaded. Applying an unverified package is exactly what this button exists to prevent — use Choose File only if you trust the file yourself.');
+  const want=String(L.sha256).toLowerCase();
+  if(!pkgChecksumMatches(got,want))return fail('Checksum mismatch — refused',
+    ['The file at '+pkgRes.url.pathname+' does not match the approved checksum.',
+     'expected  '+want,
+     'got       '+got+'   ('+bytes+' bytes'+(L.bytes!=null?(', expected '+pkgNum(L.bytes)):'')+')'
+    ],
+    'NOTHING was parsed, previewed or changed. Do not proceed. One innocent cause: running the app from a local copy of the repository, where the same file is stored with different line endings and so hashes differently. From the real site this means the file is not the one that was reviewed.');
+  if(L.bytes!=null&&bytes!==pkgNum(L.bytes))
+    return fail('Size mismatch — refused',
+      ['The file is '+bytes+' bytes; the approved entry says '+pkgNum(L.bytes)+'.'],
+      'NOTHING was parsed or previewed.');
+
+  // ---- only now is it safe to parse
+  let pkg;
+  try{ pkg=JSON.parse(new TextDecoder('utf-8').decode(buf)); }
+  catch(e){ return fail('The approved package is not valid JSON',[String(e&&e.message||e)],
+    'It passed its checksum, so the committed file itself is malformed. Nothing was previewed.'); }
+  if(pkg.packageId!==L.packageId&&pkgAliasSet(L.packageId,L.aliases).indexOf(pkg.packageId)<0)
+    return fail('The approved package is not the one the list names',
+      ['The list names "'+L.packageId+'"; the file says "'+(pkg.packageId||'(none)')+'".'],
+      'Nothing was previewed.');
+
+  // ---- hand off to the existing preview, gates and all
+  _pkgLoaded=pkg;
+  _pkgPlan=pkgPlan(pkg,S);
+  pkgRenderPreview();
+  try{
+    const el=$$('mb');
+    if(el)el.insertAdjacentHTML('afterbegin',
+      '<div class="wb green" style="font-size:12px;margin-bottom:10px">✅ Loaded <strong>'+_esc(L.title||L.packageId)+
+      '</strong> from this app’s own packages folder and verified its SHA-256 checksum'+
+      (L.reviewedBy?(', reviewed by '+_esc(L.reviewedBy)):'')+'.</div>');
+  }catch(e){}
+}
+
+function pkgRenderAlreadyCurrent(L,hit){
+  const when=String((hit&&hit.record&&hit.record.appliedAt)||'').replace('T',' ').slice(0,16);
+  mOpen('<div class="mh"><div class="mt">✅ You already have the latest approved show update</div><button class="mx" onclick="mClose()">&times;</button></div>'+
+  '<div class="wb green" style="font-size:13px;margin-bottom:10px">Nothing to do. <strong>'+_esc(L.title||L.packageId)+'</strong> is already on your board'+
+  (when?(', applied '+_esc(when)):'')+'.</div>'+
+  (L.summary?'<div style="font-size:12px;color:var(--muted);margin-bottom:10px">'+_esc(L.summary)+'</div>':'')+
+  '<div class="card" style="margin-bottom:10px">'+
+    '<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">Package</span><span style="font-weight:700;text-align:right;max-width:62%">'+_esc(L.packageId)+'</span></div>'+
+    (hit&&hit.viaAlias?('<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">Recorded on your board as</span><span style="font-weight:700;text-align:right;max-width:62%">'+_esc(hit.id)+'</span></div>'):'')+
+    (when?('<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">Applied</span><span style="font-weight:700">'+_esc(when)+'</span></div>'):'')+
+  '</div>'+
+  (hit&&hit.viaAlias?'<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Your board recorded this package under a slightly different id than the list uses. They are the same update, so there is nothing left to apply.</div>':'')+
+  // No Apply control. Deliberately: there is nothing to apply, and offering the
+  // button anyway would invite a double-apply the gates would then have to refuse.
+  '<button class="btn btn-gold btn-full" onclick="mClose();go(\'shows\')">View Shows</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="openShowPackage()">← Back to package tools</button>');
+}
+
 // ---- UI ----
 let _pkgLoaded=null, _pkgPlan=null;
 function openShowPackage(){
@@ -8507,12 +8756,18 @@ function openShowPackage(){
   ${(()=>{const g=pkgGate();return g.ok
     ?`<div class="wb green" style="margin-bottom:10px;font-size:12px">☁️ Signed in and synced. Changes save to this device and to your account.</div>`
     :`<div class="wb red" style="margin-bottom:10px;font-size:12px">☁️ <strong>Apply is unavailable right now.</strong><br>${g.reasons.map(_esc).join('<br>')}<br><br>You can still load and preview a package — previewing changes nothing. Applying is blocked until the above is fixed, because a change that lands only on this device is not saved, it is a divergence waiting to be overwritten by your next sync.</div>`;})()}
-  <div class="fg"><label class="fl">Paste the package JSON</label>
-    <textarea class="fi" id="pkg_text" style="min-height:90px;font-family:monospace;font-size:12px" placeholder='{"format":"bs-show-update-package","version":1,...}'></textarea></div>
-  <div class="g2" style="gap:8px">
-    <button class="btn btn-ghost btn-full" onclick="pkgPickFile()">📂 Choose File</button>
-    <button class="btn btn-gold btn-full" onclick="pkgPreviewFromText()">🔍 Preview</button>
-  </div>`);
+  <button class="btn btn-gold btn-full" style="margin-bottom:6px" onclick="pkgLoadApproved()">⬇️ Load Latest Approved Package</button>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Fetches the reviewed package from this app’s own files and checks its SHA-256 checksum before anything is read, then opens the same preview. Nothing is applied until you confirm.</div>
+  <details style="margin-top:4px">
+    <summary style="font-size:11px;color:var(--muted);cursor:pointer">Manual fallback — only if the button above cannot reach the file</summary>
+    <div style="font-size:11px;color:var(--muted);margin:8px 0">A package loaded this way is <strong>not</strong> checksum-verified against the approved list. Use it only for a file you have been sent directly and trust.</div>
+    <div class="fg"><label class="fl">Paste the package JSON</label>
+      <textarea class="fi" id="pkg_text" style="min-height:90px;font-family:monospace;font-size:12px" placeholder='{"format":"bs-show-update-package","version":1,...}'></textarea></div>
+    <div class="g2" style="gap:8px">
+      <button class="btn btn-ghost btn-full" onclick="pkgPickFile()">📂 Choose File</button>
+      <button class="btn btn-ghost btn-full" onclick="pkgPreviewFromText()">🔍 Preview</button>
+    </div>
+  </details>`);
 }
 function pkgPickFile(){
   const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
@@ -8860,8 +9115,9 @@ function pkgRenderReport(pkg,results,before,after,verify,localOk,push,cloudVerif
 function pkgSettingsCard(){
   return '<div class="card" style="border-color:rgba(255,215,0,0.35)">'+
   '<div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:8px">📦 APPLY SHOW UPDATE PACKAGE</div>'+
-  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Load a reviewed batch of show changes as a file instead of typing them in. Full before/after preview, one confirmation, a backup prompt, and a verification report. Saves through your own signed-in session — no password is ever asked for or stored.</div>'+
-  '<button class="btn btn-gold btn-full" onclick="openShowPackage()">📦 Apply Show Update Package</button>'+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">One tap loads the latest reviewed batch of show changes from this app’s own files, checks its checksum, and shows you a full before/after preview. One confirmation, a backup prompt, and a verification report. Saves through your own signed-in session — no password is ever asked for or stored.</div>'+
+  '<button class="btn btn-gold btn-full" onclick="pkgLoadApproved()">⬇️ Load Latest Approved Package</button>'+
+  '<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="openShowPackage()">📦 Package tools (file / paste)</button>'+
   '</div>';
 }
 

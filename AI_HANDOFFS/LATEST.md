@@ -1,18 +1,70 @@
 # LATEST
 
-Handoffs: **[2026-08-26-show-sync.md](2026-08-26-show-sync.md)** (v1 - merged, deployed as v33) - **[2026-08-26-show-sync-v2.md](2026-08-26-show-sync-v2.md)** (v2 - merged, deployed as v34) - **[2026-08-26-show-sync-v3.md](2026-08-26-show-sync-v3.md)** (v3 - this correction, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (this branch, in review)
 
 | | |
 |---|---|
-| **Date** | 2026-08-26 |
-| **Branch** | `claude/show-sync-v3-2026-08-26` |
-| **Base** | `1aa4d0e` on `main` (carries the merged, deployed v34) |
-| **App version** | **v34, unchanged - v3 is data-only** |
-| **Review state** | Approved by Scout. **Merged and deployed.** |
-| **Merged** | **Yes** - PR #29 squashed into `main` as `b293ecc188969ee40ad97a2a1f785e9174849c4b`. |
-| **Deployed** | **Yes** - Pages build `built` in 34.9s. App unchanged at **v34** (v3 is data-only). |
-| **v3 package URL** | <https://jfgreco84-commits.github.io/best-solution-app/packages/2026-08-26-show-sync-v3.json> |
-| **Live data changed** | **No.** No package has been applied. No real Supabase read or write has been made or attempted. |
+| **Date** | 2026-08-27 |
+| **Branch** | `claude/v35-approved-package-loader` |
+| **Base** | `eabf68e` on `main` |
+| **App version** | v34 → **v35** |
+| **Review state** | **Awaiting Scout. Not merged, not deployed, nothing applied.** |
+| **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v35 adds
+
+**One button: Load Latest Approved Package.** It fetches a committed catalog at
+`packages/approved-show-packages.json`, resolves the named package inside the
+app's **own** packages folder, verifies its **SHA-256 before parsing it**, and
+opens the existing preview. Everything it removes is handling; nothing it
+removes is a gate.
+
+- A catalog-supplied name must be a **bare filename** and must still resolve
+  same-origin inside `packages/` — two dozen off-limits shapes are pinned by
+  test.
+- Anything that is not a clean 64-hex checksum match **refuses**, including a
+  null digest. "Could not compute" never reads as "fine".
+- `pkg_2026-08-26_show_sync_v3` and `pkg_2026-08-26_show-sync_v3` are
+  recognised as one package, in both directions, and now through the paste path
+  too.
+- If either id is recorded: **"You already have the latest approved show
+  update"**, with no Apply button.
+- Paste and Choose File remain as a manual fallback, behind a disclosure saying
+  they are not checksum-verified.
+- `.gitattributes` pins `packages/*.json` to LF so a Windows clone matches the
+  bytes the catalog hashes.
+
+**Verified:** 430/430 checks passing, three consecutive runs. Live against the
+real button: the happy path loads and previews; a CRLF copy, a tampered checksum
+and an off-origin catalog are each refused with nothing parsed; the
+already-current screen offers no Apply; and signed out, Apply is withheld and
+`pkgApply()` still refuses on its own.
+
+**Note for review:** this round changes app code, so unlike the v3 round the
+four suites the browser adapter cannot run are **not** provably unaffected and
+need a Node run.
+
+## v3 is already applied — nothing left to apply
+
+Justin applied v3 successfully, under the underscore spelling
+`pkg_2026-08-26_show_sync_v3`. From **his saved application report**: local
+verification passed, cloud write completed, cloud verification passed, update
+complete **true**, shows **44 → 46**, reapply blocked **true**. The 44 → 46
+matches the two creations in the **6 / 50 / 2 / 0** preview derived for his
+board.
+
+**This comes from Justin's saved application report, not from a new live
+Supabase read.** Nothing in this round queried, read or wrote his account. The
+report is not committed — it is his business data and this repository is public.
+
+**After v35 deploys**, Justin opens the synced app and taps **Load Latest
+Approved Package**. It must show **You already have the latest approved show
+update**, identify that it was recorded under **`pkg_2026-08-26_show_sync_v3`**,
+and offer **no Apply control**. **Do not reapply the package.**
+
+---
+
+# Previous rounds
 
 ## Why there is a v3
 
@@ -42,12 +94,14 @@ records - 0 blocked** (Scout's measured v2 figure of 31/1 plus the measured
 **Deployed and byte-verified.** The v3 JSON GitHub Pages serves is
 byte-identical to the committed blob (`c3f2e0c7`, SHA-256 `bb2c65ea...`,
 11,300 bytes), and that blob id is the same one at the reviewed commit. The app
-is untouched at v34, and the v1 and v2 packages are unchanged. **Neither
-package has been applied.**
+is untouched at v34, and the v1 and v2 packages are unchanged.
+
+**v3 has since been applied by Justin**, under the underscore spelling
+`pkg_2026-08-26_show_sync_v3` — see the v35 section above. v1 and v2 were never
+applied and are superseded.
 
 ---
 
-# Previous rounds
 
 ## Why there is a v2
 
@@ -120,10 +174,9 @@ without touching its name.
 
 ## Next
 
-**The code is live. The data is not.** Justin applies **v2** — not v1 — himself,
-from a signed-in and synced device, after downloading a backup. The preview must
-read **6 / 42 / 2 / 0** with operation 1 showing **UPDATE**; if it shows CREATE,
-stop.
+**SUPERSEDED — v2 was never applied.** Its Party on the Pavement operation
+turned out to be a no-op against the real board, so it was replaced by **v3**,
+which Justin has since applied. See the v35 section at the top. Do not apply v2.
 
 Still outstanding from the sheet: the payment method for The Last Fling
 ($68, 2026-08-21) and Mistletoe & Martinis ($100 by phone, 2026-08-25), and the
