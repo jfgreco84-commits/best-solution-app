@@ -1,18 +1,52 @@
 # LATEST
 
-Handoffs: **[2026-08-26-show-sync.md](2026-08-26-show-sync.md)** (v1 - merged, deployed as v33) - **[2026-08-26-show-sync-v2.md](2026-08-26-show-sync-v2.md)** (v2 - merged, deployed as v34) - **[2026-08-26-show-sync-v3.md](2026-08-26-show-sync-v3.md)** (v3 - this correction, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (this branch, in review)
 
 | | |
 |---|---|
-| **Date** | 2026-08-26 |
-| **Branch** | `claude/show-sync-v3-2026-08-26` |
-| **Base** | `1aa4d0e` on `main` (carries the merged, deployed v34) |
-| **App version** | **v34, unchanged - v3 is data-only** |
-| **Review state** | Approved by Scout. **Merged and deployed.** |
-| **Merged** | **Yes** - PR #29 squashed into `main` as `b293ecc188969ee40ad97a2a1f785e9174849c4b`. |
-| **Deployed** | **Yes** - Pages build `built` in 34.9s. App unchanged at **v34** (v3 is data-only). |
-| **v3 package URL** | <https://jfgreco84-commits.github.io/best-solution-app/packages/2026-08-26-show-sync-v3.json> |
-| **Live data changed** | **No.** No package has been applied. No real Supabase read or write has been made or attempted. |
+| **Date** | 2026-08-27 |
+| **Branch** | `claude/v35-approved-package-loader` |
+| **Base** | `eabf68e` on `main` |
+| **App version** | v34 → **v35** |
+| **Review state** | **Awaiting Scout. Not merged, not deployed, nothing applied.** |
+| **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v35 adds
+
+**One button: Load Latest Approved Package.** It fetches a committed catalog at
+`packages/approved-show-packages.json`, resolves the named package inside the
+app's **own** packages folder, verifies its **SHA-256 before parsing it**, and
+opens the existing preview. Everything it removes is handling; nothing it
+removes is a gate.
+
+- A catalog-supplied name must be a **bare filename** and must still resolve
+  same-origin inside `packages/` — two dozen off-limits shapes are pinned by
+  test.
+- Anything that is not a clean 64-hex checksum match **refuses**, including a
+  null digest. "Could not compute" never reads as "fine".
+- `pkg_2026-08-26_show_sync_v3` and `pkg_2026-08-26_show-sync_v3` are
+  recognised as one package, in both directions, and now through the paste path
+  too.
+- If either id is recorded: **"You already have the latest approved show
+  update"**, with no Apply button.
+- Paste and Choose File remain as a manual fallback, behind a disclosure saying
+  they are not checksum-verified.
+- `.gitattributes` pins `packages/*.json` to LF so a Windows clone matches the
+  bytes the catalog hashes.
+
+**Verified:** 430/430 checks passing, three consecutive runs. Live against the
+real button: the happy path loads and previews; a CRLF copy, a tampered checksum
+and an off-origin catalog are each refused with nothing parsed; the
+already-current screen offers no Apply; and signed out, Apply is withheld and
+`pkgApply()` still refuses on its own.
+
+**Note for review:** this round changes app code, so unlike the v3 round the
+four suites the browser adapter cannot run are **not** provably unaffected and
+need a Node run.
+
+---
+
+# Previous rounds
 
 ## Why there is a v3
 
@@ -47,7 +81,6 @@ package has been applied.**
 
 ---
 
-# Previous rounds
 
 ## Why there is a v2
 
