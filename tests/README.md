@@ -51,6 +51,16 @@ through to CREATE a second record on the same day at the same venue. Section 10
 runs both packages against a board carrying the real record and asserts v2
 updates it in place while two decoys - the same event name on another date, and
 a same-named event at another organizer - are left byte-for-byte untouched.
+Section 12 pins the v3 correction. Party on the Pavement is absent from the
+real board while its migration marker still suppresses re-seeding, so v2's
+markPassed - which only ever matches an existing record - returned UNMATCHED
+and the decision left no trace. Section 12 covers create-when-absent,
+update-in-place-when-pending, no-change-when-already-passed, blocked-and-
+untouched when a same-named show sits in the wrong town, and reapply producing
+nothing. It also pins each half of the passed contract separately: out of every
+bucket, alert, total, calendar, conflict and transfer target, AND present in
+Passed / Not Doing history.
+
 Section 11 covers the guards that make that class of bug hard to reintroduce:
 near-duplicate detection on same-date overlapping names, an update refusing to
 proceed when it matches more than one record, and startDate genuinely narrowing

@@ -845,4 +845,207 @@ R.check('and it is the right year', datedPlan.ops[0].target.id, 'y1');
 R.check('the other year is reported as skipped',
   /NOT TOUCHED/.test(datedPlan.ops[0].notes.join(' ')), true);
 
+
+// =======================================================================
+R.section('12. v3 package: reinstate Party on the Pavement as passed history');
+
+// The failure this section exists to prevent: Party on the Pavement is ABSENT
+// from Justin's board — deleted at some point — while the pop_racine_20260818
+// migration marker still records it as seeded. The marker suppresses
+// re-seeding, so nothing brings it back, and v2's markPassed operation only
+// ever MATCHES an existing record. Against the real board it returned
+// UNMATCHED and skipped, leaving no record at all: not in Upcoming, and not in
+// Passed / Not Doing history either. The decision simply vanished.
+//
+// v3 replaces that operation with a create-or-update carrying the passed
+// fields, so the historical record is reinstated already in the passed state.
+
+const PKG3=JSON.parse(fs.readFileSync(path.join(__dirname,'..','packages','2026-08-26-show-sync-v3.json'),'utf8'));
+R.check('v3 declares the right format', PKG3.format, 'bs-show-update-package');
+R.check('v3 has a distinct package id', PKG3.packageId, 'pkg_2026-08-26_show-sync_v3');
+R.check('v3 id ends in _v3', /_v3$/.test(PKG3.packageId), true);
+R.check('v3 supersedes v2', PKG3.supersedes, 'pkg_2026-08-26_show-sync_v2');
+R.check('v3 is not the v2 id', PKG3.packageId===PKG2.packageId, false);
+R.check('v3 preserves six operations', PKG3.operations.length, 6);
+
+// The five approved operations must be untouched, field for field.
+const V3_UNCHANGED=[0,1,3,4,5];
+R.check('the other five operations are byte-for-byte v2',
+  V3_UNCHANGED.every(i=>JSON.stringify(PKG3.operations[i])===JSON.stringify(PKG2.operations[i])), true);
+R.check('and only operation 3 differs',
+  PKG3.operations.findIndex((o,i)=>JSON.stringify(o)!==JSON.stringify(PKG2.operations[i])), 2);
+
+const party3=PKG3.operations[2];
+R.check('the Party operation is now an upsert', party3.op, 'upsertShow');
+R.check('it matches the name', party3.match.nameContains, ['party on the pavement']);
+R.check('...AND the exact start date', party3.match.startDate, '2026-09-19');
+R.check('...AND requires Racine evidence', party3.match.requiredEvidenceAny, ['racine']);
+R.check('it will not rename an existing record', party3.keepExistingName, true);
+R.check('it stores the passed state', party3.show.passed, true);
+R.check('with the required reason', party3.show.passedReason, 'Justin decided not to participate in 2026.');
+R.check('and the required revisit', party3.show.passedRevisit, '2027 application cycle');
+// "Does not create a payment" — this show was never approved and never paid.
+R.check('it creates NO payment', party3.boothPayments, undefined);
+// Canonical seed facts, not invented ones.
+R.check('booth cost from the seed', party3.show.boothCost, 450);
+R.check('mileage from the seed', party3.show.miles, 24);
+R.check('location from the seed', party3.show.location, 'Racine, WI');
+R.check('hours from the seed', [party3.show.openTime,party3.show.closeTime], ['12:00','19:00']);
+R.check('application deadline from the seed', party3.show.depositDue, '2026-08-22');
+R.check('confirmed false, as it was never approved', party3.show.confirmed, false);
+R.check('the seed notes carried verbatim', party3.show.notes.length, 1176);
+R.check('notes start as the seed does', /^PARTY ON THE PAVEMENT \(23rd annual\)/.test(party3.show.notes), true);
+// Documented departure: the seed's projected $4 parking is deliberately absent,
+// because calcYTD counts a non-completed show's showExpenses as money spent and
+// we are not going.
+R.check('the projected parking expense is deliberately omitted', party3.show.showExpenses, undefined);
+R.check('and the departure is documented', (PKG3.seedDepartures||[]).length, 2);
+
+// ---- Party ABSENT: created once, and passed ----
+function boardNoParty(){
+  return realBoard().filter(s=>!/pavement/i.test(s.name));
+}
+setState(boardNoParty());
+R.check('the fixture really has no Party record',
+  C.S.shows.filter(s=>/pavement/i.test(s.name)).length, 0);
+const beforeAbsent=C.S.shows.length;
+let p3=C.pkgPlan(PKG3,C.S);
+R.check('v3 plans cleanly with Party absent', p3.ok, true);
+R.check('nothing blocked', p3.blockedCount, 0);
+const pOp=p3.ops[2];
+R.check('the Party operation is a CREATE', pOp.action, 'create');
+R.check('and it contributes 19 field changes', pOp.changes.length, 19);
+C.pkgExecute(PKG3,p3,C.S);
+R.check('exactly one Party record now exists',
+  C.S.shows.filter(s=>/pavement/i.test(s.name)).length, 1);
+R.check('the board grew by exactly one for it', C.S.shows.length, beforeAbsent+3); // party + mistletoe + rf
+let party=C.S.shows.find(s=>/pavement/i.test(s.name));
+R.check('it is PASSED', C.isPassed(party), true);
+R.check('it is NOT missed', C.isMissed(party), false);
+R.check('it is NOT upcoming', C.isUpcoming(party), false);
+R.check('the reason is recorded', party.passedReason, 'Justin decided not to participate in 2026.');
+R.check('the revisit is recorded', party.passedRevisit, '2027 application cycle');
+R.check('the source names the package', party.passedSource, 'pkg_2026-08-26_show-sync_v3');
+R.check('NO payment was created', party.boothPayments.length, 0);
+R.check('the booth cost is preserved as history', party.boothCost, 450);
+R.check('the full seed notes are preserved', (party.notes||'').length, 1176);
+R.check('the day scaffolding was built', (party.days||[]).length, 1);
+
+// ---- kept out of every forward-looking surface ----
+R.check('not in any pipeline bucket',
+  C.pipelineBuckets(C.S.shows.filter(s=>C.isUpcoming(s))).planned.filter(s=>/pavement/i.test(s.name)).length, 0);
+R.check('raises no payment-due alert despite carrying a deposit date',
+  C.depositAlerts(400).filter(x=>/pavement/i.test(x.sh.name)).length, 0);
+R.check('and it really does carry that date', party.depositDue, '2026-08-22');
+R.check('its $450 booth is not in the owed total',
+  C.calcBoothTally().owed, C.S.shows.filter(s=>s.status!=='completed'&&!C.isPassed(s))
+    .reduce((t,s)=>t+(s.boothCost||0),0));
+R.check('it creates no schedule conflict', C.showConflicts(party).length, 0);
+R.check('it is off the calendar',
+  C.S.shows.filter(s=>!C.isPassed(s)).filter(s=>/pavement/i.test(s.name)).length, 0);
+R.check('it is not a transfer target',
+  C.transferableShows().filter(s=>/pavement/i.test(s.name)).length, 0);
+R.check('it is not counted as a booked show',
+  C.S.shows.filter(s=>!C.isMissed(s)&&!C.isPassed(s)).filter(s=>/pavement/i.test(s.name)).length, 0);
+// And it IS in the history it belongs in.
+R.check('it appears in Passed / Not Doing',
+  C.S.shows.filter(s=>C.isPassed(s)).filter(s=>/pavement/i.test(s.name)).length, 1);
+
+// ---- the rest of the package still behaves ----
+R.check('Last Fling was UPDATED, not duplicated',
+  C.S.shows.filter(s=>/last fling/i.test(s.name)).length, 1);
+R.check('and it is still the original record', C.S.shows.find(s=>/last fling/i.test(s.name)).id, 'sh_fling');
+R.check('its name is still the organizer name',
+  C.S.shows.find(s=>/last fling/i.test(s.name)).name, 'The Last Fling Artisan Market');
+R.check('five Rustic Fox + Party records are passed', C.S.shows.filter(s=>C.isPassed(s)).length, 5);
+R.check('the unrelated Kris Kringle is untouched', C.isPassed(C.S.shows.find(s=>s.id==='sh_other')), false);
+
+// ---- reapply: zero changes, no duplicate ----
+R.check('RE-PLANNING v3 FINDS NOTHING LEFT TO DO', C.pkgPlan(PKG3,C.S).changeCount, 0);
+const afterV3=JSON.stringify(C.S);
+C.pkgExecute(PKG3,C.pkgPlan(PKG3,C.S),C.S);
+R.check('REAPPLYING v3 CHANGES NOTHING', JSON.stringify(C.S), afterV3);
+R.check('still exactly one Party record',
+  C.S.shows.filter(s=>/pavement/i.test(s.name)).length, 1);
+R.check('still no payment on it',
+  C.S.shows.find(s=>/pavement/i.test(s.name)).boothPayments.length, 0);
+
+// ---- Party already PENDING: updated in place, not duplicated ----
+setState(boardNoParty().concat([
+  show({name:'Party on the Pavement',startDate:'2026-09-19',id:'sh_pending_party',
+    location:'Racine, WI',confirmed:false,boothCost:450,depositDue:'2026-08-22'})
+]));
+p3=C.pkgPlan(PKG3,C.S);
+R.check('with Party pending the operation is an UPDATE', p3.ops[2].action, 'update');
+R.check('and it targets the existing record', p3.ops[2].target.id, 'sh_pending_party');
+const pendingCount=C.S.shows.length;
+C.pkgExecute(PKG3,p3,C.S);
+R.check('no second Party record was created',
+  C.S.shows.filter(s=>/pavement/i.test(s.name)).length, 1);
+party=C.S.shows.find(s=>/pavement/i.test(s.name));
+R.check('it is the SAME record, by id', party.id, 'sh_pending_party');
+R.check('it is now passed', C.isPassed(party), true);
+R.check('and not missed', C.isMissed(party), false);
+R.check('it left Pending / Applied',
+  C.pipelineBuckets(C.S.shows.filter(s=>C.isUpcoming(s))).pending.filter(s=>/pavement/i.test(s.name)).length, 0);
+R.check('board grew only by the two creates', C.S.shows.length, pendingCount+2);
+
+// ---- Party already PASSED: no additional changes ----
+R.check('re-planning against the passed record finds nothing', C.pkgPlan(PKG3,C.S).changeCount, 0);
+const passedSnapshot=JSON.stringify(C.S.shows.find(s=>/pavement/i.test(s.name)));
+C.pkgExecute(PKG3,C.pkgPlan(PKG3,C.S),C.S);
+R.check('and applying again leaves the record identical',
+  JSON.stringify(C.S.shows.find(s=>/pavement/i.test(s.name))), passedSnapshot);
+
+// ---- same name and date, WRONG location: untouched, and no duplicate ----
+setState(boardNoParty().concat([
+  show({name:'Party on the Pavement',startDate:'2026-09-19',id:'sh_wrong_town',
+    location:'Kenosha, WI',organizer:'Kenosha Downtown Association',confirmed:false,boothCost:200})
+]));
+const wrongBefore=JSON.stringify(C.S.shows.find(s=>s.id==='sh_wrong_town'));
+const wrongCount=C.S.shows.length;
+p3=C.pkgPlan(PKG3,C.S);
+R.check('the operation is BLOCKED rather than matching the wrong town', p3.ops[2].blocked, true);
+R.check('the whole package becomes unapplyable', p3.ok, false);
+R.check('the block explains it refuses to create a duplicate',
+  /refusing to create/.test(p3.ops[2].notes.join(' ')), true);
+R.check('and it names the record it would not touch',
+  /NOT TOUCHED/.test(p3.ops[2].notes.join(' ')), true);
+C.pkgExecute(PKG3,p3,C.S);
+R.check('THE WRONG-TOWN RECORD IS BYTE-FOR-BYTE UNTOUCHED',
+  JSON.stringify(C.S.shows.find(s=>s.id==='sh_wrong_town')), wrongBefore);
+// pkgExecute skips the blocked operation but still runs the other five, so the
+// board grows by the two legitimate creates. What must NOT happen is a second
+// Party record appearing beside the wrong-town one.
+R.check('no second Party record was created beside it',
+  C.S.shows.filter(s=>/pavement/i.test(s.name)).length, 1);
+R.check('the board grew only by the two unrelated creates', C.S.shows.length, wrongCount+2);
+// And in the real flow nothing would run at all, because the package is
+// unapplyable while any operation is blocked.
+R.check('pkgApply would refuse the whole package', C.pkgPlan(PKG3,C.S).ok!==true, true);
+R.check('it is still not passed', C.isPassed(C.S.shows.find(s=>s.id==='sh_wrong_town')), false);
+
+// ---- Wonderful World of Weddings, through the whole of v3 ----
+setState(boardNoParty());
+const wwwV3Before=JSON.stringify(C.S.shows.find(s=>s.id==='sh_www'));
+C.pkgExecute(PKG3,C.pkgPlan(PKG3,C.S),C.S);
+R.check('WONDERFUL WORLD OF WEDDINGS IS BYTE-FOR-BYTE UNCHANGED',
+  JSON.stringify(C.S.shows.find(s=>s.id==='sh_www')), wwwV3Before);
+R.check('its balance is still owed in full', C.boothBalance(C.S.shows.find(s=>s.id==='sh_www')), 837.8);
+R.check('and it is still the only entry in Owe Booth',
+  C.pipelineBuckets(C.S.shows.filter(s=>C.isUpcoming(s))).owe.map(s=>s.id), ['sh_www']);
+
+// ---- v3 vs v2: the difference is exactly one operation ----
+setState(boardNoParty());
+const v2plan=C.pkgPlan(PKG2,C.S);
+const v3plan=C.pkgPlan(PKG3,C.S);
+R.check('v2 leaves the Party operation UNMATCHED', v2plan.ops[2].action, 'none');
+R.check('and says so plainly', /UNMATCHED/.test(v2plan.ops[2].notes.join(' ')), true);
+R.check('v3 adds exactly 19 field changes over v2',
+  v3plan.changeCount-v2plan.changeCount, 19);
+R.check('and exactly one more creation',
+  v3plan.createCount-v2plan.createCount, 1);
+R.check('every other operation plans identically',
+  V3_UNCHANGED.every(i=>v2plan.ops[i].changes.length===v3plan.ops[i].changes.length), true);
+
 R.done();

@@ -1,18 +1,44 @@
 # LATEST
 
-Handoffs: **[2026-08-26-show-sync.md](2026-08-26-show-sync.md)** (v1 work — merged and deployed as v33) · **[2026-08-26-show-sync-v2.md](2026-08-26-show-sync-v2.md)** (this correction)
+Handoffs: **[2026-08-26-show-sync.md](2026-08-26-show-sync.md)** (v1 - merged, deployed as v33) - **[2026-08-26-show-sync-v2.md](2026-08-26-show-sync-v2.md)** (v2 - merged, deployed as v34) - **[2026-08-26-show-sync-v3.md](2026-08-26-show-sync-v3.md)** (v3 - this correction, in review)
 
 | | |
 |---|---|
 | **Date** | 2026-08-26 |
-| **Branch** | `claude/show-sync-v2-2026-08-26` |
-| **Base** | `44f6551` on `main` (already carries the merged, deployed v33) |
-| **App version** | v33 → **v34** |
-| **Review state** | Approved by Scout. **Merged and deployed.** |
-| **Merged** | **Yes** — PR #28 squashed into `main` as `3ac572036a84e3bf87d06ac02076ee6cd10ccdff`. |
-| **Deployed** | **Yes** — Pages build `built` in 32.4s. <https://jfgreco84-commits.github.io/best-solution-app/BEST_SOLUTION_APP.html> serves **v34**. |
-| **v2 package URL** | <https://jfgreco84-commits.github.io/best-solution-app/packages/2026-08-26-show-sync-v2.json> |
-| **Live data changed** | **No.** Neither package has been applied. No real Supabase read or write has been made or attempted. |
+| **Branch** | `claude/show-sync-v3-2026-08-26` |
+| **Base** | `1aa4d0e` on `main` (carries the merged, deployed v34) |
+| **App version** | **v34, unchanged - v3 is data-only** |
+| **Review state** | **Awaiting Scout. Not merged, not deployed, nothing applied.** |
+| **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## Why there is a v3
+
+Scout analysed Justin's three-copy export. **Party on the Pavement is absent
+from both device and cloud**, while the `pop_racine_20260818` migration marker
+still records it as seeded - so the marker suppresses re-seeding and nothing
+brings it back. v2's operation was a `markPassed`, which only ever *matches* an
+existing record, so on the real board it returned **UNMATCHED and skipped**: the
+decision to pass on the show left no trace anywhere.
+
+v3 replaces that operation with a create-or-update carrying the passed fields,
+so the historical record is reinstated already in Passed / Not Doing. The other
+five operations are byte-for-byte v2's. **No app-code change** -
+`BEST_SOLUTION_APP.html` is byte-identical to `main`.
+
+**One invariant is bypassed and Scout should rule on it:** an `upsertShow`
+writing `passed:true` does not go through `pndMarkPassed()`, so it skips that
+function's refusal to pass a completed or active show. Not reachable for this
+package on this board (Party is absent; its date is in the future), bounded and
+visible if it ever were. Full analysis in the v3 handoff.
+
+**Verified:** 349/349 checks passing, three consecutive runs. Preview counts
+against the exported 44-show board: **6 operations - 50 field changes - 2 new
+records - 0 blocked** (Scout's measured v2 figure of 31/1 plus the measured
++19/+1 delta from the one changed operation).
+
+---
+
+# Previous rounds
 
 ## Why there is a v2
 
