@@ -8,8 +8,11 @@ Handoffs: **[2026-08-26-show-sync.md](2026-08-26-show-sync.md)** (v1 - merged, d
 | **Branch** | `claude/show-sync-v3-2026-08-26` |
 | **Base** | `1aa4d0e` on `main` (carries the merged, deployed v34) |
 | **App version** | **v34, unchanged - v3 is data-only** |
-| **Review state** | **Awaiting Scout. Not merged, not deployed, nothing applied.** |
-| **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+| **Review state** | Approved by Scout. **Merged and deployed.** |
+| **Merged** | **Yes** - PR #29 squashed into `main` as `b293ecc188969ee40ad97a2a1f785e9174849c4b`. |
+| **Deployed** | **Yes** - Pages build `built` in 34.9s. App unchanged at **v34** (v3 is data-only). |
+| **v3 package URL** | <https://jfgreco84-commits.github.io/best-solution-app/packages/2026-08-26-show-sync-v3.json> |
+| **Live data changed** | **No.** No package has been applied. No real Supabase read or write has been made or attempted. |
 
 ## Why there is a v3
 
@@ -35,6 +38,12 @@ visible if it ever were. Full analysis in the v3 handoff.
 against the exported 44-show board: **6 operations - 50 field changes - 2 new
 records - 0 blocked** (Scout's measured v2 figure of 31/1 plus the measured
 +19/+1 delta from the one changed operation).
+
+**Deployed and byte-verified.** The v3 JSON GitHub Pages serves is
+byte-identical to the committed blob (`c3f2e0c7`, SHA-256 `bb2c65ea...`,
+11,300 bytes), and that blob id is the same one at the reviewed commit. The app
+is untouched at v34, and the v1 and v2 packages are unchanged. **Neither
+package has been applied.**
 
 ---
 
