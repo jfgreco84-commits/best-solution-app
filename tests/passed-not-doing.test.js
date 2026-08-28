@@ -261,6 +261,60 @@ C.pkgExecute(pkg([second]),C.pkgPlan(pkg([second]),C.S),C.S);
 R.check('a genuinely different payment IS added', C.S.shows[0].boothPayments.length, 2);
 
 // =======================================================================
+R.section('6b. Package upsert: blank fields never overwrite, notes append');
+// Ported from the Booked Show Handoff design: a blank incoming field must
+// never erase a filled one, and notes accumulate instead of being replaced.
+// pkgPlan and pkgExecute share one policy (pkgFieldOutcome) so the preview
+// can never promise a change pkgExecute then declines to make.
+
+setState([show({name:'Blank Field Test',startDate:FUTURE,id:'sh_blank',
+  location:'Antioch, IL',miles:33,notes:'existing organizer note'})]);
+
+const blankLoc={op:'upsertShow',match:{name:'Blank Field Test',startDate:FUTURE},
+  show:{location:'',miles:0,boothCost:75}};
+let blankPlan=C.pkgPlan(pkg([blankLoc]),C.S);
+R.check('blank location is not offered as a change',
+  blankPlan.ops[0].changes.some(c=>c.field==='location'), false);
+R.check('zero miles is offered — 0 is a real value, not blank',
+  blankPlan.ops[0].changes.some(c=>c.field==='miles'), true);
+R.check('a real boothCost is offered as a change',
+  blankPlan.ops[0].changes.some(c=>c.field==='boothCost'), true);
+
+C.pkgExecute(pkg([blankLoc]),blankPlan,C.S);
+R.check('blank location did NOT overwrite the existing one',
+  C.S.shows.find(s=>s.id==='sh_blank').location, 'Antioch, IL');
+R.check('zero miles DID land — 0 is a legitimate value',
+  C.S.shows.find(s=>s.id==='sh_blank').miles, 0);
+R.check('boothCost DID land', C.S.shows.find(s=>s.id==='sh_blank').boothCost, 75);
+R.check('notes were left untouched by an operation that named no notes field',
+  C.S.shows.find(s=>s.id==='sh_blank').notes, 'existing organizer note');
+
+const addNote={op:'upsertShow',match:{name:'Blank Field Test',startDate:FUTURE},
+  show:{notes:'accepted, awaiting payment'}};
+C.pkgExecute(pkg([addNote]),C.pkgPlan(pkg([addNote]),C.S),C.S);
+R.check('a new note is APPENDED, not replacing the old one',
+  C.S.shows.find(s=>s.id==='sh_blank').notes,
+  'existing organizer note\naccepted, awaiting payment');
+
+// Re-planning and re-applying the exact same note must settle to nothing —
+// this is the "no-op re-paste writes nothing" guarantee.
+let renotePlan=C.pkgPlan(pkg([addNote]),C.S);
+R.check('re-planning the same note finds nothing left to change', renotePlan.changeCount, 0);
+C.pkgExecute(pkg([addNote]),renotePlan,C.S);
+R.check('the note was not duplicated by a replay',
+  C.S.shows.find(s=>s.id==='sh_blank').notes,
+  'existing organizer note\naccepted, awaiting payment');
+
+const blankNote={op:'upsertShow',match:{name:'Blank Field Test',startDate:FUTURE},show:{notes:''}};
+let blankNotePlan=C.pkgPlan(pkg([blankNote]),C.S);
+R.check('a blank note is never offered as a change',
+  blankNotePlan.ops[0].changes.some(c=>c.field==='notes'), false);
+C.pkgExecute(pkg([blankNote]),blankNotePlan,C.S);
+R.check('a blank note did not erase the existing notes',
+  C.S.shows.find(s=>s.id==='sh_blank').notes,
+  'existing organizer note\naccepted, awaiting payment');
+
+// =======================================================================
 R.section('7. Package matching: normalization, drift, ambiguity');
 
 setState([show({name:'Rustic Fox — Carol Stream (Sep)',startDate:FUTURE,id:'sh_rf'})]);
