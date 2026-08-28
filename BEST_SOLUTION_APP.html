@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v35';
+const APP_VERSION='v36';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -8298,6 +8298,30 @@ function pkgResolve(st,sel){
       : 'no record matched'};
 }
 
+/* Field write policy shared by pkgPlan (preview) and pkgExecute (real write),
+   so the two can never disagree about what a package will do to an existing
+   record:
+     - A blank incoming value (null/undefined/'') never overwrites a filled
+       existing one. A sparse handoff can only add detail, never erase it.
+     - notes append rather than replace, and a note already present (or a
+       duplicate of the incoming text) is not added again.
+   This only applies to UPDATING an existing show. Creating a new one writes
+   every field the package supplies — there is nothing yet to protect. */
+function pkgIsBlank(v){return v==null||v==='';}
+function pkgFieldOutcome(existing,incoming,key){
+  if(key==='notes'){
+    const inc=String(incoming||'').trim();
+    if(!inc)return {write:false};
+    const cur=String(existing||'').trim();
+    if(!cur)return {write:true,value:inc};
+    if(cur===inc||cur.indexOf(inc)>=0)return {write:false};
+    return {write:true,value:cur+'\n'+inc};
+  }
+  if(pkgIsBlank(incoming)&&!pkgIsBlank(existing))return {write:false};
+  if(JSON.stringify(existing)===JSON.stringify(incoming))return {write:false};
+  return {write:true,value:incoming};
+}
+
 /* ---- Build the plan. READ ONLY. Touches nothing, allocates no ids, and is
    safe to run as many times as the owner likes. ---- */
 function pkgPlan(pkg,st){
@@ -8380,12 +8404,16 @@ function pkgPlan(pkg,st){
       rec.action='update';
       rec.target=sh;
       if(r.mode==='name-drift')rec.notes.push('DATE DRIFT: '+r.how+'. Matched on name alone. Check this is the right record before applying.');
-      // Field changes: only fields the package names, and only when different.
+      // Field changes: only fields the package names, and only when the
+      // shared write policy (see pkgFieldOutcome) says this actually writes
+      // something — a blank field skipped here must also be skipped by
+      // pkgExecute, or the preview would promise a change that never lands.
       Object.keys(op.show||{}).forEach(k=>{
         if(k==='name'&&op.keepExistingName)return;
-        const before=sh[k], after=(op.show||{})[k];
-        if(JSON.stringify(before)===JSON.stringify(after))return;
-        rec.changes.push({field:k,before:pkgFmtVal(before),after:pkgFmtVal(after)});
+        const before=sh[k];
+        const outcome=pkgFieldOutcome(before,(op.show||{})[k],k);
+        if(!outcome.write)return;
+        rec.changes.push({field:k,before:pkgFmtVal(before),after:pkgFmtVal(outcome.value)});
       });
       (op.boothPayments||[]).forEach(p=>{
         const dup=(sh.boothPayments||[]).find(x=>pkgSamePayment(x,p));
@@ -8510,7 +8538,11 @@ function pkgExecute(pkg,plan,state){
       }else{
         sh=r.hits[0];
         const base=op.show||{};
-        Object.keys(base).forEach(k=>{ if(k==='name'&&op.keepExistingName)return; sh[k]=base[k]; });
+        Object.keys(base).forEach(k=>{
+          if(k==='name'&&op.keepExistingName)return;
+          const outcome=pkgFieldOutcome(sh[k],base[k],k);
+          if(outcome.write)sh[k]=outcome.value;
+        });
         res.push({tag:rec.tag,status:'updated',id:sh.id,detail:sh.name+' ('+(sh.startDate||'no date')+')'});
       }
       sh.boothPayments=sh.boothPayments||[];
