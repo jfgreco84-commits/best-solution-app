@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v36';
+const APP_VERSION='v37';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -1892,8 +1892,123 @@ function dayBoothWrite(d,boothId){
   return d.boothCounts[boothId];
 }
 function boothMoney(en){ return calcPmt((en&&en.payments)||{}); }
-function boothSold(en){ if(!en||!en.morningCount||!en.eveningCount)return null; return daySold(en); }
-function boothCogsUnits(en){ if(!en||!en.morningCount||!en.eveningCount)return null; return dayUnitsLeft(en); }
+/* ---------------------------------------------------------------------
+   BOOTH-TO-BOOTH TRANSFERS
+   ---------------------------------------------------------------------
+   Booth 2 runs out of C5 Small at noon and Booth 1 has a case under the
+   table. That product moves. It was not sold, it was not lost, and the
+   show did not gain or lose a single bottle by moving it.
+
+   The ledger is ONE list per day, d.boothTransfers, and each booth's
+   in/out totals are DERIVED from it. There is no second copy to drift,
+   and undoing a transfer is deleting its row.
+
+   The invariant that makes this safe: EVERY TRANSFER CANCELS ITSELF AT
+   THE SHOW LEVEL. What leaves booth A arrives at booth B, so summed
+   across the booths the in and out totals are identical and the day's
+   own morning + restock - evening arithmetic is untouched. The show's
+   gross, units sold, COGS, at-show stock and end-of-show returns cannot
+   move by a unit because product was carried across the aisle. Only the
+   per-booth figures change, which is the whole point: booth 2's sales
+   should be credited to booth 2, not to whoever happened to pack the box.
+   --------------------------------------------------------------------- */
+function dayTransfers(d){ return Array.isArray(d&&d.boothTransfers)?d.boothTransfers:[]; }
+function boothTransferIn(d,boothId){ const r={}; SKUS.forEach(s=>r[s.key]=0);
+  dayTransfers(d).forEach(t=>{ if(t&&t.to===boothId)SKUS.forEach(s=>r[s.key]+=parseInt((t.units||{})[s.key])||0); }); return r; }
+function boothTransferOut(d,boothId){ const r={}; SKUS.forEach(s=>r[s.key]=0);
+  dayTransfers(d).forEach(t=>{ if(t&&t.from===boothId)SKUS.forEach(s=>r[s.key]+=parseInt((t.units||{})[s.key])||0); }); return r; }
+function boothTransferTotal(d,boothId,dir){ const m=dir==='in'?boothTransferIn(d,boothId):boothTransferOut(d,boothId); return SKUS.reduce((t,s)=>t+(m[s.key]||0),0); }
+// Units that physically left this booth = opening + restock + moved-in - moved-out - ending.
+// Of those, some sold and some were lost/damaged/given. Mirrors dayUnitsLeft, plus the aisle.
+function boothUnitsLeft(d,boothId){
+  const en=dayBoothRead(d,boothId)||{}, ti=boothTransferIn(d,boothId), to=boothTransferOut(d,boothId), r={};
+  SKUS.forEach(s=>{
+    const m=(en.morningCount&&en.morningCount[s.key])||0;
+    const rk=(en.restock&&en.restock[s.key])||0;
+    const e=(en.eveningCount&&en.eveningCount[s.key])||0;
+    r[s.key]=Math.max(0,m+rk+(ti[s.key]||0)-(to[s.key]||0)-e);
+  });
+  return r;
+}
+function boothSold(d,boothId){
+  const en=dayBoothRead(d,boothId); if(!en||!en.morningCount||!en.eveningCount)return null;
+  const left=boothUnitsLeft(d,boothId),r={};
+  SKUS.forEach(s=>r[s.key]=Math.max(0,(left[s.key]||0)-((en.lost&&en.lost[s.key])||0)));
+  return r;
+}
+// Option A, same as the day: lost/given units still cost money, so COGS counts everything that left.
+function boothCogsUnits(d,boothId){
+  const en=dayBoothRead(d,boothId); if(!en||!en.morningCount||!en.eveningCount)return null;
+  return boothUnitsLeft(d,boothId);
+}
+// What this booth is holding right now. Once it has closed that is its ending
+// count, full stop. While it is open this is opening + everything moved in and
+// out MINUS nothing sold yet, so it is an expectation, and the UI says so.
+function boothOnHand(sh,di,boothId){
+  const d=(sh.days||[])[di], r={}; SKUS.forEach(s=>r[s.key]=0);
+  const en=d?dayBoothRead(d,boothId):null; if(!en)return r;
+  if(en.eveningCount){ SKUS.forEach(s=>r[s.key]=parseInt(en.eveningCount[s.key])||0); return r; }
+  if(!en.morningCount)return r;
+  const ti=boothTransferIn(d,boothId), to=boothTransferOut(d,boothId);
+  SKUS.forEach(s=>{
+    const m=parseInt(en.morningCount[s.key])||0;
+    const rk=(en.restock&&en.restock[s.key])||0;
+    const ls=(en.lost&&en.lost[s.key])||0;
+    r[s.key]=Math.max(0,m+rk+(ti[s.key]||0)-(to[s.key]||0)-ls);
+  });
+  return r;
+}
+function boothOnHandIsCounted(sh,di,boothId){ const d=(sh.days||[])[di]; const en=d?dayBoothRead(d,boothId):null; return !!(en&&en.eveningCount); }
+// Move product across the aisle. Refuses a locked day, a booth moving to
+// itself, and an empty slip; everything else is recorded as the owner states
+// it, because a transfer that happened is a fact the books have to carry.
+function boothTransfer(sh,di,fromId,toId,units,note){
+  const d=(sh.days||[])[di];
+  if(!d)return {ok:false,reason:'That day does not exist.'};
+  if(d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
+  if(!fromId||!toId||fromId===toId)return {ok:false,reason:'Pick two different booths.'};
+  const clean={}; let total=0;
+  SKUS.forEach(s=>{ const n=Math.max(0,parseInt((units||{})[s.key])||0); if(n>0){clean[s.key]=n;total+=n;} });
+  if(!total)return {ok:false,reason:'Nothing to move — enter at least one unit.'};
+  dayBoothWrite(d,fromId); dayBoothWrite(d,toId);
+  if(!Array.isArray(d.boothTransfers))d.boothTransfers=[];
+  const rec={id:'bt_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+    from:fromId,to:toId,units:clean,total,ts:new Date().toISOString(),note:note||''};
+  d.boothTransfers.push(rec);
+  rollupDay(sh,di);
+  invLogPush(sh,{ts:rec.ts,di,date:d.date,type:'booth transfer',
+    changes:[SKUS.filter(s=>clean[s.key]).map(s=>clean[s.key]+' '+s.short).join(', ')+
+      ' · '+boothName(sh,fromId)+' → '+boothName(sh,toId)+(note?' ('+note+')':'')],by:'owner'});
+  return {ok:true,rec,total};
+}
+function boothTransferUndo(sh,di,transferId){
+  const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day does not exist.'};
+  if(d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
+  const list=dayTransfers(d), i=list.findIndex(t=>t&&t.id===transferId);
+  if(i<0)return {ok:false,reason:'That transfer is already gone.'};
+  const rec=list[i]; d.boothTransfers=list.slice(0,i).concat(list.slice(i+1));
+  rollupDay(sh,di);
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'booth transfer undone',
+    changes:[SKUS.filter(s=>(rec.units||{})[s.key]).map(s=>rec.units[s.key]+' '+s.short).join(', ')+
+      ' · '+boothName(sh,rec.from)+' → '+boothName(sh,rec.to)+' reversed'],by:'owner'});
+  return {ok:true,rec};
+}
+// Set this booth's stock outright. Before it opens that IS the opening count;
+// after it has closed it is the ending count. Never a silent guess: the caller
+// passes which, and the UI names it.
+function boothSetStock(sh,di,boothId,which,map){
+  const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day does not exist.'};
+  if(d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
+  const en=dayBoothWrite(d,boothId), c={};
+  SKUS.forEach(s=>c[s.key]=Math.max(0,parseInt((map||{})[s.key])||0));
+  const before=(which==='evening'?en.eveningCount:en.morningCount)||null;
+  if(which==='evening')en.eveningCount=c; else en.morningCount=c;
+  rollupDay(sh,di);
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId,
+    type:boothName(sh,boothId)+' — '+(which==='evening'?'ending':'opening')+' stock set',
+    changes:SKUS.filter(s=>(before?(before[s.key]||0):null)!==c[s.key]).map(s=>s.short+':'+(before?(before[s.key]||0):'—')+'→'+c[s.key]) || ['(no change)'],by:'owner'});
+  return {ok:true};
+}
 function boothHasData(sh,boothId){
   return (sh.days||[]).some(d=>{ const e=dayBoothRead(d,boothId); if(!e)return false;
     if(e.morningCount||e.eveningCount)return true;
@@ -1953,28 +2068,30 @@ function boothCashCheck(sh,di,boothId){
   const d=(sh.days||[])[di]; if(!d)return {state:'na'};
   const en=dayBoothRead(d,boothId); if(!en||!en.morningCount||!en.eveningCount)return {state:'na'};
   const collected=boothMoney(en); if(collected<=0)return {state:'na'};
-  const rev=calcRev(boothSold(en),sh.prices||null); if(rev<=0)return {state:'na'};
+  const rev=calcRev(boothSold(d,boothId),sh.prices||null); if(rev<=0)return {state:'na'};
   const diff=collected-rev;
   if(Math.abs(diff)<=0.50)return {state:'ok',rev,collected};
   return diff<0?{state:'short',rev,collected,amt:rev-collected}:{state:'over',rev,collected,amt:collected-rev};
 }
 // Whole-show tally for one booth: units, money in the drawer, product cost.
 function boothShowTotals(sh,boothId){
+  const b0=boothId;
   const units={}; SKUS.forEach(s=>units[s.key]=0);
-  let money=0,cogs=0,retail=0,daysCounted=0,lostT=0;
+  let money=0,cogs=0,retail=0,daysCounted=0,lostT=0,movedIn=0,movedOut=0;
   (sh.days||[]).forEach((d,di)=>{
+    movedIn+=boothTransferTotal(d,b0,'in'); movedOut+=boothTransferTotal(d,b0,'out');
     const en=dayBoothRead(d,boothId); if(!en)return;
     money+=boothMoney(en);
-    const sold=boothSold(en);
+    const sold=boothSold(d,b0);
     if(sold){
       daysCounted++;
       SKUS.forEach(s=>units[s.key]+=sold[s.key]||0);
       retail+=calcRev(sold,sh.prices||null);
-      cogs+=calcCOGSOn(boothCogsUnits(en),showDayKey(sh,di),sh);
+      cogs+=calcCOGSOn(boothCogsUnits(d,b0),showDayKey(sh,di),sh);
       SKUS.forEach(s=>lostT+=((en.lost&&en.lost[s.key])||0));
     }
   });
-  return {units,unitsTotal:SKUS.reduce((t,s)=>t+units[s.key],0),money,cogs,retail,daysCounted,lost:lostT};
+  return {units,unitsTotal:SKUS.reduce((t,s)=>t+units[s.key],0),money,cogs,retail,daysCounted,lost:lostT,movedIn,movedOut};
 }
 // Grand total across every booth. Equals the show's own figures by
 // construction, which is exactly what makes it worth printing next to them.
@@ -3999,17 +4116,22 @@ function exportShowCSV(shId){
   // Booths, when the show has them. The written sheet has to look like the
   // notebook: each booth counted on its own, then the grand total underneath.
   if(hasBooths(sh)){
-    rows.push([]); rows.push(['Booth','Day','Date','Units Sold','Collected','Product Cost']);
+    rows.push([]); rows.push(['Booth','Day','Date','Units Sold','Collected','Product Cost','Moved In','Moved Out']);
     showBooths(sh).forEach(b=>{
       (sh.days||[]).forEach((d,i)=>{ const en=dayBoothRead(d,b.id); if(!en)return;
-        const sold=boothSold(en); const u=sold?SKUS.reduce((t,x)=>t+(sold[x.key]||0),0):0;
-        const money=boothMoney(en); if(!u&&!money)return;
-        const cogs=sold?calcCOGSOn(boothCogsUnits(en),showDayKey(sh,i),sh):0;
-        rows.push([b.name,i+1,d.date||'',u,money.toFixed(2),cogs.toFixed(2)]); });
+        const sold=boothSold(d,b.id); const u=sold?SKUS.reduce((t,x)=>t+(sold[x.key]||0),0):0;
+        const money=boothMoney(en); const mi=boothTransferTotal(d,b.id,'in'), mo=boothTransferTotal(d,b.id,'out');
+        if(!u&&!money&&!mi&&!mo)return;
+        const cogs=sold?calcCOGSOn(boothCogsUnits(d,b.id),showDayKey(sh,i),sh):0;
+        rows.push([b.name,i+1,d.date||'',u,money.toFixed(2),cogs.toFixed(2),mi||'',mo||'']); });
     });
-    rows.push([]); rows.push(['Booth tally (whole show)','','Units Sold','Collected','Product Cost','Full-Price Value']);
+    const _tx=(sh.days||[]).reduce((a,d,i)=>a.concat(dayTransfers(d).map(t=>({t,i,d}))),[]);
+    if(_tx.length){ rows.push([]); rows.push(['Booth transfers','Day','Date','From','To','Units','Note']);
+      _tx.forEach(x=>rows.push(['',x.i+1,x.d.date||'',boothName(sh,x.t.from),boothName(sh,x.t.to),
+        SKUS.filter(s2=>(x.t.units||{})[s2.key]).map(s2=>x.t.units[s2.key]+' '+s2.short).join(' '),x.t.note||''])); }
+    rows.push([]); rows.push(['Booth tally (whole show)','','Units Sold','Collected','Product Cost','Full-Price Value','Moved In','Moved Out']);
     showBooths(sh).forEach(b=>{ const bt=boothShowTotals(sh,b.id);
-      rows.push([b.name,'',bt.unitsTotal,bt.money.toFixed(2),bt.cogs.toFixed(2),bt.retail.toFixed(2)]); });
+      rows.push([b.name,'',bt.unitsTotal,bt.money.toFixed(2),bt.cogs.toFixed(2),bt.retail.toFixed(2),bt.movedIn||'',bt.movedOut||'']); });
     const g=boothGrandTotals(sh);
     rows.push(['GRAND TOTAL — all booths','',g.unitsTotal,g.money.toFixed(2),g.cogs.toFixed(2),g.retail.toFixed(2)]);
   }
@@ -4405,7 +4527,7 @@ function boothDayCardHTML(sh,di,b){
   const d=sh.days[di]; const en=dayBoothRead(d,b.id)||{};
   const haM=!!en.morningCount, haE=!!en.eveningCount;
   const money=boothMoney(en), haP=money>0;
-  const sold=haM&&haE?boothSold(en):null;
+  const sold=haM&&haE?boothSold(d,b.id):null;
   const soldT=sold?SKUS.reduce((t,s)=>t+(sold[s.key]||0),0):null;
   const rev=sold?calcRev(sold,sh.prices||null):0;
   const restockT=SKUS.reduce((t,s)=>t+((en.restock&&en.restock[s.key])||0),0);
@@ -4424,10 +4546,17 @@ function boothDayCardHTML(sh,di,b){
   const pBtn=locked?'':`<button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di},${bArg})" ${haE?'':'disabled'}>${haP?'Edit':'Count'}</button>`;
   const pmtRows=PMTS.map(p=>`<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${p.label}</span><span style="font-weight:700">${haP?(((en.payments||{})[p.key]||0)>0?fmt(en.payments[p.key]):'—'):''}</span></div>`).join('')
     +`<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;color:var(--green);margin-top:4px"><span>Total</span><span>${haP?fmt(money):'—'}</span></div>`;
+  const onHand=boothOnHand(sh,di,b.id);
+  const onHandT=SKUS.reduce((t,s)=>t+(onHand[s.key]||0),0);
+  const movedIn=boothTransferTotal(d,b.id,'in'), movedOut=boothTransferTotal(d,b.id,'out');
   let h=`<div class="card" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:${(haM&&haE&&haP)?'var(--greenbd)':'var(--goldbd)'}">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-size:15px;font-weight:900">🏬 ${_esc(b.name)}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;cursor:pointer" onclick="openBoothDetail('${sh.id}',${di},${bArg})">
+      <div style="font-size:15px;font-weight:900">🏬 ${_esc(b.name)} <span style="font-size:11px;color:var(--gold);font-weight:700">stock ›</span></div>
       <span class="chip ${stateCls}" style="font-size:10px">${state}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:11px;color:var(--muted)">
+      <span>${haM?`<b style="color:var(--gold)">${onHandT}</b> units ${boothOnHandIsCounted(sh,di,b.id)?'counted on this table':'should be on this table'}`:'Not counted yet'}${movedIn||movedOut?` · <span style="color:#7EB8F7">${movedIn?'+'+movedIn+' in':''}${movedIn&&movedOut?' ':''}${movedOut?'−'+movedOut+' out':''}</span>`:''}</span>
+      ${locked?'':`<button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();openBoothTransfer('${sh.id}',${di},${bArg})">🔄 Move</button>`}
     </div>
     <div style="display:flex;gap:5px">
       ${col('🌅 Morning',{fg:'#7EB8F7',bd:haM?'var(--border)':'var(--gold)'},skuRows(en.morningCount||{},haM),mBtn)}
@@ -4453,6 +4582,15 @@ function dayBoothsHTML(sh,di){
     <button class="btn btn-xs btn-ghost" onclick="openBoothsModal('${sh.id}')">✏️ Booths</button>
   </div>`;
   h+=booths.map(b=>boothDayCardHTML(sh,di,b)).join('');
+  const tx=dayTransfers(sh.days[di]);
+  if(tx.length)h+=`<div class="card" style="margin:0 0 8px;padding:10px;background:var(--card2);border-color:rgba(79,195,247,0.3)">
+    <div style="font-size:10px;color:#7EB8F7;text-transform:uppercase;font-weight:800;margin-bottom:5px">🔄 Product moved between booths today</div>
+    ${tx.map(t=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;padding:3px 0">
+      <span style="min-width:0"><b>${_esc(boothName(sh,t.from))} → ${_esc(boothName(sh,t.to))}</b> <span style="color:var(--muted)">${SKUS.filter(s=>(t.units||{})[s.key]).map(s=>t.units[s.key]+' '+s.short).join(', ')}${t.note?' · '+_esc(t.note):''}</span></span>
+      ${sh.days[di].locked?'':`<span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="undoBoothTransfer('${sh.id}',${di},'${t.id}','${t.from}')">✕</span>`}
+    </div>`).join('')}
+    <div style="font-size:10px;color:var(--muted);margin-top:4px">Moves cancel out in the grand total — the show neither gained nor lost a bottle.</div>
+  </div>`;
   if(waiting.length)h+=`<div class="wb gold" style="margin-bottom:8px;font-size:12px">🌙 Still open: <strong>${waiting.map(b=>_esc(b.name)).join(', ')}</strong>. The day's grand total stays unfinished until every booth that opened has an evening count, so a half-closed day can never post a fake sale.</div>`;
   else if(opened.length)h+=`<div class="wb green" style="margin-bottom:8px;font-size:12px">✓ All ${opened.length} booths closed out. Grand total below: <strong>${fmt(money)}</strong> collected.</div>`;
   return h;
@@ -4462,15 +4600,16 @@ function dayBoothsHTML(sh,di){
 function boothScoreboardHTML(sh){
   const booths=showBooths(sh); if(!booths.length)return '';
   const g=boothGrandTotals(sh);
+  const _di=(typeof todayDayIndex==='function')?todayDayIndex(sh):0;
   const rows=booths.map(b=>{
     const t=boothShowTotals(sh,b.id);
     const chips=SKUS.filter(s=>(t.units[s.key]||0)>0).map(s=>`<span class="chip gold" style="font-size:10px">${s.short}: ${t.units[s.key]}</span>`).join('')||'<span style="color:var(--muted);font-size:11px">no counts yet</span>';
-    return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openBoothDetail('${sh.id}',${_di},'${b.id}')">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <div style="font-size:14px;font-weight:900">🏬 ${_esc(b.name)}</div>
+        <div style="font-size:14px;font-weight:900">🏬 ${_esc(b.name)} <span style="font-size:11px;color:var(--gold);font-weight:700">stock ›</span></div>
         <div style="text-align:right"><div style="font-size:17px;font-weight:900;color:var(--green)">${fmt(t.money)}</div><div style="font-size:10px;color:var(--muted)">collected</div></div>
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-top:2px">${t.unitsTotal} units${t.daysCounted?' · '+t.daysCounted+' day'+(t.daysCounted>1?'s':'')+' counted':''}${t.lost?' · '+t.lost+' lost/given':''} · product cost ${fmt(t.cogs)} · full-price value ${fmt(t.retail)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${t.unitsTotal} units${t.daysCounted?' · '+t.daysCounted+' day'+(t.daysCounted>1?'s':'')+' counted':''}${t.lost?' · '+t.lost+' lost/given':''}${(t.movedIn||t.movedOut)?' · '+t.movedIn+' in / '+t.movedOut+' out across the aisle':''} · product cost ${fmt(t.cogs)} · full-price value ${fmt(t.retail)}</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">${chips}</div>
     </div>`;
   }).join('');
@@ -4484,8 +4623,151 @@ function boothScoreboardHTML(sh){
       <div style="font-size:15px;font-weight:900;color:var(--gold)">🧮 GRAND TOTAL</div>
       <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(g.money)}</div><div style="font-size:10px;color:var(--muted)">${g.unitsTotal} units · all booths</div></div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:4px">Every booth's numbers add straight into this total and into the show's P&amp;L. Stock still leaves the garage to the SHOW, not to a booth — booths only split the counting.</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">Tap any booth to see and edit its stock, or to move product to another booth. Every booth's numbers add straight into this total and into the show's P&amp;L. Stock still leaves the garage to the SHOW, not to a booth — moving product across the aisle never changes the show's totals.</div>
   </div>`;
+}
+// ---- one booth, opened up -------------------------------------------------
+// Tap a booth anywhere and you land here: what it is holding right now, every
+// way stock got in or out of it, and every button that changes those numbers.
+// This is the screen that answers "what have I actually got on that table".
+function boothStockRowsHTML(sh,di,b){
+  const d=sh.days[di], en=dayBoothRead(d,b.id)||{};
+  const ti=boothTransferIn(d,b.id), to=boothTransferOut(d,b.id);
+  const onHand=boothOnHand(sh,di,b.id), counted=boothOnHandIsCounted(sh,di,b.id);
+  const sold=boothSold(d,b.id);
+  const cell=(v,c)=>`<td style="text-align:right;padding:3px 4px;font-weight:700;${c?'color:'+c:''}">${v||'—'}</td>`;
+  const rows=SKUS.map(s=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.05)">
+    <td style="padding:3px 4px;color:var(--muted)">${s.short}</td>
+    ${cell(en.morningCount?(en.morningCount[s.key]||0):null)}
+    ${cell((en.restock&&en.restock[s.key])||0,'#7EB8F7')}
+    ${cell(ti[s.key]||0,'var(--green)')}
+    ${cell(to[s.key]||0,'#FFA500')}
+    ${cell((en.lost&&en.lost[s.key])||0,'var(--red)')}
+    ${cell(en.eveningCount?(en.eveningCount[s.key]||0):null)}
+    ${cell(sold?(sold[s.key]||0):null,'var(--gold)')}
+    <td style="text-align:right;padding:3px 4px;font-weight:900;color:var(--gold)">${onHand[s.key]||0}</td>
+  </tr>`).join('');
+  return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:340px">
+    <tr style="font-size:9px;text-transform:uppercase;color:var(--muted);font-weight:800;text-align:right">
+      <th style="text-align:left;padding:2px 4px">SKU</th><th style="padding:2px 4px">Open</th><th style="padding:2px 4px">+Restock</th>
+      <th style="padding:2px 4px">+In</th><th style="padding:2px 4px">−Out</th><th style="padding:2px 4px">−Lost</th>
+      <th style="padding:2px 4px">End</th><th style="padding:2px 4px">Sold</th><th style="padding:2px 4px">On hand</th></tr>
+    ${rows}</table></div>
+  <div style="font-size:10px;color:var(--muted);margin-top:5px">${counted
+    ? '“On hand” is this booth’s counted ending stock.'
+    : '“On hand” is opening + restock + moved in − moved out − lost. It does <b>not</b> subtract today’s sales yet — those are only known once you count the booth tonight.'}</div>`;
+}
+function openBoothDetail(shId,di,boothId){
+  const sh=S.shows.find(x=>x.id===shId); if(!sh)return;
+  di=Math.max(0,Math.min((sh.days||[]).length-1,parseInt(di)||0));
+  const d=sh.days[di]; if(!d)return;
+  const b=showBooths(sh).find(x=>x.id===boothId); if(!b)return;
+  const en=dayBoothRead(d,boothId)||{};
+  const haM=!!en.morningCount, haE=!!en.eveningCount, money=boothMoney(en);
+  const onHand=boothOnHand(sh,di,boothId);
+  const onHandT=SKUS.reduce((t,s)=>t+(onHand[s.key]||0),0);
+  const onHandRetail=SKUS.reduce((t,s)=>t+(onHand[s.key]||0)*((sh.prices&&sh.prices[s.key]!=null)?sh.prices[s.key]:getP(s.key)),0);
+  const bt=boothShowTotals(sh,boothId);
+  const others=showBooths(sh).filter(x=>x.id!==boothId);
+  const tx=dayTransfers(d).filter(t=>t.from===boothId||t.to===boothId);
+  const dayTabs=(sh.days||[]).map((x,i)=>`<button class="btn btn-xs ${i===di?'btn-gold':'btn-ghost'}" style="margin:0 4px 4px 0" onclick="openBoothDetail('${shId}',${i},'${boothId}')">${_esc(x.date||('Day '+(i+1)))}</button>`).join('');
+  const lock=d.locked;
+  mOpen(`<div class="mh"><div class="mt">🏬 ${_esc(b.name)}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${_esc(sh.name)} · ${_esc(d.date||('Day '+(di+1)))}${lock?' · 🔒 finalized':''}</div>
+  ${(sh.days||[]).length>1?`<div style="margin-bottom:10px">${dayTabs}</div>`:''}
+  <div class="card" style="margin-bottom:10px;border-color:var(--goldbd);background:var(--card2)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">${boothOnHandIsCounted(sh,di,boothId)?'Counted on this table':'Should be on this table'}</div>
+      <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--gold);line-height:1.1">${onHandT} units</div><div style="font-size:10px;color:var(--muted)">${fmt(onHandRetail)} at full price</div></div>
+    </div>
+  </div>
+  ${boothStockRowsHTML(sh,di,b)}
+  ${lock?'<div class="wb gold" style="margin-top:10px;font-size:11px">🔒 This day is finalized. Unlock it on the day screen to change anything here.</div>':`
+  <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;margin:14px 0 6px">Set this booth's stock</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn btn-sm ${haM?'btn-ghost':'btn-gold'}" style="flex:1;min-width:130px" onclick="showCntModal('${shId}',${di},'morning','${boothId}')">🌅 ${haM?'Edit opening stock':'Set opening stock'}</button>
+    <button class="btn btn-sm ${haE?'btn-ghost':(haM?'btn-gold':'btn-outline')}" style="flex:1;min-width:130px" ${haM?'':'disabled'} onclick="showCntModal('${shId}',${di},'evening','${boothId}')">🌙 ${haE?'Edit ending stock':'Count ending stock'}</button>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+    <button class="btn btn-sm btn-ghost" style="flex:1;min-width:130px" onclick="openAdjustModal('${shId}',${di},'${boothId}')">± Restock / Lost</button>
+    <button class="btn btn-sm ${money>0?'btn-ghost':(haE?'btn-gold':'btn-outline')}" style="flex:1;min-width:130px" ${haE?'':'disabled'} onclick="showMoneyModal('${shId}',${di},'${boothId}')">💰 ${money>0?'Money '+fmt(money):'Count money'}</button>
+  </div>
+  <button class="btn btn-sm btn-full" style="margin-top:8px;background:rgba(79,195,247,0.14);border:1px solid rgba(79,195,247,0.4);color:#7EB8F7" ${others.length?'':'disabled'} onclick="openBoothTransfer('${shId}',${di},'${boothId}')">🔄 Move product to another booth</button>
+  ${others.length?'':'<div style="font-size:11px;color:var(--muted);margin-top:5px">Add a second booth in ✏️ Edit Show before you can move product between them.</div>'}`}
+  ${tx.length?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;margin:14px 0 6px">Moves today</div>
+    ${tx.map(t=>{const out=t.from===boothId;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px">
+        <div style="min-width:0"><div style="font-weight:800;color:${out?'#FFA500':'var(--green)'}">${out?'→ out to '+_esc(boothName(sh,t.to)):'← in from '+_esc(boothName(sh,t.from))}</div>
+        <div style="color:var(--muted)">${SKUS.filter(s=>(t.units||{})[s.key]).map(s=>t.units[s.key]+' '+s.short).join(', ')}${t.note?' · '+_esc(t.note):''}</div></div>
+        ${lock?'':`<button class="btn btn-xs btn-ghost" onclick="undoBoothTransfer('${shId}',${di},'${t.id}','${boothId}')">Undo</button>`}
+      </div>`;}).join('')}`:''}
+  <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;margin:14px 0 6px">${_esc(b.name)} — whole show</div>
+  <div class="sr"><span class="srl">Units sold</span><span class="srv gold">${bt.unitsTotal}</span></div>
+  <div class="sr"><span class="srl">Money collected</span><span class="srv green">${fmt(bt.money)}</span></div>
+  <div class="sr"><span class="srl">Product cost</span><span class="srv red">${fmt(bt.cogs)}</span></div>
+  ${(bt.movedIn||bt.movedOut)?`<div class="sr"><span class="srl">Moved in / out across the aisle</span><span class="srv">${bt.movedIn} in · ${bt.movedOut} out</span></div>`:''}
+  ${bt.lost?`<div class="sr"><span class="srl">Lost / damaged / given</span><span class="srv red">${bt.lost}</span></div>`:''}
+  <div style="font-size:10px;color:var(--muted);margin-top:8px">Moving product between booths never changes the show's stock, sales, COGS or profit — it only changes which booth gets the credit.</div>`);
+}
+function undoBoothTransfer(shId,di,txId,backToBooth){
+  const sh=S.shows.find(x=>x.id===shId); if(!sh)return;
+  const res=boothTransferUndo(sh,di,txId);
+  if(!res.ok){ toast('⚠️ '+res.reason); return; }
+  saveS(); toast('↩️ Transfer reversed');
+  openBoothDetail(shId,di,backToBooth);
+}
+// ---- move product across the aisle ---------------------------------------
+function openBoothTransfer(shId,di,fromId){
+  const sh=S.shows.find(x=>x.id===shId); if(!sh)return;
+  const d=sh.days[di]; if(!d)return;
+  if(d.locked){toast('🔒 Day locked. Unlock to move product.');return;}
+  const others=showBooths(sh).filter(x=>x.id!==fromId);
+  if(!others.length){toast('Add a second booth first.');return;}
+  const have=boothOnHand(sh,di,fromId);
+  mOpen(`<div class="mh"><div class="mt">🔄 Move product</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${_esc(sh.name)} · ${_esc(d.date||('Day '+(di+1)))}</div>
+  <div class="fg"><label class="fl">From</label>
+    <div class="fi" style="font-weight:800;color:var(--gold)">🏬 ${_esc(boothName(sh,fromId))}</div></div>
+  <div class="fg"><label class="fl">To</label>
+    <select class="fi" id="bt_to">${others.map(o=>`<option value="${o.id}">${_esc(o.name)}</option>`).join('')}</select></div>
+  <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:6px;align-items:center;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-top:6px"><div>Product</div><div>On hand</div><div>Move</div></div>
+  ${SKUS.map(s=>`<div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:6px;align-items:center;margin-top:6px">
+    <div style="font-size:12px">${s.short}</div>
+    <div style="font-size:12px;font-weight:800;color:${(have[s.key]||0)>0?'var(--gold)':'var(--muted)'}">${have[s.key]||0}</div>
+    <input class="fi" type="number" min="0" step="1" id="bt_${s.key}" value="" placeholder="0" oninput="btCheck()"></div>`).join('')}
+  <div id="bt_warn" style="margin-top:10px"></div>
+  <div class="fg" style="margin-top:10px"><label class="fl">Note (optional)</label><input class="fi" type="text" id="bt_note" placeholder="e.g. Booth 2 ran out of C5 Small"></div>
+  <div class="wb" style="font-size:11px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7">This moves product between your own booths. The show's stock, sales, COGS and profit do not change by a single unit — only which booth gets the credit for selling it.</div>
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveBoothTransfer('${shId}',${di},'${fromId}')">🔄 Move it</button>`);
+  setTimeout(btCheck,30);
+}
+// Running total while typing. Whether it exceeds what the booth should have is
+// checked on save, where the owner can confirm it — a booth that sold less than
+// expected legitimately has more on the table than the app predicted.
+function btCheck(){
+  const el=$$('bt_warn'); if(!el)return;
+  let total=0;
+  SKUS.forEach(s=>{ const i=$$('bt_'+s.key); total+=i?(parseInt(i.value)||0):0; });
+  el.innerHTML=total?`<div style="font-size:12px;font-weight:800;color:var(--gold)">Moving ${total} unit${total===1?'':'s'}</div>`:'';
+}
+function saveBoothTransfer(shId,di,fromId){
+  if(_dupGuard())return;
+  const sh=S.shows.find(x=>x.id===shId); if(!sh)return;
+  const toId=($$('bt_to')||{}).value;
+  const units={}; SKUS.forEach(s=>{ const i=$$('bt_'+s.key); units[s.key]=i?(parseInt(i.value)||0):0; });
+  const have=boothOnHand(sh,di,fromId);
+  const over=SKUS.filter(s=>(units[s.key]||0)>(have[s.key]||0));
+  if(over.length&&typeof confirm==='function'){
+    const msg='More than '+boothName(sh,fromId)+' should have on hand:\n'+
+      over.map(s=>s.short+': moving '+units[s.key]+', expected '+(have[s.key]||0)).join('\n')+
+      '\n\nRecord the move anyway? (Fine if it sold less than expected — cancel if it is a typo.)';
+    if(!confirm(msg))return;
+  }
+  const res=boothTransfer(sh,di,fromId,toId,units,($$('bt_note')||{}).value||'');
+  if(!res.ok){ toast('⚠️ '+res.reason); return; }
+  mClose(); saveS();
+  toast('🔄 Moved '+res.total+' units to '+boothName(sh,toId));
+  openBoothDetail(shId,di,fromId);
 }
 // ---- booth manager -------------------------------------------------------
 var _boothEdit=null;

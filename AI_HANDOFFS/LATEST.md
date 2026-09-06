@@ -1,15 +1,47 @@
 # LATEST
 
-Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (this branch, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (this branch, in review)
 
 | | |
 |---|---|
 | **Date** | 2026-09-06 |
-| **Branch** | `claude/cranberry-fest-booth-calendar-s77yge` |
-| **Base** | `cb677b9` on `main` |
-| **App version** | v35 → **v36** |
-| **Review state** | **Awaiting review. Not merged, not deployed.** |
+| **Branch** | `claude/cranberry-fest-booth-calendar-s77yge` (restarted after #32 merged) |
+| **Base** | `1410e8f` on `main` |
+| **App version** | v36 → **v37** |
+| **Review state** | **Awaiting review.** |
 | **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v37 adds
+
+**Tap a booth, get the booth.** One screen per booth per day: a per-SKU table
+showing Open / +Restock / +In / −Out / −Lost / End / Sold / On hand, the booth's
+headline "what is on that table right now" in units and dollars, its whole-show
+totals, and every button that changes those numbers. Reachable from the booth
+card on the day screen, from any Booth Tally row on the show screen, and from
+the day tabs inside it. It opens on a planned show too, which is where booths
+get set up before the doors open.
+
+On hand is honest about what it knows: once a booth is counted at close that IS
+its stock; while it is open it is opening + restock + moved in − moved out −
+lost, which does not subtract today's sales because nobody knows them yet. The
+screen says which of the two you are reading.
+
+**Product can move between booths.** Booth 2 runs out, booth 1 has a case under
+the table, the product moves. One ledger row per move, each booth's in/out
+derived from it, an ✕ to reverse. The invariant: **every transfer cancels itself
+at the show level** — what leaves A arrives at B, so the show's gross, units,
+COGS, at-show stock and end-of-show returns cannot move by a unit. Only the
+per-booth credit changes, which is the whole point.
+
+Moves show up on the day screen, on the tally, and in the CSV (Moved In / Moved
+Out columns plus a transfers section with notes).
+
+**Verified:** 153/153 on the booth suite (up from 111), 546/546 across the other
+four, and 427/430 on `passed-not-doing` — the same 3 fail on unmodified `main`.
+
+---
+
+## Previously: what v36 added
 
 ## What v36 adds
 

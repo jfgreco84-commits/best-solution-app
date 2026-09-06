@@ -94,7 +94,14 @@ happened. Section 8 changes a show's booth fee and asserts break-even moves
 with it, which is the check that would have caught booth rent quietly going
 missing from the number. Section 10 pins that the calendar grid and the
 conflict-day picker read the same filter, so a red day always has a list behind
-it and a passed show is on neither.
+it and a passed show is on neither. Sections 11 and 12 cover per-booth stock
+and booth-to-booth transfers, and pin both halves of the transfer contract at
+once: the per-booth credit MUST change (the sending booth is credited with what
+it actually sold, not with the case it gave away) while the day total, at-show
+stock, gross, COGS and unit count MUST NOT move by a unit, because what leaves
+one booth arrives at another. They also pin that a booth's on-hand figure is
+arithmetic while the booth is open and the counted number once it has closed,
+and that a finalized day refuses a move, an undo and a stock edit alike.
 
 ## Fixtures are synthetic
 
