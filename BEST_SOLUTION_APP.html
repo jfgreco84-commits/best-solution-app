@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v35';
+const APP_VERSION='v36';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -1256,6 +1256,19 @@ function applyOneTimeUpdates(d){
     d._applied['show_expenses_seed_v1']=true;
   }
 
+  // Cranberry Fest 2026 runs THREE booths. Other people work two of them, so
+  // each one is counted and cashed out separately morning and night. The show,
+  // the $450 booth fee and the stock pull all stay single — see the multi-booth
+  // header note. Existing day data (there is none yet) would land on Booth 1.
+  if(!d._applied['cranberry_three_booths_2026']){
+    const cf=(d.shows||[]).find(sh=>(sh.name||'').toLowerCase().includes('cranberry'));
+    if(cf&&!(Array.isArray(cf.booths)&&cf.booths.length)){
+      boothsApply(cf,['Booth 1','Booth 2','Booth 3']);
+      cf.boothNote='3 booths — each counted and cashed out separately; totals roll up to the show.';
+    }
+    d._applied['cranberry_three_booths_2026']=true;
+  }
+
   // Cranberry Fest 2026 — Airbnb in Merrillan WI, $600, 34 min from show
   if(!d._applied['cranberry_airbnb_2026']){
     d.shows=d.shows||[];
@@ -1827,6 +1840,185 @@ function daySold(d){ const left=dayUnitsLeft(d),lost=dayLostMap(d),r={}; SKUS.fo
 // Option A (owner's rule): damaged / lost / given-away units still cost money, so COGS counts everything that left = sold + lost.
 function dayCogsUnits(d){ return dayUnitsLeft(d); }
 function dayHasAdjust(d){ return !!((d.restock&&SKUS.some(s=>(d.restock[s.key]||0)>0))||(d.lost&&SKUS.some(s=>(d.lost[s.key]||0)>0))); }
+
+/* ======================================================================
+   MULTI-BOOTH SHOWS  (booth*)
+   ----------------------------------------------------------------------
+   Cranberry Fest 2026 is ONE show with THREE booths. Other people run two
+   of them, so each booth is counted and cashed out on its own: its own
+   morning count, its own evening count, its own money drawer. Three sets of
+   numbers get written down in the morning, three more at close, and then
+   one grand total has to be trustworthy.
+
+   The rule that keeps it honest:
+
+       A BOOTH IS AN INPUT. THE DAY IS THE TOTAL.
+
+   Every per-booth entry lives in day.boothCounts[boothId]. The day's own
+   morningCount / eveningCount / restock / lost / payments are REBUILT from
+   the sum of the booths every time a booth is saved (rollupDay). Nothing
+   downstream had to learn what a booth is: COGS, revenue, the cash check,
+   the reconciliation ladder, the P&L, the closeout wizard and every export
+   keep reading the day exactly the way they always did, and what they read
+   is now the grand total. One code path, one set of numbers.
+
+   STOCK IS NOT SPLIT BY BOOTH. Product comes off master inventory to the
+   SHOW, exactly as before, because that is how it physically moves: it
+   leaves the garage once. Booths only divide the counting, not the stock.
+
+     sh.booths      [{id,name}]   empty or absent = ordinary single-booth show
+     d.boothCounts  {boothId:{morningCount,eveningCount,restock,lost,payments}}
+
+   The evening rollup is deliberately ALL-OR-NOTHING. If booth 1 has closed
+   and booths 2 and 3 have not, summing what exists would read as "we opened
+   with 300 and ended with 90", i.e. a fake 210-unit sale and a fake COGS
+   charge. So the day's eveningCount stays null until every booth that
+   opened has also closed, and the screen names the booths still owing a
+   count. A morning rollup is additive as booths come in, because a booth
+   not yet counted is simply not open yet.
+
+   Turning booths ON for a show that already has day data moves that data
+   into the first booth (boothSeedFromDays), so the rollup reproduces the
+   identical totals the show had a second earlier. Turning them back OFF
+   leaves the last rollup in place, because the grand total IS the day.
+   ====================================================================== */
+function showBooths(sh){ const b=sh&&sh.booths; return Array.isArray(b)?b.filter(x=>x&&x.id):[]; }
+function hasBooths(sh){ return showBooths(sh).length>0; }
+function boothName(sh,boothId){ const b=showBooths(sh).find(x=>x.id===boothId); return b?(b.name||boothId):boothId; }
+function dayBoothRead(d,boothId){ const m=(d&&d.boothCounts)||{}; return m[boothId]||null; }
+function dayBoothWrite(d,boothId){
+  if(!d.boothCounts||typeof d.boothCounts!=='object')d.boothCounts={};
+  if(!d.boothCounts[boothId])d.boothCounts[boothId]={morningCount:null,eveningCount:null,restock:null,lost:null,payments:null};
+  return d.boothCounts[boothId];
+}
+function boothMoney(en){ return calcPmt((en&&en.payments)||{}); }
+function boothSold(en){ if(!en||!en.morningCount||!en.eveningCount)return null; return daySold(en); }
+function boothCogsUnits(en){ if(!en||!en.morningCount||!en.eveningCount)return null; return dayUnitsLeft(en); }
+function boothHasData(sh,boothId){
+  return (sh.days||[]).some(d=>{ const e=dayBoothRead(d,boothId); if(!e)return false;
+    if(e.morningCount||e.eveningCount)return true;
+    if(e.payments&&calcPmt(e.payments)>0)return true;
+    if(e.restock&&SKUS.some(s=>(e.restock[s.key]||0)>0))return true;
+    if(e.lost&&SKUS.some(s=>(e.lost[s.key]||0)>0))return true;
+    return false; });
+}
+// Booths that opened on this day but have not been closed out yet.
+function boothsAwaitingEvening(sh,di){
+  const d=(sh.days||[])[di]; if(!d)return [];
+  return showBooths(sh).filter(b=>{ const en=dayBoothRead(d,b.id); return !!(en&&en.morningCount&&!en.eveningCount); });
+}
+function boothsCounted(sh,di){
+  const d=(sh.days||[])[di]; if(!d)return [];
+  return showBooths(sh).filter(b=>{ const en=dayBoothRead(d,b.id); return !!(en&&en.morningCount); });
+}
+// Rebuild the day from its booths. This is the ONLY place a multi-booth day's
+// totals are written, so the grand total can never drift from the parts.
+function rollupDay(sh,di){
+  const d=(sh.days||[])[di]; if(!d)return null;
+  const booths=showBooths(sh); if(!booths.length)return d;
+  const m={},e={},rk={},ls={},p={};
+  SKUS.forEach(s=>{m[s.key]=0;e[s.key]=0;rk[s.key]=0;ls[s.key]=0;});
+  PMTS.forEach(x=>p[x.key]=0);
+  let anyM=false;
+  booths.forEach(b=>{ const en=dayBoothRead(d,b.id); if(!en)return;
+    if(en.morningCount){anyM=true;SKUS.forEach(s=>m[s.key]+=parseInt(en.morningCount[s.key])||0);}
+    if(en.eveningCount)SKUS.forEach(s=>e[s.key]+=parseInt(en.eveningCount[s.key])||0);
+    if(en.restock)SKUS.forEach(s=>rk[s.key]+=parseInt(en.restock[s.key])||0);
+    if(en.lost)SKUS.forEach(s=>ls[s.key]+=parseInt(en.lost[s.key])||0);
+    if(en.payments)PMTS.forEach(x=>p[x.key]+=parseFloat(en.payments[x.key])||0);
+  });
+  const opened=boothsCounted(sh,di);
+  const allClosed=opened.length>0&&boothsAwaitingEvening(sh,di).length===0;
+  d.morningCount=anyM?m:null;
+  d.eveningCount=allClosed?e:null;   // never half a day — see the header note
+  d.restock=rk; d.lost=ls; d.payments=p;
+  d.paymentsAuto=false; d.boothRollup=true;
+  return d;
+}
+function rollupShow(sh){ (sh.days||[]).forEach((d,i)=>rollupDay(sh,i)); return sh; }
+// Continuity per booth: this booth's opening should match this booth's own
+// ending last night. The day-level ladder still checks the grand total.
+function boothCarryIssues(sh,boothId){
+  const out=[],days=sh.days||[];
+  for(let i=1;i<days.length;i++){
+    const pe=(dayBoothRead(days[i-1],boothId)||{}).eveningCount, mo=(dayBoothRead(days[i],boothId)||{}).morningCount;
+    if(!pe||!mo)continue;
+    SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0; if(a!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,morn:b,diff:b-a}); });
+  }
+  return out;
+}
+// Cash vs product for ONE booth on ONE day — same test the day already runs,
+// so a shortfall can be pinned on the booth (and the person) it came from.
+function boothCashCheck(sh,di,boothId){
+  const d=(sh.days||[])[di]; if(!d)return {state:'na'};
+  const en=dayBoothRead(d,boothId); if(!en||!en.morningCount||!en.eveningCount)return {state:'na'};
+  const collected=boothMoney(en); if(collected<=0)return {state:'na'};
+  const rev=calcRev(boothSold(en),sh.prices||null); if(rev<=0)return {state:'na'};
+  const diff=collected-rev;
+  if(Math.abs(diff)<=0.50)return {state:'ok',rev,collected};
+  return diff<0?{state:'short',rev,collected,amt:rev-collected}:{state:'over',rev,collected,amt:collected-rev};
+}
+// Whole-show tally for one booth: units, money in the drawer, product cost.
+function boothShowTotals(sh,boothId){
+  const units={}; SKUS.forEach(s=>units[s.key]=0);
+  let money=0,cogs=0,retail=0,daysCounted=0,lostT=0;
+  (sh.days||[]).forEach((d,di)=>{
+    const en=dayBoothRead(d,boothId); if(!en)return;
+    money+=boothMoney(en);
+    const sold=boothSold(en);
+    if(sold){
+      daysCounted++;
+      SKUS.forEach(s=>units[s.key]+=sold[s.key]||0);
+      retail+=calcRev(sold,sh.prices||null);
+      cogs+=calcCOGSOn(boothCogsUnits(en),showDayKey(sh,di),sh);
+      SKUS.forEach(s=>lostT+=((en.lost&&en.lost[s.key])||0));
+    }
+  });
+  return {units,unitsTotal:SKUS.reduce((t,s)=>t+units[s.key],0),money,cogs,retail,daysCounted,lost:lostT};
+}
+// Grand total across every booth. Equals the show's own figures by
+// construction, which is exactly what makes it worth printing next to them.
+function boothGrandTotals(sh){
+  const units={}; SKUS.forEach(s=>units[s.key]=0);
+  let money=0,cogs=0,retail=0,lostT=0;
+  showBooths(sh).forEach(b=>{ const t=boothShowTotals(sh,b.id);
+    SKUS.forEach(s=>units[s.key]+=t.units[s.key]||0);
+    money+=t.money; cogs+=t.cogs; retail+=t.retail; lostT+=t.lost; });
+  return {units,unitsTotal:SKUS.reduce((t,s)=>t+units[s.key],0),money,cogs,retail,lost:lostT};
+}
+// Existing day data belongs to the first booth — the show did not suddenly
+// gain product, it gained a way of splitting the counting.
+function boothSeedFromDays(sh,boothId){
+  (sh.days||[]).forEach(d=>{
+    const en=dayBoothWrite(d,boothId);
+    if(en.morningCount==null&&d.morningCount)en.morningCount=Object.assign({},d.morningCount);
+    if(en.eveningCount==null&&d.eveningCount)en.eveningCount=Object.assign({},d.eveningCount);
+    if(en.restock==null&&d.restock&&SKUS.some(s=>(d.restock[s.key]||0)>0))en.restock=Object.assign({},d.restock);
+    if(en.lost==null&&d.lost&&SKUS.some(s=>(d.lost[s.key]||0)>0))en.lost=Object.assign({},d.lost);
+    if(en.payments==null&&d.payments&&calcPmt(d.payments)>0)en.payments=Object.assign({},d.payments);
+  });
+}
+// Set this show's booth list. Refuses to delete a booth that carries real
+// numbers — dropping counted money is never something a rename should do.
+function boothsApply(sh,names){
+  const cur=showBooths(sh);
+  const clean=(names||[]).map(n=>String(n==null?'':n).trim());
+  const blocked=cur.slice(clean.length).filter(b=>boothHasData(sh,b.id));
+  if(blocked.length)return {ok:false,blocked:blocked.map(b=>b.name||b.id)};
+  const used=new Set(cur.slice(0,clean.length).map(b=>b.id));
+  const next=clean.map((nm,i)=>{
+    const keep=cur[i];
+    if(keep)return {id:keep.id,name:nm||keep.name||('Booth '+(i+1))};
+    let n=i+1,id='booth'+n; while(used.has(id)){n++;id='booth'+n;} used.add(id);
+    return {id,name:nm||('Booth '+(i+1))};
+  });
+  cur.slice(clean.length).forEach(b=>{ (sh.days||[]).forEach(d=>{ if(d.boothCounts)delete d.boothCounts[b.id]; }); });
+  const wasSingle=cur.length===0;
+  sh.booths=next;
+  if(wasSingle&&next.length)boothSeedFromDays(sh,next[0].id);
+  rollupShow(sh);
+  return {ok:true,booths:next};
+}
 function calcPmt(pmts){return PMTS.reduce((t,p)=>t+(parseFloat(pmts[p.key])||0),0);}
 function calcInvCost(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*getCost(s.key),0);}
 function calcInvRetail(inv){return SKUS.reduce((t,s)=>t+(inv[s.key]||0)*getP(s.key),0);}
@@ -1866,6 +2058,37 @@ function calcShow(sh){
   return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,cardFees,salesTax,gasAuto,booth,potential,profit,taxRes};
 }
 function showCardTaxRate(sh){ return (sh&&sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?(parseFloat(sh.cardTaxRate)||0):((S.settings&&S.settings.cardTax!=null)?(parseFloat(S.settings.cardTax)||0):0); }
+// Every dollar inside calcShow().expenses, itemised. Booth rent is line one.
+// The Expenses figure on the show screen used to be a single number with no
+// way to check it, which is how "is the booth even in there?" becomes a fair
+// question. Now it adds up in front of you.
+function showExpenseRowsHTML(sh){
+  const t=calcShow(sh);
+  let dayExp=0; (sh.days||[]).forEach(d=>{ if(d.expenses)dayExp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0); });
+  const otherExp=(sh.showExpenses||[]).reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+  const rows=[
+    ['🏬 Booth rent',t.booth,(t.booth>(sh.boothCost||0))?('paid '+fmt(t.booth)+' vs '+fmt(sh.boothCost||0)+' sticker'):''],
+    ['⛽ Gas (auto estimate)',t.gasAuto,t.gasAuto>0?(fmtN(showMiles(sh))+' mi @ '+showMpg(sh)+' mpg'):''],
+    ['⛽ Gas / food / parking logged on days',dayExp,''],
+    ['🏨 Lodging',(sh.lodging||0),sh.lodgingNote?_esc(sh.lodgingNote):''],
+    ['💸 Other show expenses',otherExp,(sh.showExpenses||[]).length?((sh.showExpenses||[]).length+' item'+((sh.showExpenses||[]).length>1?'s':'')):''],
+    ['🧴 Supplies (bags, candy, paper)',t.supplyCost,''],
+    ['💵 Rep day pay',t.repPay,''],
+    ['🧍 Worker payouts',t.workerPay,''],
+    ['💳 Card processing fees',t.cardFees,t.cardFees>0?(((S.settings.sqFee||0)*100).toFixed(1)+'% of card sales'):'']
+  ].filter(r=>(r[1]||0)>0.005);
+  const listed=rows.reduce((a,r)=>a+r[1],0);
+  const unlisted=Math.round((t.expenses-listed)*100)/100;
+  return `<div class="card" style="margin-bottom:12px;border-color:var(--redbd)">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🧾 What the ${fmt(t.expenses)} of expenses is made of</div>
+    ${rows.length?rows.map(r=>`<div class="sr"><span class="srl">${r[0]}${r[2]?` <span style="color:var(--muted);font-weight:400;font-size:10px">${r[2]}</span>`:''}</span><span class="srv red">-${fmt(r[1])}</span></div>`).join(''):'<div style="font-size:12px;color:var(--muted)">Nothing spent on this show yet.</div>'}
+    ${Math.abs(unlisted)>0.005?`<div class="sr"><span class="srl">Other</span><span class="srv red">-${fmt(unlisted)}</span></div>`:''}
+    <div class="sr" style="border-top:1px solid var(--border);margin-top:4px"><span class="srl b">Total Expenses</span><span class="srv red lg">-${fmt(t.expenses)}</span></div>
+    <div class="sr"><span class="srl">Product cost (COGS) — counted separately</span><span class="srv red">-${fmt(t.cogs)}</span></div>
+    ${t.salesTax>0?`<div class="sr"><span class="srl">Sales tax collected (owed to the state)</span><span class="srv red">-${fmt(t.salesTax)}</span></div>`:''}
+    <div class="sr" style="border-top:1px solid var(--border);margin-top:4px"><span class="srl b">Everything out</span><span class="srv red lg">-${fmt(t.expenses+t.cogs+t.salesTax)}</span></div>
+  </div>`;
+}
 // ---- Revenue: Potential vs Actual vs Discounts (Change 2) ----
 // Potential = units sold x full price (same basis as calcShow().gross).
 function showPotentialRev(sh){
@@ -3071,6 +3294,10 @@ function showEditCosts(id){
   <div class="fg"><label class="fl">Number of Days</label><input class="fi" type="number" id="ec_days" step="1" min="1" value="${sh.numDays||1}" placeholder="1"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
   <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">🏬 Booths at this show</label>
+    <button type="button" class="btn btn-ghost btn-sm btn-full" onclick="openBoothsModal('${id}')">${hasBooths(sh)?(showBooths(sh).length+' booths — '+showBooths(sh).map(b=>b.name).join(', ')):'Single booth — tap to split into 2, 3 or 4'}</button>
+    <div style="font-size:11px;color:var(--muted);margin-top:5px">Still one show, one booth fee, one pull from master stock. Splitting only means each booth gets counted and cashed out on its own, and every booth adds into the grand total.</div>
+  </div>
   <div class="fg"><label class="fl">Booth Deposit Due By (optional)</label><input class="fi" type="date" id="ec_due" value="${sh.depositDue||''}"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Set this and the app warns you on Home starting 7 days out until the booth is paid.</div>
   <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
@@ -3176,7 +3403,11 @@ function calcBreakEven(sh){
   const workerPay=(typeof showWorkerPayouts==='function')?showWorkerPayouts(sh):0; // flat/hourly/manual workers are fixed labor
   // Rep day pay is flat labor too (no % of sales anymore) — whatever's been entered counts as a fixed cost.
   const repPay=(typeof showRepPayTotal==='function')?showRepPayTotal(sh):0;
-  const fixedCosts=Math.max(sh.boothCost||0,(typeof boothPaid==='function')?boothPaid(sh):0)+gas+(sh.lodging||0)+showExp+flatOverhead+workerPay+repPay;
+  // Booth rent is the FIRST thing in here. It is the biggest fixed cost on most
+  // shows, and every screen that prints a break-even now also prints this
+  // breakdown, so "is the booth in that number?" is answerable by looking.
+  const booth=Math.max(sh.boothCost||0,(typeof boothPaid==='function')?boothPaid(sh):0);
+  const fixedCosts=booth+gas+(sh.lodging||0)+showExp+flatOverhead+workerPay+repPay;
   // Variable-cost ratio: this show's own COGS-to-collected when it has data, else 30% (2025 season average)
   let ratio=0.30,cardShare=0.5;
   const g=showActualRev(sh);
@@ -3188,7 +3419,41 @@ function calcBreakEven(sh){
   let avg=SKUS.reduce((t,s)=>t+((P[s.key]!=null)?P[s.key]:getP(s.key)),0)/SKUS.length;
   const u=showUnitsSold(sh); const uT=SKUS.reduce((t,s)=>t+(u[s.key]||0),0);
   if(uT>0){ const pv=calcRev(u,sh.prices||null); if(pv>0)avg=pv/uT; }
-  return {dollars,units:avg>0?Math.ceil(dollars/avg):0,ratio};
+  return {dollars,units:avg>0?Math.ceil(dollars/avg):0,ratio,fixedCosts,
+    parts:{booth,gas,lodging:(sh.lodging||0),showExp,flatOverhead,workerPay,repPay}};
+}
+// The break-even panel every show screen shares. It answers three questions in
+// one place: what has to come through the drawer before the day pays for
+// itself, what is IN that number (booth rent first), and — once the show is
+// running — how far past it we are.
+function breakEvenHTML(sh,opts){
+  opts=opts||{};
+  const be=calcBreakEven(sh), p=be.parts||{};
+  const live=(sh.status==='active'||sh.status==='completed');
+  const gross=live?((typeof showActualRev==='function')?showActualRev(sh):0):0;
+  const gap=be.dollars-gross;
+  const bits=[
+    ['Booth rent',p.booth],
+    ['Gas',p.gas],
+    ['Lodging',p.lodging],
+    ['Other show expenses',p.showExp],
+    ['Candy + paper',p.flatOverhead],
+    ['Crew pay',(p.repPay||0)+(p.workerPay||0)]
+  ].filter(x=>(x[1]||0)>0.005);
+  const chips=bits.map(x=>`<span class="chip" style="font-size:10px">${x[0]}: <strong style="color:var(--gold)">${fmt(x[1])}</strong></span>`).join('')
+    ||'<span style="color:var(--muted);font-size:11px">No fixed costs entered yet — add the booth fee in ✏️ Edit Show.</span>';
+  const progress=live?`<div style="margin-top:7px;font-size:12px;font-weight:800;color:${gap<=0?'var(--green)':'var(--red)'}">${gap<=0?`✅ Past break even by ${fmt(-gap)} — everything after this is profit.`:`⏳ ${fmt(gap)} still to collect before this show pays for itself.`}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:2px">Collected so far: <b style="color:var(--green)">${fmt(gross)}</b></div>`:'';
+  return `<div style="margin-top:8px;padding:9px 10px;background:rgba(255,200,0,0.08);border:1px solid rgba(255,200,0,0.25);border-radius:8px"${opts.stop?' onclick="event.stopPropagation()"':''}>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:800">Break Even${opts.title?' — '+opts.title:''}</div>
+      <div style="text-align:right"><div style="font-size:19px;font-weight:900;color:var(--gold);line-height:1.1">${fmt(be.dollars)}</div><div style="font-size:10px;color:var(--muted)">≈ ${fmtN(be.units)} units</div></div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:7px 0 3px">Fixed costs in that number — ${fmt(be.fixedCosts)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">${chips}</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:5px">Plus ${Math.round((be.ratio||0)*100)}% product cost and card fees on every dollar after that.</div>
+    ${progress}
+  </div>`;
 }
 const SHOW_EXP_CATS=[
   {key:'fuel',   label:'Fuel',         icon:'⛽'},
@@ -3211,8 +3476,6 @@ function showCard(sh){
   const bdg=passed?'🚫 PASSED / NOT DOING':(missed?'❌ MISSED / DID NOT DO':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED'));
   const dateStr=sh.dates?sh.dates.join(' → '):'';
   const dateBig=(sh.dates&&sh.dates.length)?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):(sh.startDate||'Date TBD');
-  const beO=calcBreakEven(sh),be=beO.dollars;
-  const beHit=sh.status==='completed'&&t.gross>=be;
   return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
     <span class="sc-badge ${sh.status}"${passed?' style="background:rgba(255,165,0,0.14);color:#FFA500;border:1px solid rgba(255,165,0,0.45)"':(missed?' style="background:var(--redbg);color:var(--red);border:1px solid var(--redbd)"':'')}>${bdg}</span>
     <div class="sc-name">${sh.name}${sh.repOnlyShow?' <span style="font-size:11px;font-weight:800;color:#7EB8F7">👥 CREW-RUN</span>':''}</div>
@@ -3233,11 +3496,9 @@ function showCard(sh){
       <div style="font-size:11px;color:var(--muted);margin-top:6px">History is fully preserved. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div>
       <button class="btn btn-ghost btn-sm btn-full" style="margin-top:8px;border-color:var(--goldbd);color:var(--gold)" onclick="restoreShowPassed('${sh.id}')">↩️ Restore to Upcoming</button>
     </div>`:''}
+    ${passed?'':breakEvenHTML(sh)}
     ${(sh.status==='planned'&&!missed&&!passed)?`
-    <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2)">
-      <div style="font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}</div>
-      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Break Even</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(be)}</div><div style="font-size:10px;color:var(--muted)">≈ ${fmtN(beO.units)} units</div></div>
-    </div>
+    <div style="margin-top:8px;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:6px;border:1px solid rgba(255,200,0,0.2);font-size:11px;color:var(--muted)">${sh.numDays||1} day${sh.numDays>1?'s':''} · ${sh.miles||0} mi · Booth ${sh.boothCost?fmt(sh.boothCost):'TBD'}${hasBooths(sh)?' · 🏬 '+showBooths(sh).length+' booths':''}</div>
     ${(()=>{
       const dlabels=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
       const sched=dlabels.map((dl,i)=>{const ct=dayCallClose(sh,i);return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--muted)">${dl}</span><span style="font-weight:700">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400">· call ${ct.call}</span></span></div>`;}).join('');
@@ -3735,6 +3996,23 @@ function exportShowCSV(shId){
   // Flat / hourly / manual workers (e.g. Olivia)
   if((sh.workers||[]).length){ rows.push([]); rows.push(['Workers (flat/hourly/manual)','Role','Type','Payout','Paid','Owed','Pay Method','Note']);
     (sh.workers||[]).forEach(w=>{ const pay=workerPayout(w); const paid=parseFloat(w.paid)||0; rows.push([w.name||'',w.role||'',w.type||'',pay.toFixed(2),paid.toFixed(2),Math.max(0,pay-paid).toFixed(2),w.payMethod||'',w.payNote||'']); }); }
+  // Booths, when the show has them. The written sheet has to look like the
+  // notebook: each booth counted on its own, then the grand total underneath.
+  if(hasBooths(sh)){
+    rows.push([]); rows.push(['Booth','Day','Date','Units Sold','Collected','Product Cost']);
+    showBooths(sh).forEach(b=>{
+      (sh.days||[]).forEach((d,i)=>{ const en=dayBoothRead(d,b.id); if(!en)return;
+        const sold=boothSold(en); const u=sold?SKUS.reduce((t,x)=>t+(sold[x.key]||0),0):0;
+        const money=boothMoney(en); if(!u&&!money)return;
+        const cogs=sold?calcCOGSOn(boothCogsUnits(en),showDayKey(sh,i),sh):0;
+        rows.push([b.name,i+1,d.date||'',u,money.toFixed(2),cogs.toFixed(2)]); });
+    });
+    rows.push([]); rows.push(['Booth tally (whole show)','','Units Sold','Collected','Product Cost','Full-Price Value']);
+    showBooths(sh).forEach(b=>{ const bt=boothShowTotals(sh,b.id);
+      rows.push([b.name,'',bt.unitsTotal,bt.money.toFixed(2),bt.cogs.toFixed(2),bt.retail.toFixed(2)]); });
+    const g=boothGrandTotals(sh);
+    rows.push(['GRAND TOTAL — all booths','',g.unitsTotal,g.money.toFixed(2),g.cogs.toFixed(2),g.retail.toFixed(2)]);
+  }
   rows.push([]); rows.push(['SUMMARY']);
   rows.push(['Potential Gross','','','','',showPotentialRev(sh).toFixed(2)]);
   rows.push(['Actual Collected','','','','',showActualRev(sh).toFixed(2)]);
@@ -3744,6 +4022,13 @@ function exportShowCSV(shId){
   rows.push(['Rep Pay','','','','',(t.repPay||0).toFixed(2)]);
   rows.push(['Worker Payouts','','','','',(t.workerPay||0).toFixed(2)]);
   rows.push(['Net Profit','','','','',t.profit.toFixed(2)]);
+  const _be=calcBreakEven(sh);
+  rows.push(['Break Even (dollars)','','','','',_be.dollars.toFixed(2)]);
+  rows.push(['Break Even (units)','','','','',_be.units]);
+  rows.push(['  of which booth rent','','','','',(_be.parts.booth||0).toFixed(2)]);
+  rows.push(['  of which gas','','','','',(_be.parts.gas||0).toFixed(2)]);
+  rows.push(['  of which lodging','','','','',(_be.parts.lodging||0).toFixed(2)]);
+  rows.push(['  of which crew pay','','','','',((_be.parts.repPay||0)+(_be.parts.workerPay||0)).toFixed(2)]);
   dlFile('best-solution-'+_slug(sh.name)+'-'+_stamp()+'.csv',_csvRows(rows));
 }
 function exportRepCSV(){
@@ -3792,6 +4077,13 @@ function printShowReport(shId){
     '<h1>'+_esc(sh.name)+'</h1><div class="muted">'+_esc(sh.location||'')+' · '+_esc((sh.dates||[]).join(' - '))+' · Generated '+_stamp()+'</div>'+
     '<h2>Units Sold</h2><table><tr><th>Date</th><th>Product</th><th>Units</th><th>Price</th><th>Revenue</th></tr>'+(dayRows||'<tr><td colspan="5">No sales recorded</td></tr>')+'</table>'+
     (payRows?'<h2>Payments Collected</h2><table><tr><th>Method</th><th>Amount</th></tr>'+payRows+'</table>':'')+
+    (()=>{ if(!hasBooths(sh))return '';
+      let br='';
+      showBooths(sh).forEach(b=>{ const bt=boothShowTotals(sh,b.id);
+        br+='<tr><td>'+_esc(b.name)+'</td><td class="r">'+bt.unitsTotal+'</td><td class="r">'+_money(bt.money)+'</td><td class="r">'+_money(bt.cogs)+'</td></tr>'; });
+      const g=boothGrandTotals(sh);
+      br+='<tr class="tot"><td>GRAND TOTAL</td><td class="r">'+g.unitsTotal+'</td><td class="r">'+_money(g.money)+'</td><td class="r">'+_money(g.cogs)+'</td></tr>';
+      return '<h2>Booth Tally ('+showBooths(sh).length+' booths)</h2><table><tr><th>Booth</th><th>Units</th><th>Collected</th><th>Product Cost</th></tr>'+br+'</table>'; })()+
     (()=>{ const ids=showRepIds(sh).filter(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&!r.isSelf;});
       let pr='';
       ids.forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id)||{}; const act=repShowPay(sh,id); const meta=(sh.repPayMeta&&sh.repPayMeta[id])||{};
@@ -3807,7 +4099,17 @@ function printShowReport(shId){
     '<tr><td>Expenses</td><td class="r">'+_money(t.expenses)+'</td></tr>'+
     '<tr><td>Rep Pay</td><td class="r">'+_money(t.repPay||0)+'</td></tr>'+
     '<tr><td>Worker Payouts</td><td class="r">'+_money(t.workerPay||0)+'</td></tr>'+
-    '<tr class="tot"><td>Net Profit</td><td class="r">'+_money(t.profit)+'</td></tr></table>');
+    '<tr class="tot"><td>Net Profit</td><td class="r">'+_money(t.profit)+'</td></tr></table>'+
+    (()=>{ const be=calcBreakEven(sh),p=be.parts||{};
+      return '<h2>Break Even</h2><table>'+
+        '<tr class="tot"><td>Break even</td><td class="r">'+_money(be.dollars)+' &middot; '+be.units+' units</td></tr>'+
+        '<tr><td>Booth rent</td><td class="r">'+_money(p.booth||0)+'</td></tr>'+
+        '<tr><td>Gas</td><td class="r">'+_money(p.gas||0)+'</td></tr>'+
+        '<tr><td>Lodging</td><td class="r">'+_money(p.lodging||0)+'</td></tr>'+
+        '<tr><td>Other show expenses</td><td class="r">'+_money(p.showExp||0)+'</td></tr>'+
+        '<tr><td>Candy + paper</td><td class="r">'+_money(p.flatOverhead||0)+'</td></tr>'+
+        '<tr><td>Crew pay</td><td class="r">'+_money((p.repPay||0)+(p.workerPay||0))+'</td></tr>'+
+        '<tr class="tot"><td>Fixed costs</td><td class="r">'+_money(be.fixedCosts)+'</td></tr></table>'; })());
 }
 
 // ===================================================
@@ -3851,6 +4153,9 @@ function rShow(){
     <div><div class="sl">Tax Reserve</div><div class="sv sm r" style="font-size:14px">${fmt(t.taxRes)}</div></div>
     <div><div class="sl">Keep</div><div class="sv sm g" style="font-size:14px">${fmt(Math.max(0,t.profit-t.taxRes))}</div></div>
   </div>
+  ${_pd?'':breakEvenHTML(sh,{title:'what has to come through the drawer'})}
+  <div style="height:12px"></div>
+  ${showExpenseRowsHTML(sh)}
   <div class="card" style="margin-bottom:12px;border-color:rgba(0,210,106,0.25)">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">💵 REVENUE — POTENTIAL vs ACTUAL</div>
     <div class="sr"><span class="srl">Potential (units sold × full price)</span><span class="srv gold">${fmt(showPotentialRev(sh))}</span></div>
@@ -3860,6 +4165,7 @@ function rShow(){
     <button class="btn btn-xs btn-ghost" style="width:100%;margin-top:8px" onclick="openDiscountModal('${sh.id}')">+ Log Discount / Freebie / Promo</button>
     ${(sh.discounts||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">${[...(sh.discounts||[])].slice().reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0"><span style="color:var(--muted);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.note||'(no note)'} <span style="opacity:.6">${x.date||''}</span></span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--red);font-weight:700">-${fmt(x.amount)}</span><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delDiscount('${sh.id}','${x.id}')">✕</span></span></div>`).join('')}</div>`:''}
   </div>
+  ${boothScoreboardHTML(sh)}
   ${_pd?`<div class="wb gold" style="margin-bottom:12px">🚫 <strong>Passed / Not Doing.</strong> ${_esc(passedReason(sh)||'No reason recorded')}${passedRevisit(sh)?`<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}${sh.passedAt?`<div style="font-weight:400;font-size:10px;margin-top:3px;color:var(--muted)">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}<div style="font-weight:400;font-size:11px;margin-top:5px;color:var(--muted)">Everything below is preserved history. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div></div>`:''}
   ${actBtn}
   ${passBtn}
@@ -3895,7 +4201,7 @@ function rShow(){
       if(dayCarry.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Opening ≠ last night ending: ${dayCarry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>
         <div style="display:flex;gap:6px;margin-top:4px"><button class="btn btn-xs btn-ghost" onclick="fixCarryFromPrev('${sh.id}',${i})">↩︎ Reset to last night</button><button class="btn btn-xs btn-ghost" onclick="reconcileCarry('${sh.id}',${i})">✓ Explain / keep</button></div>`; }
       if(dayNeg.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Ending &gt; opening (impossible sale — restock or fix): ${dayNeg.map(m=>m.short+' '+m.morn+'→'+m.eve).join(', ')}</div>`; }
-      if(hasM&&hasE){ r+=`<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${!d.locked?`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i})">± Restock / Damaged-Lost</button>`:''}${d.locked?`<button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${i})">🔓 Unlock day</button>`:`<button class="btn btn-xs btn-ghost" onclick="lockDay('${sh.id}',${i})">🔒 Finalize / lock day</button>`}</div>`; }
+      if(hasM&&hasE){ r+=`<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${!d.locked?(hasBooths(sh)?showBooths(sh).map(b=>`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i},'${b.id}')">± ${_esc(b.name)}</button>`).join(''):`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i})">± Restock / Damaged-Lost</button>`):''}${d.locked?`<button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${i})">🔓 Unlock day</button>`:`<button class="btn btn-xs btn-ghost" onclick="lockDay('${sh.id}',${i})">🔒 Finalize / lock day</button>`}</div>`; }
       return r+`</div>`;
     }).join('');
     if((sh.invLog||[]).length){ h+=`<details style="margin-top:8px"><summary style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;cursor:pointer">🧾 Change log (${sh.invLog.length})</summary><div style="margin-top:6px">${sh.invLog.slice(-15).reverse().map(e=>`<div style="font-size:10px;color:var(--muted);padding:2px 0">${(e.ts||'').replace('T',' ').slice(0,16)} · ${e.type} ${e.date||''} — ${((e.changes||[]).join(', ')).replace(/</g,'&lt;')}</div>`).join('')}</div></details>`; }
@@ -4086,6 +4392,147 @@ function clearPreShowStock(shId){
   sh.preShowStock={};mClose();saveS();toast('Pre-show stock cleared');
 }
 
+// ===================================================
+// BOOTH UI — per-booth entry cards, the booth manager, and the tally
+// ===================================================
+// One card per booth on the day screen. Each card is a complete little
+// booth: its own morning column, its own evening column, its own drawer,
+// its own cash-vs-product check and its own restock/lost. The day's grand
+// total sits underneath, auto-summed, and is deliberately not editable —
+// there is exactly one way for those numbers to change, and it is by
+// counting a booth.
+function boothDayCardHTML(sh,di,b){
+  const d=sh.days[di]; const en=dayBoothRead(d,b.id)||{};
+  const haM=!!en.morningCount, haE=!!en.eveningCount;
+  const money=boothMoney(en), haP=money>0;
+  const sold=haM&&haE?boothSold(en):null;
+  const soldT=sold?SKUS.reduce((t,s)=>t+(sold[s.key]||0),0):null;
+  const rev=sold?calcRev(sold,sh.prices||null):0;
+  const restockT=SKUS.reduce((t,s)=>t+((en.restock&&en.restock[s.key])||0),0);
+  const lostT=SKUS.reduce((t,s)=>t+((en.lost&&en.lost[s.key])||0),0);
+  const carry=boothCarryIssues(sh,b.id).filter(m=>m.di===di);
+  const cc=boothCashCheck(sh,di,b.id);
+  const locked=!!d.locked;
+  const bArg="'"+b.id+"'";
+  const state=(haM&&haE&&haP)?'✓ CLOSED OUT':(haM&&haE)?'COUNTED — NEEDS MONEY':haM?'OPEN':'NOT COUNTED';
+  const stateCls=(haM&&haE&&haP)?'green':haM?'gold':'';
+  const col=(title,color,rows,btn)=>`<div style="flex:1;background:var(--card);border-radius:8px;padding:7px;border:1px solid ${color.bd}">
+    <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:${color.fg};margin-bottom:5px">${title}</div>${rows}${btn}</div>`;
+  const skuRows=(map,has)=>SKUS.map(s=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:1px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${s.short}</span><span style="font-weight:800">${has?(map[s.key]||0):'—'}</span></div>`).join('');
+  const mBtn=locked?'':`<button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'} btn-full" style="margin-top:6px" onclick="showCntModal('${sh.id}',${di},'morning',${bArg})">${haM?'Edit':'Count'}</button>`;
+  const eBtn=locked?'':`<button class="btn btn-xs ${haE?'btn-ghost':(haM?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showCntModal('${sh.id}',${di},'evening',${bArg})" ${haM?'':'disabled'}>${haE?'Edit':'Count'}</button>`;
+  const pBtn=locked?'':`<button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di},${bArg})" ${haE?'':'disabled'}>${haP?'Edit':'Count'}</button>`;
+  const pmtRows=PMTS.map(p=>`<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${p.label}</span><span style="font-weight:700">${haP?(((en.payments||{})[p.key]||0)>0?fmt(en.payments[p.key]):'—'):''}</span></div>`).join('')
+    +`<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;color:var(--green);margin-top:4px"><span>Total</span><span>${haP?fmt(money):'—'}</span></div>`;
+  let h=`<div class="card" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:${(haM&&haE&&haP)?'var(--greenbd)':'var(--goldbd)'}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:15px;font-weight:900">🏬 ${_esc(b.name)}</div>
+      <span class="chip ${stateCls}" style="font-size:10px">${state}</span>
+    </div>
+    <div style="display:flex;gap:5px">
+      ${col('🌅 Morning',{fg:'#7EB8F7',bd:haM?'var(--border)':'var(--gold)'},skuRows(en.morningCount||{},haM),mBtn)}
+      ${col('🌙 Evening',{fg:'#B98AE6',bd:haE?'var(--border)':(haM?'var(--gold)':'var(--border)')},skuRows(en.eveningCount||{},haE),eBtn)}
+      ${col('💰 Money',{fg:'#00D26A',bd:haP?'var(--border)':(haE?'var(--gold)':'var(--border)')},pmtRows,pBtn)}
+    </div>`;
+  if(restockT||lostT)h+=`<div style="font-size:10px;color:var(--muted);margin-top:6px">${restockT?'+ Restock '+restockT+' ':''}${lostT?'· Lost/Damaged '+lostT+' (still costs COGS)':''}</div>`;
+  if(carry.length)h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ Opening ≠ this booth's ending last night: ${carry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>`;
+  if(sold)h+=`<div style="margin-top:7px;font-size:12px;color:var(--muted)">Sold <b style="color:var(--gold)">${soldT}</b> units · full price <b style="color:var(--gold)">${fmt(rev)}</b> · collected <b style="color:var(--green)">${fmt(money)}</b></div>`;
+  if(cc.state==='short')h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ ${_esc(b.name)} is ${fmt(cc.amt)} short: ${fmt(cc.collected)} in the drawer vs ${fmt(cc.rev)} of product gone. OK if they gave discounts — otherwise ask.</div>`;
+  else if(cc.state==='over')h+=`<div class="wb gold" style="margin-top:6px;font-size:11px">⚠️ ${_esc(b.name)} is ${fmt(cc.amt)} OVER what sold. Re-check this booth's counts.</div>`;
+  else if(cc.state==='ok')h+=`<div class="wb green" style="margin-top:6px;font-size:11px">✓ ${_esc(b.name)} balances — ${fmt(cc.collected)} collected.</div>`;
+  if(haM&&haE&&!locked)h+=`<button class="btn btn-xs btn-ghost btn-full" style="margin-top:7px" onclick="openAdjustModal('${sh.id}',${di},${bArg})">± Restock / Damaged-Lost at ${_esc(b.name)}</button>`;
+  return h+`</div>`;
+}
+function dayBoothsHTML(sh,di){
+  const booths=showBooths(sh); if(!booths.length)return '';
+  const waiting=boothsAwaitingEvening(sh,di);
+  const opened=boothsCounted(sh,di);
+  const money=booths.reduce((t,b)=>t+boothMoney(dayBoothRead(sh.days[di],b.id)||{}),0);
+  let h=`<div style="display:flex;justify-content:space-between;align-items:center;margin:2px 0 7px">
+    <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800">🏬 ${booths.length} booths — count each one on its own</div>
+    <button class="btn btn-xs btn-ghost" onclick="openBoothsModal('${sh.id}')">✏️ Booths</button>
+  </div>`;
+  h+=booths.map(b=>boothDayCardHTML(sh,di,b)).join('');
+  if(waiting.length)h+=`<div class="wb gold" style="margin-bottom:8px;font-size:12px">🌙 Still open: <strong>${waiting.map(b=>_esc(b.name)).join(', ')}</strong>. The day's grand total stays unfinished until every booth that opened has an evening count, so a half-closed day can never post a fake sale.</div>`;
+  else if(opened.length)h+=`<div class="wb green" style="margin-bottom:8px;font-size:12px">✓ All ${opened.length} booths closed out. Grand total below: <strong>${fmt(money)}</strong> collected.</div>`;
+  return h;
+}
+// Whole-show tally: every booth side by side, then the grand total. This is
+// the sheet the owner reads at the end of the weekend.
+function boothScoreboardHTML(sh){
+  const booths=showBooths(sh); if(!booths.length)return '';
+  const g=boothGrandTotals(sh);
+  const rows=booths.map(b=>{
+    const t=boothShowTotals(sh,b.id);
+    const chips=SKUS.filter(s=>(t.units[s.key]||0)>0).map(s=>`<span class="chip gold" style="font-size:10px">${s.short}: ${t.units[s.key]}</span>`).join('')||'<span style="color:var(--muted);font-size:11px">no counts yet</span>';
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="font-size:14px;font-weight:900">🏬 ${_esc(b.name)}</div>
+        <div style="text-align:right"><div style="font-size:17px;font-weight:900;color:var(--green)">${fmt(t.money)}</div><div style="font-size:10px;color:var(--muted)">collected</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${t.unitsTotal} units${t.daysCounted?' · '+t.daysCounted+' day'+(t.daysCounted>1?'s':'')+' counted':''}${t.lost?' · '+t.lost+' lost/given':''} · product cost ${fmt(t.cogs)} · full-price value ${fmt(t.retail)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">${chips}</div>
+    </div>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:12px;border-color:var(--goldbd)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700">🏬 Booth Tally — ${booths.length} booths</div>
+      <button class="btn btn-xs btn-ghost" onclick="openBoothsModal('${sh.id}')">✏️ Edit booths</button>
+    </div>
+    ${rows}
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding-top:9px">
+      <div style="font-size:15px;font-weight:900;color:var(--gold)">🧮 GRAND TOTAL</div>
+      <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(g.money)}</div><div style="font-size:10px;color:var(--muted)">${g.unitsTotal} units · all booths</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">Every booth's numbers add straight into this total and into the show's P&amp;L. Stock still leaves the garage to the SHOW, not to a booth — booths only split the counting.</div>
+  </div>`;
+}
+// ---- booth manager -------------------------------------------------------
+var _boothEdit=null;
+function openBoothsModal(shId){
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  _boothEdit={shId,names:showBooths(sh).map(b=>b.name||'')};
+  renderBoothsModal();
+}
+function boothEditRead(){ if(!_boothEdit)return; _boothEdit.names=_boothEdit.names.map((n,i)=>{const el=$$('bth_n_'+i);return el?String(el.value||''):n;}); }
+function boothAddRow(){ if(!_boothEdit)return; boothEditRead(); _boothEdit.names.push('Booth '+(_boothEdit.names.length+1)); renderBoothsModal(); }
+function boothDelRow(i){ if(!_boothEdit)return; boothEditRead(); _boothEdit.names.splice(i,1); renderBoothsModal(); }
+function boothQuickSet(n){ if(!_boothEdit)return; boothEditRead();
+  const names=[]; for(let i=0;i<n;i++)names.push((_boothEdit.names[i]||'').trim()||('Booth '+(i+1)));
+  _boothEdit.names=names; renderBoothsModal(); }
+function renderBoothsModal(){
+  if(!_boothEdit)return;
+  const sh=S.shows.find(s=>s.id===_boothEdit.shId);if(!sh)return;
+  const cur=showBooths(sh);
+  const rows=_boothEdit.names.map((nm,i)=>{
+    const existing=cur[i];
+    const hasData=existing?boothHasData(sh,existing.id):false;
+    return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:7px">
+      <div style="min-width:20px;font-size:12px;color:var(--muted);font-weight:800">${i+1}</div>
+      <input class="fi" type="text" id="bth_n_${i}" value="${String(nm||'').replace(/"/g,'&quot;')}" placeholder="Booth ${i+1}" style="flex:1">
+      ${hasData?'<span class="chip green" style="font-size:10px">has counts</span>':`<button class="btn btn-xs btn-ghost" onclick="boothDelRow(${i})">✕</button>`}
+    </div>`;
+  }).join('')||'<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Single booth — the day screen counts the whole show at once.</div>';
+  mOpen(`<div class="mh"><div class="mt">🏬 Booths at this show</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${_esc(sh.name)} — one show, one booth fee, one pull from master stock. Booths just split the COUNTING so each person's table is counted and cashed out on its own, and every booth adds into the grand total.</div>
+  <div style="display:flex;gap:6px;margin-bottom:12px">
+    ${[1,2,3,4].map(n=>`<button class="btn btn-sm ${_boothEdit.names.length===n?'btn-gold':'btn-ghost'}" style="flex:1" onclick="boothQuickSet(${n})">${n} booth${n>1?'s':''}</button>`).join('')}
+  </div>
+  ${rows}
+  <button class="btn btn-ghost btn-sm btn-full" style="margin-top:4px" onclick="boothAddRow()">+ Add another booth</button>
+  <div class="wb gold" style="margin-top:12px;font-size:11px">Turning booths ON moves any counts this show already has onto the first booth, so today's totals do not move by a penny. A booth that already has counts cannot be deleted here — clear its numbers first.</div>
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveBooths()">Save Booths</button>`);
+}
+function saveBooths(){
+  if(!_boothEdit)return;
+  boothEditRead();
+  const sh=S.shows.find(s=>s.id===_boothEdit.shId);if(!sh)return;
+  const res=boothsApply(sh,_boothEdit.names);
+  if(!res.ok){ toast('⚠️ '+res.blocked.join(', ')+' already has counts — clear them first'); return; }
+  const n=res.booths.length;
+  _boothEdit=null; mClose(); saveS();
+  toast(n?('✅ '+n+' booth'+(n>1?'s':'')+' on '+sh.name):'Back to a single booth');
+}
 function rDay(sh,di){
   const d=sh.days[di];if(!d)return'';
   const haM=d.morningCount!==null,haE=d.eveningCount!==null,haP=calcPmt(d.payments)>0;
@@ -4106,24 +4553,26 @@ function rDay(sh,di){
       <div style="font-size:17px;font-weight:900">${d.date||'Day '+(di+1)}</div>
       <span class="chip ${haM&&haE&&haP?'green':isA?'gold':''}">${haM&&haE&&haP?'✓ COMPLETE':isA?'IN PROGRESS':'—'}</span>
     </div>
+    ${dayBoothsHTML(sh,di)}
+    ${hasBooths(sh)?`<div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800;margin:2px 0 6px">🧮 Grand total — all ${showBooths(sh).length} booths, auto-summed</div>`:''}
     <!-- 3-COLUMN COUNTS: Morning | Evening | Money -->
     <div style="display:flex;gap:6px;margin-bottom:6px">
       <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haM?'var(--border)':'var(--gold)'}">
         <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#7EB8F7;margin-bottom:6px">🌅 Morning</div>
         ${SKUS.map(s=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${s.short}</span><span style="font-weight:800">${haM?(d.morningCount[s.key]||0):'—'}</span></div>`).join('')}
-        <button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'morning')">${haM?'Edit':'Count'}</button>
+        ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:8px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'morning')">${haM?'Edit':'Count'}</button>`}
       </div>
       <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haE?'var(--border)':(haM?'var(--gold)':'var(--border)')}">
         <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#B98AE6;margin-bottom:6px">🌙 Evening</div>
         ${SKUS.map(s=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${s.short}</span><span style="font-weight:800">${haE?(d.eveningCount[s.key]||0):'—'}</span></div>`).join('')}
-        <button class="btn btn-xs ${haE?'btn-ghost':(haM?'btn-gold':'btn-outline')} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'evening')" ${!haM?'disabled':''}>${haE?'Edit':'Count'}</button>
+        ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:8px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haE?'btn-ghost':(haM?'btn-gold':'btn-outline')} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'evening')" ${!haM?'disabled':''}>${haE?'Edit':'Count'}</button>`}
       </div>
       <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haP?'var(--border)':(haE?'var(--gold)':'var(--border)')}">
         <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#00D26A;margin-bottom:6px">💰 Money</div>
         ${PMTS.map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${p.label}</span><span style="font-weight:700">${haP?((d.payments[p.key]||0)>0?fmt(d.payments[p.key]):'—'):''}</span></div>`).join('')}
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;color:var(--green);margin-top:4px"><span>Total</span><span>${haP?fmt(pmtT):'—'}</span></div>
         ${(d.paymentsAuto&&(d.repSales||[]).length)?'<div style="font-size:10px;color:#7EB8F7;text-align:center;margin-top:2px">↑ auto-summed from reps</div>':''}
-        <button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>
+        ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>`}
       </div>
     </div>
     ${moneyCheck}
@@ -4197,20 +4646,32 @@ function openCloseout(shId,di){
   const cashLine=cc.state==='short'?(' · cash short '+fmt(cc.amt)+' vs product sold (ok if discounts)'):cc.state==='over'?(' · cash '+fmt(cc.amt)+' OVER — recheck counts'):cc.state==='ok'?' · cash matches inventory':'';
   const ic=v=>v===true?'✅':v==='opt'?'◽':'⬜';
   const step=(n,title,state,detail,btn)=>`<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)"><div style="font-size:17px;line-height:1.3">${ic(state)}</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">${n}. ${title}</div><div style="font-size:11px;color:var(--muted)">${detail}</div>${btn?`<div style="margin-top:6px">${btn}</div>`:''}</div></div>`;
+  const openBooths=boothsAwaitingEvening(sh,di);
   const canLock=hasE&&hasP&&!reconBad;
-  const moneyBtn=`<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="showMoneyModal('${sh.id}',${di})">${hasP?'Edit money':'Count money'}</button>`;
+  // On a multi-booth show the closeout is per booth: three evening counts and
+  // three drawers. The day is not closeable until every booth that opened has
+  // been counted, which is the same rule the rollup enforces.
+  const bList=showBooths(sh);
+  const moneyBtn=bList.length
+    ? bList.map(b=>{const m=boothMoney(dayBoothRead(d,b.id)||{});return `<button class="btn btn-xs ${m>0?'btn-ghost':'btn-gold'}" style="margin:0 4px 4px 0" onclick="showMoneyModal('${sh.id}',${di},'${b.id}')">${m>0?'✓ ':''}${_esc(b.name)}${m>0?' '+fmt(m):''}</button>`;}).join('')
+    : `<button class="btn btn-xs ${hasP?'btn-ghost':'btn-gold'}" onclick="showMoneyModal('${sh.id}',${di})">${hasP?'Edit money':'Count money'}</button>`;
+  const eveBtn=bList.length
+    ? bList.map(b=>{const en=dayBoothRead(d,b.id)||{};return `<button class="btn btn-xs ${en.eveningCount?'btn-ghost':'btn-gold'}" style="margin:0 4px 4px 0" onclick="showCntModal('${sh.id}',${di},'evening','${b.id}')" ${en.morningCount?'':'disabled style="opacity:.5"'}>${en.eveningCount?'✓ ':''}${_esc(b.name)}</button>`;}).join('')
+    : `<button class="btn btn-xs ${hasE?'btn-ghost':'btn-gold'}" onclick="showCntModal('${sh.id}',${di},'evening')" ${!hasM?'disabled style="opacity:.5"':''}>${hasE?'Edit count':'Count now'}</button>${!hasM?' <span style="font-size:10px;color:var(--muted)">(do morning count first)</span>':''}`;
   mOpen(`<div class="mh"><div class="mt">🏁 Day Closeout</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} · ${d.date||('Day '+(di+1))}. Work top to bottom — reopen anytime to see what's left.</div>
   ${d.locked?`<div class="wb green" style="margin-bottom:10px">🔒 Finalized & locked. <button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${di});setTimeout(()=>openCloseout('${sh.id}',${di}),50)">Unlock to edit</button></div>`:''}
-  ${step(1,'Evening count',hasE?true:false,hasE?'Counted — unsold product recorded.':'Count all unsold product at end of day.',`<button class="btn btn-xs ${hasE?'btn-ghost':'btn-gold'}" onclick="showCntModal('${sh.id}',${di},'evening')" ${!hasM?'disabled style="opacity:.5"':''}>${hasE?'Edit count':'Count now'}</button>${!hasM?' <span style="font-size:10px;color:var(--muted)">(do morning count first)</span>':''}`)}
-  ${step(2,'Money',hasP?true:false,hasP?('Day total '+fmt(dayTotal)+(d.paymentsAuto?' · auto from old rep-sales data':'')):'Count the day\'s money — one total, by payment method.',moneyBtn)}
+  ${step(1,bList.length?('Evening count — all '+bList.length+' booths'):'Evening count',hasE?true:false,
+    hasE?('Counted — unsold product recorded'+(bList.length?' at every booth.':'.')):(openBooths.length?('Still open: '+openBooths.map(b=>_esc(b.name)).join(', ')+'. The day total stays unfinished until every booth is counted.'):'Count all unsold product at end of day.'),eveBtn)}
+  ${step(2,bList.length?('Money — one drawer per booth'):'Money',hasP?true:false,
+    hasP?('Day total '+fmt(dayTotal)+(bList.length?' across '+bList.length+' booths':'')+(d.paymentsAuto?' · auto from old rep-sales data':'')):(bList.length?'Count each booth\'s drawer on its own — they add into the day total.':'Count the day\'s money — one total, by payment method.'),moneyBtn)}
   ${step(3,'Day expenses',(d.expenses&&Object.values(d.expenses).some(v=>parseFloat(v)>0))?true:'opt','Gas, food, parking, hotel for the day (optional).',`<button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit expenses</button>`)}
   ${step(4,'Day pay — what each rep gets today',staffed?(calcDayPay(d)>0?true:false):'opt',staffed?(calcDayPay(d)>0?('Entered — '+fmt(calcDayPay(d))+' today.'):'Enter each rep\'s flat $ for this day before you close out.'):'No reps on this show. Workers are logged on the show page.',staffed?`<button class="btn btn-xs ${calcDayPay(d)>0?'btn-ghost':'btn-gold'}" onclick="openDayPay('${sh.id}',${di})">${calcDayPay(d)>0?'Edit day pay':'Enter day pay'}</button>`:`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to show</button>`)}
   ${step(5,'Reconciliation — inventory + cash',reconBad?false:(reconOK?true:'opt'),(reconBad?'⚠️ Inventory mismatch — fix before locking.':(reconOK?'Counts reconcile.':'Reviewed (override on file).'))+cashLine,reconBad?`<button class="btn btn-xs btn-gold" onclick="mClose();go('show','${sh.id}',${di})">Review mismatch</button>`:'')}
   ${(cc.state==='short'||cc.state==='over')?dayCashCheckHTML(sh,di,false):''}
   <div style="margin-top:14px">
     <button class="btn ${canLock&&!d.locked?'btn-gold':'btn-ghost'} btn-full" ${(!canLock||d.locked)?'disabled style="opacity:.5"':''} onclick="lockDay('${sh.id}',${di});mClose();go('show','${sh.id}',${di})">${d.locked?'🔒 Already finalized':'🔒 Finalize & Lock Day'}</button>
-    ${(!canLock&&!d.locked)?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">${!hasE?'Need evening count. ':''}${!hasP?'Need a money total. ':''}${reconBad?'Resolve the inventory mismatch. ':''}</div>`:''}
+    ${(!canLock&&!d.locked)?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">${!hasE?(openBooths.length?('Still need an evening count from '+openBooths.map(b=>_esc(b.name)).join(', ')+'. '):'Need evening count. '):''}${!hasP?'Need a money total. ':''}${reconBad?'Resolve the inventory mismatch. ':''}</div>`:''}
   </div>`);
 }
 
@@ -4262,86 +4723,129 @@ function confirmPack(shId){
   sh.status='active';sh.packedInventory={...pk};sh.days[0].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
   mClose();saveS();toast('Show started! Inventory packed.');
 }
-function showCntModal(shId,di,type){
+// boothId is optional. Given one, the modal counts THAT booth and compares it
+// against that booth's own ending last night, never the show-wide total.
+function showCntModal(shId,di,type,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  const d=sh.days[di];
+  const d=sh.days[di]; boothId=boothId||null;
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each booth.'); return; }
+  const cur=boothId?(dayBoothRead(d,boothId)||{}):d;
+  const prevDay=di>0?sh.days[di-1]:null;
+  const prevSrc=prevDay?(boothId?(dayBoothRead(prevDay,boothId)||{}):prevDay):null;
   let def=eSku();
-  if(type==='morning'){if(di>0&&sh.days[di-1].eveningCount)def={...sh.days[di-1].eveningCount};else if(d.morningCount)def={...d.morningCount};}
-  else{def=d.eveningCount?{...d.eveningCount}:(d.morningCount?{...d.morningCount}:eSku());}
-  const prevEve=(type==='morning'&&di>0)?(sh.days[di-1].eveningCount||null):null;
+  if(type==='morning'){if(prevSrc&&prevSrc.eveningCount)def={...prevSrc.eveningCount};else if(cur.morningCount)def={...cur.morningCount};}
+  else{def=cur.eveningCount?{...cur.eveningCount}:(cur.morningCount?{...cur.morningCount}:eSku());}
+  const prevEve=(type==='morning'&&prevSrc)?(prevSrc.eveningCount||null):null;
+  const bArg=boothId?("'"+boothId+"'"):'null';
+  const who=boothId?(' · '+_esc(boothName(sh,boothId))):'';
   mOpen(`<div class="mh"><div class="mt">${type==='morning'?'🌅 Morning Count':'🌙 Evening Count'}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${type==='morning'?'Count everything at your booth right now.':'Count all unsold items at end of day.'}</div>
-  ${prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>last night's ending</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:''}
-  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&d.morningCount?`<div class="cr-s">Started: ${d.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}</div>`:'')}</div>
+  ${boothId?`<div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:2px">🏬 ${_esc(boothName(sh,boothId))}</div>`:''}
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${type==='morning'?('Count everything at this booth right now.'+(boothId?' This booth only — the other booths get counted on their own cards.':'')):('Count all unsold items at end of day.'+(boothId?' This booth only.':''))}</div>
+  ${prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:''}
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}</div>`:'')}</div>
   <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
-  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}')">Save ${type==='morning'?'Morning':'Evening'} Count</button>`);
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}',${bArg})">Save ${type==='morning'?'Morning':'Evening'} Count${who}</button>`);
 }
 function cA(id,d){const e=$$(id);e.value=Math.max(0,parseInt(e.value||0)+d);}
-function saveCount(shId,di,type){
+function saveCount(shId,di,type,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const d=sh.days[di];
   if(d.locked){ toast('🔒 Day is locked. Unlock it to edit.'); return; }
+  boothId=boothId||null;
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each booth.'); return; }
   const c={};SKUS.forEach(s=>c[s.key]=parseInt($$('c_'+s.key).value)||0);
-  const before=(type==='morning'?d.morningCount:d.eveningCount)||null;
+  const tgt=boothId?dayBoothWrite(d,boothId):d;
+  const before=(type==='morning'?tgt.morningCount:tgt.eveningCount)||null;
   const diffs=SKUS.filter(s=>(before?(before[s.key]||0):null)!==(c[s.key]||0)).map(s=>`${s.short}:${before?(before[s.key]||0):'—'}→${c[s.key]||0}`);
-  if(type==='morning')d.morningCount=c;
-  else{d.eveningCount=c;if(di<sh.days.length-1&&!sh.days[di+1].morningCount)sh.days[di+1].morningCount={...c};}
-  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:type+' count',changes:diffs.length?diffs:['(no change)'],by:'owner'});
+  const nextDay=sh.days[di+1]||null;
+  if(type==='morning')tgt.morningCount=c;
+  else{
+    tgt.eveningCount=c;
+    // Tomorrow opens where tonight ended — per booth when the show has booths.
+    if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount)ntgt.morningCount={...c}; }
+  }
+  const lbl=(boothId?boothName(sh,boothId)+' — ':'')+type+' count';
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId||null,type:lbl,changes:diffs.length?diffs:['(no change)'],by:'owner'});
   // Cross-day continuity check on a morning entry — flag if it doesn't match last night's ending
   let warn='';
-  if(type==='morning'&&di>0&&sh.days[di-1].eveningCount){
-    const mm=SKUS.some(s=>(sh.days[di-1].eveningCount[s.key]||0)!==(c[s.key]||0));
+  const prevEve=(di>0)?(boothId?((dayBoothRead(sh.days[di-1],boothId)||{}).eveningCount||null):sh.days[di-1].eveningCount):null;
+  if(type==='morning'&&prevEve){
+    const mm=SKUS.some(s=>(prevEve[s.key]||0)!==(c[s.key]||0));
     if(mm){ d.carryReason=null; warn=' ⚠️ Does NOT match last night — see Reconciliation.'; }
   }
-  mClose();saveS();toast((type==='morning'?'Morning count saved!':'Evening count saved!')+warn);
+  if(boothId){ rollupDay(sh,di); if(nextDay)rollupDay(sh,di+1); }
+  mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn);
 }
 function lockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; d.locked=true; d.lockTs=new Date().toISOString(); invLogPush(sh,{ts:d.lockTs,di,date:d.date,type:'lock',changes:['day finalized/locked'],by:'owner'}); saveS();toast('🔒 Day finalized'); }
 function unlockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; const reason=(typeof prompt==='function')?prompt('Reason for unlocking this finalized day?'):'unlocked'; if(reason===null)return; d.locked=false; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'unlock',changes:['unlocked: '+(reason||'(no reason)')],by:'owner'}); saveS();toast('🔓 Day unlocked'); }
 function reconcileCarry(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; const reason=(typeof prompt==='function')?prompt('Explain the change from last night (e.g. restocked 12 C5S, recounted, damaged/lost):'):'reviewed'; if(reason===null)return; d.carryReason=reason||'(reviewed)'; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'reconcile',changes:['override accepted: '+d.carryReason],by:'owner'}); saveS();toast('✅ Reconciliation noted'); }
 function fixCarryFromPrev(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di],prev=sh.days[di-1]; if(!prev||!prev.eveningCount)return; d.morningCount={...prev.eveningCount}; d.carryReason=null; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'autofix',changes:['opening reset to last night ending'],by:'owner'}); saveS();toast('✅ Opening reset to last night ending'); }
 // Per-day restock (units brought in) + damaged/lost/given (units that left but earned no money). Option A: lost units still count as COGS.
-function openAdjustModal(shId,di){
+function openAdjustModal(shId,di,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
   if(d.locked){toast('🔒 Day locked. Unlock to edit.');return;}
-  const rk=d.restock||{},ls=d.lost||{};
+  boothId=boothId||null;
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — adjust each booth.'); return; }
+  const src=boothId?(dayBoothRead(d,boothId)||{}):d;
+  const rk=src.restock||{},ls=src.lost||{};
+  const bArg=boothId?("'"+boothId+"'"):'null';
   mOpen(`<div class="mh"><div class="mt">± Restock / Damaged-Lost-Given</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${sh.name} · ${d.date||('Day '+(di+1))}</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${sh.name} · ${d.date||('Day '+(di+1))}${boothId?' · <strong style="color:var(--gold)">'+_esc(boothName(sh,boothId))+'</strong>':''}</div>
   <div class="wb gold" style="font-size:11px;margin-bottom:12px">Restock = extra units you brought to the booth that day. Damaged / Lost / Given = units that left but earned no money. Both keep your sold count and COGS honest — lost/given units still count as COGS.</div>
   <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700"><div>Product</div><div>Restock +</div><div>Lost/Dmg −</div></div>
   ${SKUS.map(s=>`<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;margin-top:6px"><div style="font-size:12px">${s.short}</div><input class="fi" type="number" min="0" step="1" id="adj_r_${s.key}" value="${rk[s.key]||''}" placeholder="0"><input class="fi" type="number" min="0" step="1" id="adj_l_${s.key}" value="${ls[s.key]||''}" placeholder="0"></div>`).join('')}
-  <button class="btn btn-gold btn-full" style="margin-top:14px" onclick="saveAdjust('${shId}',${di})">Save Adjustments</button>`);
+  <button class="btn btn-gold btn-full" style="margin-top:14px" onclick="saveAdjust('${shId}',${di},${bArg})">Save Adjustments</button>`);
 }
-function saveAdjust(shId,di){
+function saveAdjust(shId,di,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
+  boothId=boothId||null;
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — adjust each booth.'); return; }
   const r={},l={};
   SKUS.forEach(s=>{ const rv=parseInt(($$('adj_r_'+s.key)||{}).value)||0; const lv=parseInt(($$('adj_l_'+s.key)||{}).value)||0; if(rv>0)r[s.key]=rv; if(lv>0)l[s.key]=lv; });
-  d.restock=r; d.lost=l;
+  const tgt=boothId?dayBoothWrite(d,boothId):d;
+  tgt.restock=r; tgt.lost=l;
+  if(boothId)rollupDay(sh,di);
   const rc=SKUS.filter(s=>r[s.key]).map(s=>'+'+r[s.key]+' '+s.short).join(' ');
   const lc=SKUS.filter(s=>l[s.key]).map(s=>'-'+l[s.key]+' '+s.short).join(' ');
-  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'adjust',changes:[[rc&&('restock '+rc),lc&&('lost '+lc)].filter(Boolean).join(' · ')||'cleared'],by:'owner'});
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId||null,type:(boothId?boothName(sh,boothId)+' — adjust':'adjust'),changes:[[rc&&('restock '+rc),lc&&('lost '+lc)].filter(Boolean).join(' · ')||'cleared'],by:'owner'});
   mClose();saveS();toast('✅ Adjustments saved');renderCur();
 }
-function showMoneyModal(shId,di){
+function showMoneyModal(shId,di,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  const d=sh.days[di];const pmts=d.payments||{};
-  let exp=0;if(d.morningCount&&d.eveningCount){const sold=daySold(d);exp=calcRev(sold);}
-  const repTot=calcPmt(sumRepSalesForDay(d)); const hasRepSales=(d.repSales||[]).length>0&&repTot>0;
+  const d=sh.days[di]; boothId=boothId||null;
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each drawer.'); return; }
+  const src=boothId?(dayBoothRead(d,boothId)||{}):d;
+  const pmts=src.payments||{};
+  let exp=0;
+  if(src.morningCount&&src.eveningCount){ exp=calcRev(daySold(src),sh.prices||null); }
+  const repTot=calcPmt(sumRepSalesForDay(d)); const hasRepSales=!boothId&&(d.repSales||[]).length>0&&repTot>0;
+  const bArg=boothId?("'"+boothId+"'"):'null';
   mOpen(`<div class="mh"><div class="mt">💰 Money Count</div><button class="mx" onclick="mClose()">×</button></div>
+  ${boothId?`<div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:6px">🏬 ${_esc(boothName(sh,boothId))} — this booth's drawer only</div>`:''}
   ${hasRepSales?`<div class="wb" style="margin-bottom:12px;background:rgba(79,195,247,0.1);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7;font-size:12px">This day has old per-rep sales data totaling <strong>${fmt(repTot)}</strong> (from before per-rep tracking was removed). Saving a count here overrides it.</div>`:''}
-  ${exp>0?`<div class="wb gold" style="margin-bottom:12px">Expected from inventory sold: <strong>${fmt(exp)}</strong></div>`:''}
+  ${exp>0?`<div class="wb gold" style="margin-bottom:12px">Expected from inventory sold${boothId?' at this booth':''}: <strong>${fmt(exp)}</strong></div>`:''}
   ${PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${pmts[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('')}
   <div style="background:var(--card2);border-radius:9px;padding:12px;margin:10px 0;display:flex;justify-content:space-between;align-items:center">
     <span style="font-weight:900">TOTAL COLLECTED</span>
     <span id="pmtTot" style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(calcPmt(pmts))}</span>
   </div>
-  <button class="btn btn-gold btn-full" onclick="saveMoney('${shId}',${di})">Save Money Count</button>`);
+  <button class="btn btn-gold btn-full" onclick="saveMoney('${shId}',${di},${bArg})">Save Money Count</button>`);
 }
 function updPmt(){let t=0;PMTS.forEach(p=>t+=parseFloat($$('pm_'+p.key).value)||0);$$('pmtTot').textContent=fmt(t);}
-function saveMoney(shId,di){
+function saveMoney(shId,di,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  boothId=boothId||null;
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each drawer.'); return; }
+  const d=sh.days[di];
   const p={};PMTS.forEach(x=>p[x.key]=parseFloat($$('pm_'+x.key).value)||0);
-  sh.days[di].payments=p;sh.days[di].paymentsAuto=false; // manual count = override of the rep auto-sum
-  mClose();saveS();toast('Money count saved!');
+  if(boothId){
+    dayBoothWrite(d,boothId).payments=p;
+    rollupDay(sh,di);
+    invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId,type:boothName(sh,boothId)+' — money count',changes:[fmt(calcPmt(p))+' collected'],by:'owner'});
+  }else{
+    d.payments=p; d.paymentsAuto=false; // manual count = override of the rep auto-sum
+  }
+  mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+'Money count saved!');
 }
 function showExpModal(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
@@ -5057,6 +5561,53 @@ function calToday(){
   const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};
   rCalendar();
 }
+// Every calendar day with a show on it is a door. One show opens it straight
+// away, on the right day tab. Two or more — the red conflict days — open a
+// picker first, because "there is a clash here" is useless without "and here
+// is each show, tap one to go look at it".
+function calDayShows(ds){
+  return (S.shows||[]).filter(sh=>!isPassed(sh)&&getShowDates(sh).indexOf(ds)>=0);
+}
+function calDayIndex(sh,ds){ const i=getShowDates(sh).indexOf(ds); return i<0?0:i; }
+function openCalDay(ds){
+  const shows=calDayShows(ds);
+  if(!shows.length)return;
+  if(shows.length===1){ go('show',shows[0].id,calDayIndex(shows[0],ds)); return; }
+  const nice=(()=>{ const d=new Date(ds+'T12:00:00');
+    return d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}); })();
+  const rows=shows.map(sh=>{
+    const t=calcShow(sh);
+    const be=calcBreakEven(sh);
+    const di=calDayIndex(sh,ds);
+    const dayLbl=(sh.dates&&sh.dates[di])?sh.dates[di]:('Day '+(di+1));
+    const st=isMissed(sh)?{l:'❌ MISSED',c:'var(--red)'}:sh.status==='active'?{l:'🔴 ACTIVE',c:'var(--red)'}:sh.status==='completed'?{l:'✅ DONE',c:'var(--green)'}:sh.confirmed?{l:'📅 BOOKED',c:'var(--green)'}:{l:'⏳ PENDING',c:'var(--gold)'};
+    const reps=(sh.repIds||[]).map(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r?r.name:null;}).filter(Boolean);
+    const money=(sh.status==='active'||sh.status==='completed')
+      ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Gross <b style="color:var(--green)">${fmt(t.gross)}</b> · profit <b style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</b></div>`
+      : `<div style="font-size:11px;color:var(--muted);margin-top:4px">Booth <b style="color:var(--gold)">${sh.boothCost?fmt(sh.boothCost):'TBD'}</b> · break even <b style="color:var(--gold)">${fmt(be.dollars)}</b></div>`;
+    return `<div class="card" style="margin-bottom:8px;cursor:pointer;border-color:var(--goldbd)" onclick="calGoShow('${sh.id}','${ds}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0">
+          <div style="font-size:15px;font-weight:900">${_esc(sh.name)}${sh.repOnlyShow?' <span style="font-size:10px;color:#7EB8F7;font-weight:800">👥 CREW-RUN</span>':''}</div>
+          <div style="font-size:11px;color:var(--muted)">${_esc(sh.location||'')}${sh.numDays>1?' · '+dayLbl+' of '+sh.numDays:''}</div>
+        </div>
+        <span style="font-size:10px;font-weight:800;color:${st.c};white-space:nowrap">${st.l}</span>
+      </div>
+      ${money}
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">👥 ${reps.length?_esc(reps.join(', ')):'nobody assigned yet'}${hasBooths(sh)?' · 🏬 '+showBooths(sh).length+' booths':''}</div>
+      <div style="font-size:11px;color:var(--gold);font-weight:800;margin-top:6px">Tap to open this show →</div>
+    </div>`;
+  }).join('');
+  mOpen(`<div class="mh"><div class="mt">📅 ${shows.length} shows this day</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:13px;font-weight:800;margin-bottom:2px">${nice}</div>
+  <div class="wb red" style="margin:8px 0 12px;font-size:12px">🚨 <strong>Schedule conflict.</strong> ${shows.length} shows land on this date. Pick one to open, then either assign crew to cover both or mark the one you are not doing as Passed / Not Doing.</div>
+  ${rows}`);
+}
+function calGoShow(shId,ds){
+  const sh=(S.shows||[]).find(x=>x.id===shId); if(!sh)return;
+  mClose();
+  go('show',shId,calDayIndex(sh,ds));
+}
 function rCalendar(){
   if(!calMonth){const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};}
   const y=calMonth.y,m=calMonth.m;
@@ -5090,7 +5641,7 @@ function rCalendar(){
       else if(shows.some(s=>s.confirmed||s.status==='active'))st='confirmed';
       cls+=` has-show ${st}`;
       if(conflict)cls+=' conflict';
-      onclick=` onclick="go('show','${shows[0].id}')"`;
+      onclick=` onclick="openCalDay('${ds}')"`;
     }
     h+=`<div class="${cls}"${onclick}><div class="cal-num">${day}${conflict?' <span style="color:var(--red);font-size:10px">⚠️</span>':''}</div>`;
     shows.slice(0,2).forEach(s=>{h+=`<div class="cal-show-pill">${s.repOnlyShow?'👥 ':''}${s.name}</div>`;});
@@ -5100,6 +5651,7 @@ function rCalendar(){
   h+='</div>';
   h+=`<div class="cal-legend"><span><span class="cal-legend-dot" style="background:var(--green)"></span>Booked</span><span><span class="cal-legend-dot" style="background:var(--gold)"></span>Pending</span><span><span class="cal-legend-dot" style="background:rgba(0,210,106,0.55)"></span>Completed</span><span><span class="cal-legend-dot" style="background:var(--red)"></span>⚠️ Conflict</span></div>`;
   h+=`<div style="text-align:center;font-size:12px;color:var(--muted);margin-top:10px">${monthDays} show day${monthDays===1?'':'s'} in ${MN[m]}${conflictDays?` · <span style="color:var(--red);font-weight:700">${conflictDays} conflict day${conflictDays>1?'s':''}</span>`:''}</div>`;
+  h+=`<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:4px">Tap any coloured day to open that show on that day. Tap a red conflict day to see every show on it and pick one.</div>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="calToday()">Jump to This Month</button>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="exportCalICS()">Export Shows to Calendar (.ics)</button>`;
   pg('calendar').innerHTML=h;

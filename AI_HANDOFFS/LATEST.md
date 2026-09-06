@@ -1,15 +1,52 @@
 # LATEST
 
-Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (this branch, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (this branch, in review)
 
 | | |
 |---|---|
-| **Date** | 2026-08-27 |
-| **Branch** | `claude/v35-approved-package-loader` |
-| **Base** | `eabf68e` on `main` |
-| **App version** | v34 → **v35** |
-| **Review state** | **Awaiting Scout. Not merged, not deployed, nothing applied.** |
+| **Date** | 2026-09-06 |
+| **Branch** | `claude/cranberry-fest-booth-calendar-s77yge` |
+| **Base** | `cb677b9` on `main` |
+| **App version** | v35 → **v36** |
+| **Review state** | **Awaiting review. Not merged, not deployed.** |
 | **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v36 adds
+
+**Cranberry Fest runs three booths, counted separately, totalled together.**
+Each booth gets its own morning count, evening count and money drawer on the
+day screen, its own cash-vs-product check, and its own line on a Booth Tally
+card that ends in a GRAND TOTAL.
+
+The rule underneath it: **a booth is an input, the day is the total.** Per-booth
+entries live in `day.boothCounts[boothId]` and the day's own counts and payments
+are rebuilt from their sum, so COGS, revenue, the P&L, the closeout wizard, the
+CSV and the printed report all keep reading the day and get the grand total for
+free. Stock is *not* split — product still leaves the garage to the SHOW.
+
+The evening rollup is all-or-nothing: while one booth is closed and two are
+open, the day posts no evening at all, because summing them would book a sale
+that never happened. The screen names the booths still owing a count and the
+day cannot be locked until they are in.
+
+**Every calendar day is a door.** One show opens straight through, on the day
+tab you tapped. A red conflict day opens a picker naming every show on it, and
+picking one goes into that show on that date's own day.
+
+**Break-even is on every show, and it shows its work.** Booth rent was always
+inside the expense and break-even figures; now both print their breakdown —
+booth rent, gas, lodging, other expenses, candy + paper, crew pay — plus a new
+expense receipt on the show screen that itemises every dollar of the Expenses
+total. Once money is coming in the panel says how far past break-even the show
+is.
+
+**Verified:** 111/111 on the new suite, 546/546 across the other four, and
+427/430 on `passed-not-doing` — the same 3 fail on unmodified `main`, so they
+are date-sensitive fixtures and not from this branch.
+
+---
+
+## Previously: what v35 added
 
 ## What v35 adds
 

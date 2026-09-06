@@ -9,6 +9,7 @@ node tests/replay-guard.test.js
 node tests/booking-pipeline-filters.test.js
 node tests/product-debt-invoices.test.js
 node tests/passed-not-doing.test.js
+node tests/booth-splits-and-calendar.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -76,6 +77,24 @@ Section 11 covers the guards that make that class of bug hard to reintroduce:
 near-duplicate detection on same-date overlapping names, an update refusing to
 proceed when it matches more than one record, and startDate genuinely narrowing
 a nameContains selector.
+
+`booth-splits-and-calendar.test.js` covers multi-booth shows and the tappable
+calendar. The invariant it protects is the rule the booth feature is built on:
+a booth is an INPUT and the day is the TOTAL. Per-booth entries live in
+`day.boothCounts[boothId]` and the day's own counts and payments are rebuilt
+from their sum, so a change that lets a booth total and the day total drift
+apart is the failure this file exists to catch — most checks assert both sides
+of the same fact at once. Two halves pull against each other here as well:
+splitting the COUNTING must not split the STOCK (`showOnHand`, `atShowsInv`,
+transfers and `endShowReturns` stay show-level), and turning booths on for a
+show that already has numbers must not move a single figure. Section 2 pins the
+half-closed day: while one booth has closed and two are still open, the day
+posts no evening at all, because summing them would book a sale that never
+happened. Section 8 changes a show's booth fee and asserts break-even moves
+with it, which is the check that would have caught booth rent quietly going
+missing from the number. Section 10 pins that the calendar grid and the
+conflict-day picker read the same filter, so a red day always has a list behind
+it and a passed show is on neither.
 
 ## Fixtures are synthetic
 
