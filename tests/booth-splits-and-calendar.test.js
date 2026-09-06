@@ -429,4 +429,124 @@ R.section('10. Every calendar day is a door');
   chk('10s. and the grid tells you the days are tappable',grid.indexOf('Tap any coloured day')>=0,true);
 }
 
+// ===========================================================================
+R.section('11. Moving product across the aisle');
+// ===========================================================================
+{
+  // Booth 2 runs out and booth 1 has a case under the table. The product moves.
+  // The whole point of these checks is the half that is easy to get wrong: the
+  // per-booth credit MUST change, and the show's totals MUST NOT.
+  const {ctx}=world();
+  const sh=newShow(ctx,{id:'t1',name:'Aisle Fest',numDays:1,status:'active'});
+  ctx.S.shows.push(sh);
+  ctx.boothsApply(sh,['A','B','C']);
+  const [A,B,C]=ctx.showBooths(sh).map(x=>x.id);
+  const open=cnt({'c5s':50,'2oz':40});
+  [A,B,C].forEach(id=>{ctx.dayBoothWrite(sh.days[0],id).morningCount={...open};});
+  ctx.rollupDay(sh,0);
+  const showBefore={morning:{...sh.days[0].morningCount},onHand:ctx.showOnHand(sh)};
+
+  const r=ctx.boothTransfer(sh,0,A,B,{c5s:20},'B ran out');
+  chk('11a. the move is recorded',r.ok&&r.total,20);
+  chk('11b. it left booth A',ctx.boothOnHand(sh,0,A).c5s,30);
+  chk('11c. it arrived at booth B',ctx.boothOnHand(sh,0,B).c5s,70);
+  chk('11d. booth C never moved',ctx.boothOnHand(sh,0,C).c5s,50);
+  // THE INVARIANT. Nothing above the booth may notice.
+  chk('11e. the day total did not move',sh.days[0].morningCount,showBefore.morning);
+  chk('11f. at-show stock did not move',ctx.showOnHand(sh),showBefore.onHand);
+  chk('11g. one ledger row, not two copies',ctx.dayTransfers(sh.days[0]).length,1);
+  chk('11h. in and out are equal and opposite',
+      [ctx.boothTransferTotal(sh.days[0],A,'out'),ctx.boothTransferTotal(sh.days[0],B,'in')],[20,20]);
+  chk('11i. and the receiving booth sent nothing',ctx.boothTransferTotal(sh.days[0],B,'out'),0);
+
+  // Close out: A sold 5 of its remaining 30, B sold 10 of its 70, C sold 2.
+  ctx.dayBoothWrite(sh.days[0],A).eveningCount=cnt({'c5s':25,'2oz':40});
+  ctx.dayBoothWrite(sh.days[0],B).eveningCount=cnt({'c5s':60,'2oz':40});
+  ctx.dayBoothWrite(sh.days[0],C).eveningCount=cnt({'c5s':48,'2oz':40});
+  ctx.rollupDay(sh,0);
+  chk('11j. the sending booth is credited with what IT sold, not the case it gave away',
+      ctx.boothSold(sh.days[0],A).c5s,5);
+  chk('11k. the receiving booth is credited with what it sold',ctx.boothSold(sh.days[0],B).c5s,10);
+  chk('11l. and the third booth is untouched',ctx.boothSold(sh.days[0],C).c5s,2);
+  chk('11m. the booths add up to the day',
+      [A,B,C].reduce((t,id)=>t+ctx.boothSold(sh.days[0],id).c5s,0),ctx.daySold(sh.days[0]).c5s);
+  chk('11n. which is what the show sells',ctx.daySold(sh.days[0]).c5s,ctx.showUnitsSold(sh).c5s);
+  const pennies=n=>Math.round(n*100);
+  chk('11o. and the booth product costs add up to the show COGS',
+      pennies([A,B,C].reduce((t,id)=>t+ctx.boothShowTotals(sh,id).cogs,0)),pennies(ctx.calcShow(sh).cogs));
+  chk('11p. the aisle traffic is reported per booth',
+      [ctx.boothShowTotals(sh,A).movedOut,ctx.boothShowTotals(sh,B).movedIn],[20,20]);
+
+  // Undo puts the credit back where it was and still moves no show total.
+  const grossBefore=ctx.calcShow(sh).gross, cogsBefore=ctx.calcShow(sh).cogs, unitsBefore=ctx.showUnitsSold(sh).c5s;
+  const u=ctx.boothTransferUndo(sh,0,ctx.dayTransfers(sh.days[0])[0].id);
+  chk('11q. a transfer can be reversed',u.ok,true);
+  chk('11r. the ledger row is gone',ctx.dayTransfers(sh.days[0]).length,0);
+  chk('11s. booth A is credited with the full drop again',ctx.boothSold(sh.days[0],A).c5s,25);
+  chk('11t. the show gross never moved',ctx.calcShow(sh).gross,grossBefore);
+  chk('11u. nor its COGS',pennies(ctx.calcShow(sh).cogs),pennies(cogsBefore));
+  chk('11v. nor its units',ctx.showUnitsSold(sh).c5s,unitsBefore);
+
+  // Refusals.
+  chk('11w. a booth cannot move product to itself',ctx.boothTransfer(sh,0,A,A,{c5s:1}).ok,false);
+  chk('11x. an empty slip is refused',ctx.boothTransfer(sh,0,A,B,{}).ok,false);
+  chk('11y. so is a slip of zeroes',ctx.boothTransfer(sh,0,A,B,{c5s:0}).ok,false);
+  sh.days[0].locked=true;
+  chk('11z. a finalized day refuses a move',ctx.boothTransfer(sh,0,A,B,{c5s:1}).ok,false);
+  chk('11z2. and refuses an undo',ctx.boothTransferUndo(sh,0,'anything').ok,false);
+  sh.days[0].locked=false;
+  chk('11z3. undoing a transfer that is not there is refused, not crashed',
+      ctx.boothTransferUndo(sh,0,'bt_nope').ok,false);
+}
+
+// ===========================================================================
+R.section('12. Editing one booth\'s stock');
+// ===========================================================================
+{
+  const {ctx}=world();
+  const sh=newShow(ctx,{id:'t2',name:'Stock Edit Fest',numDays:2,status:'active'});
+  ctx.S.shows.push(sh);
+  ctx.boothsApply(sh,['A','B']);
+  const [A,B]=ctx.showBooths(sh).map(x=>x.id);
+
+  chk('12a. an uncounted booth holds nothing',SK.reduce((t,k)=>t+ctx.boothOnHand(sh,0,A)[k],0),0);
+  ctx.boothSetStock(sh,0,A,'morning',cnt({'c5s':40,'32oz':10}));
+  chk('12b. setting the opening stock is what it holds',ctx.boothOnHand(sh,0,A),cnt({'c5s':40,'32oz':10}));
+  chk('12c. and it rolls into the day',sh.days[0].morningCount,cnt({'c5s':40,'32oz':10}));
+  chk('12d. the other booth is still empty',ctx.dayBoothRead(sh.days[0],B),null);
+
+  // On hand tracks every route in and out while the booth is open.
+  ctx.dayBoothWrite(sh.days[0],A).restock=cnt({'c5s':12});
+  ctx.dayBoothWrite(sh.days[0],A).lost=cnt({'c5s':2});
+  ctx.boothSetStock(sh,0,B,'morning',cnt({'c5s':5}));
+  ctx.boothTransfer(sh,0,A,B,{c5s:10});
+  ctx.rollupDay(sh,0);
+  chk('12e. on hand = opening + restock − lost − moved out',ctx.boothOnHand(sh,0,A).c5s,40);
+  chk('12f. and opening + moved in on the receiving side',ctx.boothOnHand(sh,0,B).c5s,15);
+  chk('12g. before a count it is an expectation, not a fact',ctx.boothOnHandIsCounted(sh,0,A),false);
+
+  // Once counted, on hand IS the count — no arithmetic, no argument.
+  ctx.boothSetStock(sh,0,A,'evening',cnt({'c5s':31}));
+  chk('12h. after closing, on hand is the counted number',ctx.boothOnHand(sh,0,A).c5s,31);
+  chk('12i. and it says so',ctx.boothOnHandIsCounted(sh,0,A),true);
+  // 40 opening + 12 restock - 10 moved out - 31 counted at close = 11 gone from
+  // the booth; 2 of those were damaged, so 9 were sold.
+  chk('12j. sold = what left the booth minus what was lost',ctx.boothSold(sh.days[0],A).c5s,9);
+
+  chk('12k. a finalized day refuses a stock edit',
+      (()=>{sh.days[0].locked=true;const r=ctx.boothSetStock(sh,0,A,'morning',cnt({'c5s':999}));sh.days[0].locked=false;return r.ok;})(),false);
+  chk('12l. so the number did not change',ctx.dayBoothRead(sh.days[0],A).morningCount.c5s,40);
+
+  // The booth screen renders for a planned show too — that is where the owner
+  // sets up who is carrying what before the doors open.
+  const planned=newShow(ctx,{id:'t3',name:'Not Started Fest',numDays:1});
+  ctx.S.shows.push(planned);
+  ctx.boothsApply(planned,['A','B','C']);
+  ctx.openBoothDetail('t3',0,ctx.showBooths(planned)[0].id);
+  chk('12m. the booth screen opens on a show that has not started',
+      ctx.$$('mb').innerHTML.indexOf('Set opening stock')>=0,true);
+  chk('12n. and offers the move button',
+      ctx.$$('mb').innerHTML.indexOf('Move product to another booth')>=0,true);
+}
+
 R.done();
