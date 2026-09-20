@@ -105,18 +105,24 @@ arithmetic while the booth is open and the counted number once it has closed,
 and that a finalized day refuses a move, an undo and a stock edit alike.
 
 `garage-transfers.test.js` covers bringing more product from the garage to a
-show that is already running (v38). Transfer Stock used to list only other
-shows, and Pack for Show runs once when a show starts, so "I'm at the show and
-need to bring more from home tomorrow" had no button. The invariant it protects
-is that a garage delivery is ONE physical act recorded in three places that
-must agree: the garage count goes down, the show's packed total goes up, and
-the units land as +Restock on the day (and booth) they are for. Most checks
-assert that garage + at-shows never changes by a unit, that the next morning
-count can stay what it always was (last night's ending) with no reconciliation
-mismatch, that the units sold out of the delivery are counted exactly once,
-and that undo puts all three back. Section 8 pins that show → show transfers
-are byte-for-byte the old behaviour: no day is written and the garage never
-notices.
+show that is already running (v38, reworked in v39). Transfer Stock used to
+list only other shows, and Pack for Show runs once when a show starts, so
+"I'm at the show and need to bring more from home" had no button. The rule
+the feature is built on since v39 is that A DELIVERY IS PART OF THE OPENING
+COUNT: what comes from the garage for a day is written to `day.garageIn` (per
+booth on a booth show, rolled up to the day) and added straight onto that
+day's morning count if it is already in, or offered as the default (last
+night's ending + brought) if it is not. The reconciliation ladder expects
+exactly that, so the number on the table and the number on the screen agree
+with no flag, and sold is still opening + restock − ending with nothing
+counted twice. Most checks assert the three-way invariant (garage down,
+packed up, the day up, all by the same amount, so garage + at-shows never
+changes by a unit) and that undo puts all three back. Section 4 pins that
+every size comes in one tap as one batch with one undo. Section 8 pins that
+show → show transfers still write no day and never touch the garage. Section
+9 pins the one-time migration of v38 rows, which landed as +Restock, onto the
+opening count, including the case where the morning had already been
+recounted with the new product on the table and must not be raised twice.
 
 ## Fixtures are synthetic
 

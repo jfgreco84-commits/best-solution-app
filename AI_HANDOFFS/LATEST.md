@@ -1,15 +1,43 @@
 # LATEST
 
-Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (this branch, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (v38, deployed) · **[v39 delivery = opening](2026-09-20-v39-delivery-is-opening.md)** (this branch, in review)
 
 | | |
 |---|---|
 | **Date** | 2026-09-20 |
-| **Branch** | `claude/transfer-stock-garage-shows-n4yvaj` |
-| **Base** | `1850c0f` on `main` |
-| **App version** | v37 → **v38** |
+| **Branch** | `claude/transfer-stock-garage-shows-n4yvaj` (restarted after #35 merged) |
+| **Base** | `652b5fe` on `main` |
+| **App version** | v38 → **v39** |
 | **Review state** | **Awaiting review.** |
 | **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v39 adds
+
+**Every size in one tap.** The Transfer Stock modal is a row per size, like
+Pack for Show. One tap is one batch with one undo, everywhere it shows.
+
+**A delivery is part of the opening count.** What comes from the garage for a
+day goes to `day.garageIn` (per booth, rolled up) and straight onto that day's
+morning count if it is in; if not, the morning count defaults to last night's
+ending + brought, and tonight's evening save pre-fills tomorrow the same way.
+The reconciliation ladder expects last night + brought, so the table and the
+screen agree with no flag; a morning that ignores the delivery is flagged with
+the expectation named. Sold is still opening + restock − ending, and Restock is
+back to meaning a manual adjustment only. A one-time migration moves this
+morning's three v38 deliveries (which landed as restock) onto the opening.
+
+**Where it shows.** A 📦 Show stock card on the show screen (Packed at start,
+🏠 Brought, Total, Sold, On hand / Returned), a 🏠 delivery card on the day
+screen with undo and a Bring-more button, a line on the booth screen, and
+"(incl. 🏠 N from garage)" on the reconciliation ladder.
+
+**Verified:** 167/167 on the rewritten suite, 699/699 across the other five,
+and 427/430 on `passed-not-doing` — the same 3 fail on unmodified `main`.
+Rendered and saved through a real Chromium DOM.
+
+---
+
+## Previously: what v38 added
 
 ## What v38 adds
 

@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v38';
+const APP_VERSION='v39';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -880,6 +880,12 @@ function mrgWithheldMarkers(incoming,current){
 function applyOneTimeUpdates(d){
   d._applied=d._applied||{};
   mrgLedgerReconcile(d);
+
+  // v39: garage deliveries land on the opening count, not on restock.
+  if(!d._applied['garage_in_v39']){
+    try{ migrateGarageRowsV39(d); }catch(e){ console.error('garage_in_v39',e); }
+    d._applied['garage_in_v39']=true;
+  }
 
   // ===== Jul 2026 audit: REAL street prices + card-only sales tax (Froggy confirmed 7/26) =====
   if(!d._applied['real_prices_v1']){
@@ -2031,14 +2037,15 @@ function boothsCounted(sh,di){
 function rollupDay(sh,di){
   const d=(sh.days||[])[di]; if(!d)return null;
   const booths=showBooths(sh); if(!booths.length)return d;
-  const m={},e={},rk={},ls={},p={};
-  SKUS.forEach(s=>{m[s.key]=0;e[s.key]=0;rk[s.key]=0;ls[s.key]=0;});
+  const m={},e={},rk={},ls={},gi={},p={};
+  SKUS.forEach(s=>{m[s.key]=0;e[s.key]=0;rk[s.key]=0;ls[s.key]=0;gi[s.key]=0;});
   PMTS.forEach(x=>p[x.key]=0);
   let anyM=false;
   booths.forEach(b=>{ const en=dayBoothRead(d,b.id); if(!en)return;
     if(en.morningCount){anyM=true;SKUS.forEach(s=>m[s.key]+=parseInt(en.morningCount[s.key])||0);}
     if(en.eveningCount)SKUS.forEach(s=>e[s.key]+=parseInt(en.eveningCount[s.key])||0);
     if(en.restock)SKUS.forEach(s=>rk[s.key]+=parseInt(en.restock[s.key])||0);
+    if(en.garageIn)SKUS.forEach(s=>gi[s.key]+=parseInt(en.garageIn[s.key])||0);
     if(en.lost)SKUS.forEach(s=>ls[s.key]+=parseInt(en.lost[s.key])||0);
     if(en.payments)PMTS.forEach(x=>p[x.key]+=parseFloat(en.payments[x.key])||0);
   });
@@ -2046,7 +2053,7 @@ function rollupDay(sh,di){
   const allClosed=opened.length>0&&boothsAwaitingEvening(sh,di).length===0;
   d.morningCount=anyM?m:null;
   d.eveningCount=allClosed?e:null;   // never half a day — see the header note
-  d.restock=rk; d.lost=ls; d.payments=p;
+  d.restock=rk; d.lost=ls; d.garageIn=gi; d.payments=p;
   d.paymentsAuto=false; d.boothRollup=true;
   return d;
 }
@@ -2058,7 +2065,8 @@ function boothCarryIssues(sh,boothId){
   for(let i=1;i<days.length;i++){
     const pe=(dayBoothRead(days[i-1],boothId)||{}).eveningCount, mo=(dayBoothRead(days[i],boothId)||{}).morningCount;
     if(!pe||!mo)continue;
-    SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0; if(a!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,morn:b,diff:b-a}); });
+    const gi=boothGarageIn(days[i],boothId);
+    SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0,g=gi[s.key]||0,x=a+g; if(x!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,brought:g,expected:x,morn:b,diff:b-x}); });
   }
   return out;
 }
@@ -2111,6 +2119,7 @@ function boothSeedFromDays(sh,boothId){
     if(en.morningCount==null&&d.morningCount)en.morningCount=Object.assign({},d.morningCount);
     if(en.eveningCount==null&&d.eveningCount)en.eveningCount=Object.assign({},d.eveningCount);
     if(en.restock==null&&d.restock&&SKUS.some(s=>(d.restock[s.key]||0)>0))en.restock=Object.assign({},d.restock);
+    if(en.garageIn==null&&d.garageIn&&SKUS.some(s=>(d.garageIn[s.key]||0)>0))en.garageIn=Object.assign({},d.garageIn);
     if(en.lost==null&&d.lost&&SKUS.some(s=>(d.lost[s.key]||0)>0))en.lost=Object.assign({},d.lost);
     if(en.payments==null&&d.payments&&calcPmt(d.payments)>0)en.payments=Object.assign({},d.payments);
   });
@@ -2280,9 +2289,13 @@ function isUpcoming(sh){ if(isPassed(sh))return false; return sh.status!=='compl
 function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>u[s.key]+=(sold[s.key]||0)); } }); return u; }
 // ===== Inventory reconciliation / discrepancy trust system =====
 // Continuity rule: each day's ending count MUST equal the next day's opening count, unless the gap is explained.
+// v39: a garage delivery booked for a day is part of what should be on the
+// table that morning, so the expected opening is last night's ending PLUS
+// what was brought. diff is measured against that expectation.
 function invCarryIssues(sh){ const out=[]; const days=sh.days||[];
   for(let i=1;i<days.length;i++){ const pe=days[i-1].eveningCount, mo=days[i].morningCount; if(!pe||!mo)continue;
-    SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0; if(a!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,morn:b,diff:b-a}); }); }
+    const gi=dayGarageIn(days[i]);
+    SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0,g=gi[s.key]||0,x=a+g; if(x!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,brought:g,expected:x,morn:b,diff:b-x}); }); }
   return out; }
 // Impossible sell-through: ending > opening on the same day (would be a negative sale) — needs a restock note or a fix.
 function invNegativeSold(sh){ const out=[]; (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount)SKUS.forEach(s=>{ const avail=(d.morningCount[s.key]||0)+((d.restock&&d.restock[s.key])||0),e=d.eveningCount[s.key]||0; if(e>avail)out.push({di:i,sku:s.key,short:s.short,morn:avail,eve:e,diff:e-avail}); }); }); return out; }
@@ -2984,7 +2997,7 @@ function showOnHand(sh){
   for(let i=days.length-1;i>=0;i--){ const d=days[i]; if(!d)continue;
     if(d.eveningCount){ SKUS.forEach(s=>r[s.key]=(parseInt(d.eveningCount[s.key])||0)+pending[s.key]); return r; }
     if(d.morningCount){ const rk=d.restock||{}; SKUS.forEach(s=>r[s.key]=(parseInt(d.morningCount[s.key])||0)+(parseInt(rk[s.key])||0)+pending[s.key]); return r; }
-    const rk=d.restock||{}; SKUS.forEach(s=>pending[s.key]+=parseInt(rk[s.key])||0);
+    const rk=d.restock||{}, gi=d.garageIn||{}; SKUS.forEach(s=>pending[s.key]+=(parseInt(rk[s.key])||0)+(parseInt(gi[s.key])||0));
   }
   if(sh.packedInventory)SKUS.forEach(s=>r[s.key]=parseInt(sh.packedInventory[s.key])||0);
   return r;
@@ -3053,7 +3066,7 @@ function rStock(){
   </div>
   ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
-    ${[...(S.transfers||[])].slice().reverse().slice(0,20).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}${tr.boothName?' ('+_esc(tr.boothName)+')':''}<span style="color:var(--muted)"> · ${tr.dayDate?'for '+tr.dayDate:(tr.date||'')}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
+    ${transferBatches().slice(0,20).map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${transferBatchLabel(b)}</strong> · ${b.fromName} → ${b.toName}${b.boothName?' ('+_esc(b.boothName)+')':''}<span style="color:var(--muted)"> · ${b.dayDate?'for '+b.dayDate:(b.date||'')}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransferBatch('${b.batch}')">↩︎</span></div>`).join('')}
   </div>`:''}
   <div style="height:10px"></div>`;
 }
@@ -4015,6 +4028,18 @@ function delDiscount(shId,id){
 // exists and reconciles.
 // ===================================================
 const GARAGE_ID='garage', GARAGE_NAME='🏠 Garage';
+// v39 — A DELIVERY IS PART OF THE OPENING COUNT. What comes from the garage
+// on a given day is written to d.garageIn (per booth on a booth show, rolled
+// up to the day) AND added straight onto that day's morning count if it is
+// already in. The reconciliation ladder expects last night + brought, so the
+// number on the table and the number on the screen agree with no flag, and
+// sold is still opening + restock − ending with nothing counted twice.
+function dayGarageIn(d){ const r={}; SKUS.forEach(s=>r[s.key]=parseInt(((d&&d.garageIn)||{})[s.key])||0); return r; }
+function dayGarageInTotal(d){ const g=dayGarageIn(d); return SKUS.reduce((t,s)=>t+(g[s.key]||0),0); }
+function boothGarageIn(d,boothId){ const en=dayBoothRead(d,boothId)||{}; const r={}; SKUS.forEach(s=>r[s.key]=parseInt(((en.garageIn)||{})[s.key])||0); return r; }
+// Whole-show totals: what was packed at the start, what was brought later.
+function showGarageIn(sh){ const r={}; SKUS.forEach(s=>r[s.key]=0); (sh&&sh.days||[]).forEach(d=>{ const g=dayGarageIn(d); SKUS.forEach(s=>r[s.key]+=g[s.key]||0); }); return r; }
+function showPackedAtStart(sh){ const g=showGarageIn(sh), r={}; SKUS.forEach(s=>r[s.key]=Math.max(0,(parseInt(((sh&&sh.packedInventory)||{})[s.key])||0)-(g[s.key]||0))); return r; }
 function transferableShows(){ return (S.shows||[]).filter(s=>(s.status==='active'||s.status==='planned')&&!isPassed(s)); } // no shipping stock to a show we are not working
 // Only a show that has already started can take a garage delivery. A planned
 // show gets its stock from Pack for Show, which is the same physical act.
@@ -4030,9 +4055,10 @@ function transferDefaultDay(sh){
   i=days.findIndex(d=>open(d)); if(i>=0)return i;
   return days.length-1;
 }
-// The model half of a garage delivery. Pure: validates, moves the units,
-// writes the ledger row, returns {ok, rec | reason}. No DOM, no save.
-function garageToShow(sh,sku,qty,di,boothId){
+// The model half of a garage delivery, one SKU. Pure: validates, moves the
+// units, writes the ledger row, returns {ok, rec | reason}. No DOM, no save.
+//   garage −qty · packed +qty · day.garageIn +qty · morning count +qty (if in)
+function garageToShow(sh,sku,qty,di,boothId,batch){
   qty=parseInt(qty)||0;
   if(!sh)return {ok:false,reason:'Show not found'};
   if(!SKUS.some(s=>s.key===sku))return {ok:false,reason:'Unknown product'};
@@ -4046,21 +4072,23 @@ function garageToShow(sh,sku,qty,di,boothId){
   S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)-qty);
   sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[sku]=(parseInt(sh.packedInventory[sku])||0)+qty;
   const tgt=boothId?dayBoothWrite(d,boothId):d;
-  if(!tgt.restock||typeof tgt.restock!=='object')tgt.restock={};
-  tgt.restock[sku]=(parseInt(tgt.restock[sku])||0)+qty;
+  if(!tgt.garageIn||typeof tgt.garageIn!=='object')tgt.garageIn={};
+  tgt.garageIn[sku]=(parseInt(tgt.garageIn[sku])||0)+qty;
+  if(tgt.morningCount&&typeof tgt.morningCount==='object')tgt.morningCount[sku]=(parseInt(tgt.morningCount[sku])||0)+qty;
   if(boothId)rollupDay(sh,di);
   const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
-  const rec={id:'tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),ts:new Date().toISOString(),date:_todayKey(),sku,qty,
+  const id='tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+  const rec={id,batch:batch||id,ts:new Date().toISOString(),date:_todayKey(),sku,qty,landed:'opening',
     fromShowId:GARAGE_ID,fromName:GARAGE_NAME,toShowId:sh.id,toName:sh.name,di,dayDate:d.date||'',boothId:boothId||null,boothName:boothId?boothName(sh,boothId):''};
   if(!Array.isArray(S.transfers))S.transfers=[];
   S.transfers.push(rec);
   invLogPush(sh,{ts:rec.ts,di,date:d.date,booth:boothId||null,type:'garage delivery',
-    changes:['+'+qty+' '+sName+' from the garage'+(boothId?' → '+boothName(sh,boothId):'')+' (restock on '+(d.date||('Day '+(di+1)))+')'],by:'owner'});
+    changes:['+'+qty+' '+sName+' from the garage'+(boothId?' → '+boothName(sh,boothId):'')+' (opening on '+(d.date||('Day '+(di+1)))+')'],by:'owner'});
   return {ok:true,rec,sName};
 }
-// Reverse of garageToShow. The restock it added comes back off (floored at 0
-// in case the day's restock was edited by hand since), the packed total and
-// the garage go back, the ledger row is removed.
+// Reverse of garageToShow: garageIn and the morning count come back down
+// (floored at 0), packed and the garage go back, the ledger row is removed.
+// A pre-v39 row that landed as restock is reversed from restock instead.
 function garageToShowUndo(tr){
   if(!tr||tr.fromShowId!==GARAGE_ID)return {ok:false,reason:'Not a garage delivery.'};
   const sh=(S.shows||[]).find(s=>s.id===tr.toShowId);
@@ -4073,7 +4101,11 @@ function garageToShowUndo(tr){
   if(d){
     const boothId=(tr.boothId&&hasBooths(sh))?tr.boothId:null;
     const tgt=boothId?dayBoothWrite(d,boothId):d;
-    if(tgt.restock&&typeof tgt.restock==='object')tgt.restock[tr.sku]=Math.max(0,(parseInt(tgt.restock[tr.sku])||0)-qty);
+    if(tr.landed==='restock'){ if(tgt.restock&&typeof tgt.restock==='object')tgt.restock[tr.sku]=Math.max(0,(parseInt(tgt.restock[tr.sku])||0)-qty); }
+    else{
+      if(tgt.garageIn&&typeof tgt.garageIn==='object')tgt.garageIn[tr.sku]=Math.max(0,(parseInt(tgt.garageIn[tr.sku])||0)-qty);
+      if(tgt.morningCount&&typeof tgt.morningCount==='object')tgt.morningCount[tr.sku]=Math.max(0,(parseInt(tgt.morningCount[tr.sku])||0)-qty);
+    }
     if(boothId)rollupDay(sh,tr.di);
   }
   const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;
@@ -4082,9 +4114,37 @@ function garageToShowUndo(tr){
   S.transfers=(S.transfers||[]).filter(x=>x.id!==tr.id);
   return {ok:true};
 }
+// One-time v39 migration. v38 landed a garage delivery as +Restock on the day.
+// Move each such row onto the opening count instead: restock comes down by
+// what it holds, garageIn goes up, and the morning count is raised by
+// whatever part of the delivery it does not already contain (measured
+// against last night's ending, so a morning that was recounted WITH the new
+// product on the table is not raised a second time).
+function migrateGarageRowsV39(d){
+  (d.transfers||[]).forEach(tr=>{
+    if(!tr||tr.fromShowId!==GARAGE_ID||tr.landed)return;
+    const sh=(d.shows||[]).find(s=>s.id===tr.toShowId); const day=sh&&(sh.days||[])[tr.di];
+    if(!sh||!day){ tr.landed='opening'; tr.batch=tr.batch||tr.id; return; }
+    const boothId=(tr.boothId&&hasBooths(sh))?tr.boothId:null;
+    const tgt=boothId?dayBoothWrite(day,boothId):day;
+    const qty=parseInt(tr.qty)||0, sku=tr.sku;
+    const held=(tgt.restock&&typeof tgt.restock==='object')?(parseInt(tgt.restock[sku])||0):0;
+    const move=Math.min(qty,held);
+    if(move>0)tgt.restock[sku]=held-move;
+    if(!tgt.garageIn||typeof tgt.garageIn!=='object')tgt.garageIn={};
+    tgt.garageIn[sku]=(parseInt(tgt.garageIn[sku])||0)+qty;
+    if(tgt.morningCount&&typeof tgt.morningCount==='object'){
+      const prev=tr.di>0?(boothId?((dayBoothRead(sh.days[tr.di-1],boothId)||{}).eveningCount||null):sh.days[tr.di-1].eveningCount):null;
+      const already=prev?Math.max(0,(parseInt(tgt.morningCount[sku])||0)-(parseInt(prev[sku])||0)):0;
+      tgt.morningCount[sku]=(parseInt(tgt.morningCount[sku])||0)+Math.max(0,qty-already);
+    }
+    if(boothId)rollupDay(sh,tr.di);
+    tr.landed='opening'; tr.batch=tr.batch||tr.id;
+  });
+}
 // The modal keeps its own small state so From can switch between the garage
-// and a show and the To / day / booth pickers follow. Typed values survive a
-// redraw because they are read back off the inputs first.
+// and a show and the To / day / booth pickers follow. Typed quantities
+// survive a redraw because they are read back off the inputs first.
 let _trState=null;
 function openTransferModal(presetFromId){
   const shows=transferableShows(), deliverable=garageDeliveryShows();
@@ -4096,15 +4156,17 @@ function openTransferModal(presetFromId){
   else if(deliverable.length){ from=GARAGE_ID; to=deliverable[0].id; }
   else { from=shows[0].id; to=(shows.find(s=>s.id!==from)||{}).id||''; }
   const toSh=(S.shows||[]).find(s=>s.id===to);
-  _trState={sku:SKUS[0].key,qty:'',from,to,di:toSh?transferDefaultDay(toSh):0,booth:(toSh&&hasBooths(toSh))?showBooths(toSh)[0].id:''};
+  _trState={qtys:{},from,to,di:toSh?transferDefaultDay(toSh):0,booth:(toSh&&hasBooths(toSh))?showBooths(toSh)[0].id:''};
   trRender();
 }
 function trReadState(){
-  const st=_trState||{};
+  const st=_trState||(_trState={qtys:{}});
+  st.qtys=st.qtys||{};
   const v=id=>{const e=$$(id);return e&&e.value!=null?String(e.value):null;};
-  const sku=v('tr_sku'),qty=v('tr_qty'),from=v('tr_from'),to=v('tr_to'),di=v('tr_day'),booth=v('tr_booth');
-  if(sku)st.sku=sku; if(qty!=null)st.qty=qty; if(from)st.from=from; if(to)st.to=to;
-  if(di!=null&&di!=='')st.di=parseInt(di)||0; if(booth!=null)st.booth=booth;
+  SKUS.forEach(s=>{ const q=v('tr_q_'+s.key); if(q!=null)st.qtys[s.key]=parseInt(q)||0; });
+  const from=v('tr_from'),to=v('tr_to'),di=v('tr_day'),booth=v('tr_booth');
+  if(from)st.from=from; if(to)st.to=to;
+  if(di!=null&&di!=='')st.di=parseInt(di)||0; if(booth!=null&&booth!=='')st.booth=booth;
   return st;
 }
 function trTargets(from){ return from===GARAGE_ID?garageDeliveryShows():transferableShows().filter(s=>s.id!==from); }
@@ -4119,15 +4181,16 @@ function trRefresh(changed){
   }
   trRender();
 }
+function trA(sku,dlt){ const st=trReadState(); const e=$$('tr_q_'+sku); const cur=Math.max(0,(parseInt(e&&e.value)||0)+dlt); if(e)e.value=cur; st.qtys[sku]=cur; }
 function trRender(){
-  const st=_trState||(_trState={});
+  const st=_trState||(_trState={qtys:{}});
   const shows=transferableShows(), deliverable=garageDeliveryShows();
   const fromOpts=(deliverable.length?[{id:GARAGE_ID,name:GARAGE_NAME,status:''}]:[]).concat(shows);
   const targets=trTargets(st.from);
   const opt=(list,sel)=>list.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${_esc(s.name)}${s.status==='active'?' 🔴':''}</option>`).join('');
   const isGarage=st.from===GARAGE_ID;
   const toSh=(S.shows||[]).find(s=>s.id===st.to);
-  const avail=isGarage?((S.inventory||{})[st.sku]||0):(((shows.find(s=>s.id===st.from)||{}).packedInventory||{})[st.sku]||0);
+  const src=isGarage?(S.inventory||{}):(((shows.find(s=>s.id===st.from)||{}).packedInventory)||{});
   let landing='';
   if(isGarage&&toSh){
     const days=toSh.days||[];
@@ -4135,61 +4198,128 @@ function trRender(){
     const booths=showBooths(toSh);
     landing=`<div class="fg"><label class="fl">For which day</label><select class="fi" id="tr_day" onchange="trRefresh('day')">${dayOpt}</select></div>
     ${booths.length?`<div class="fg"><label class="fl">Which booth gets it</label><select class="fi" id="tr_booth" onchange="trRefresh('booth')">${booths.map(b=>`<option value="${b.id}"${b.id===st.booth?' selected':''}>${_esc(b.name)}</option>`).join('')}</select></div>`:''}
-    <div class="wb gold" style="font-size:11px;margin-bottom:12px">Lands as <strong>+Restock</strong> on that day${booths.length?' at that booth':''}. Do your morning count the normal way (last night's ending, the default) — the app adds these units on top, so don't count them into the morning number or they'll be counted twice. Garage now: <strong>${avail}</strong> ${(SKUS.find(s=>s.key===st.sku)||{}).short||''}.</div>`;
+    <div class="wb gold" style="font-size:11px;margin-bottom:12px">These units are added to that day's <strong>opening count</strong>${booths.length?' at that booth':''} — last night's ending + what you brought = what is on the table. The garage goes down by the same amount, and the show's "brought from garage" total goes up.</div>`;
   }
+  const rows=SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">${isGarage?'Garage':'Packed'}: ${parseInt(src[s.key])||0}</div></div>
+    <div class="cr-c"><button class="crb" onclick="trA('${s.key}',-1)">−</button><input class="cri" type="number" id="tr_q_${s.key}" value="${parseInt(st.qtys[s.key])||0}" min="0" step="1" inputmode="numeric" oninput="trReadState()"><button class="crb" onclick="trA('${s.key}',1)">+</button></div></div>`).join('');
   mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${isGarage?'Bring more product from home to a show that is already running.':'Move packed units from one show to another (e.g. one booth ran out).'} This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${isGarage?'Bring more product from home to a show that is already running. Fill in every size you are bringing, then tap once.':'Move packed units from one show to another (e.g. one booth ran out).'} This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
   <div class="fg"><label class="fl">From</label><select class="fi" id="tr_from" onchange="trRefresh('from')">${opt(fromOpts,st.from)}</select></div>
   <div class="fg"><label class="fl">To</label>${targets.length?`<select class="fi" id="tr_to" onchange="trRefresh('to')">${opt(targets,st.to)}</select>`:`<div style="font-size:12px;color:var(--red);padding:6px 0">${isGarage?'No show is running right now. Start one with Pack for Show.':'No other show to send to. Pick 🏠 Garage as From to bring product from home.'}</div>`}</div>
-  <div class="fg"><label class="fl">Product</label><select class="fi" id="tr_sku" onchange="trRefresh('sku')">${SKUS.map(s=>`<option value="${s.key}"${s.key===st.sku?' selected':''}>${s.name}</option>`).join('')}</select></div>
-  <div class="fg"><label class="fl">Quantity</label><input class="fi" type="number" id="tr_qty" value="${_esc(st.qty||'')}" placeholder="0" min="1" step="1" inputmode="numeric" oninput="_trState&&(_trState.qty=this.value)"></div>
   ${landing}
-  <button class="btn btn-gold btn-full" ${targets.length?'':'disabled style="opacity:.5"'} onclick="saveTransfer()">✅ ${isGarage?'Bring it':'Transfer'}</button>`);
+  <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;margin:6px 0">How many of each</div>
+  ${rows}
+  <button class="btn btn-gold btn-full" style="margin-top:12px" ${targets.length?'':'disabled style="opacity:.5"'} onclick="saveTransfer()">✅ ${isGarage?'Bring it all':'Transfer'}</button>`);
 }
 function saveTransfer(){ if(_dupGuard())return;
   const st=trReadState();
-  const sku=st.sku, qty=parseInt(st.qty)||0;
   const fromId=st.from, toId=st.to;
-  if(qty<=0){toast('Enter a quantity');return;}
+  const lines=SKUS.map(s=>({sku:s.key,short:s.short,qty:parseInt(st.qtys[s.key])||0})).filter(l=>l.qty>0);
+  if(!lines.length){toast('Enter a quantity for at least one size');return;}
   if(!toId){toast('Pick where it goes');return;}
   if(fromId===toId){toast('Pick two different places');return;}
+  const batch='tb_'+Date.now();
   if(fromId===GARAGE_ID){
     const to=(S.shows||[]).find(s=>s.id===toId); if(!to){toast('Show not found');return;}
-    const avail=(S.inventory||{})[sku]||0;
-    if(qty>avail&&!confirm(`The garage only shows ${avail}. Bring ${qty} anyway? (Garage count will go to 0 — fix it on the Stock tab if it was wrong.)`))return;
-    const res=garageToShow(to,sku,qty,st.di,st.booth||null);
-    if(!res.ok){toast(res.reason);return;}
+    const short=lines.filter(l=>l.qty>((S.inventory||{})[l.sku]||0));
+    if(short.length&&!confirm('The garage only shows '+short.map(l=>((S.inventory||{})[l.sku]||0)+' '+l.short).join(', ')+'. Bring '+short.map(l=>l.qty+' '+l.short).join(', ')+' anyway? (Garage count floors at 0 — fix it on the Stock tab if it was wrong.)'))return;
+    // Dry-run the refusals first so a multi-size delivery is all or nothing.
+    const d=(to.days||[])[st.di]; const boothId=st.booth||null;
+    if(to.status!=='active'){toast(to.name+' has not started. Use Pack for Show.');return;}
+    if(!d){toast('That day is not on this show.');return;}
+    if(d.locked){toast('That day is finalized. Unlock it first.');return;}
+    if(hasBooths(to)&&(!boothId||!showBooths(to).some(b=>b.id===boothId))){toast('Pick which booth gets it.');return;}
+    const done=[];
+    for(const l of lines){ const res=garageToShow(to,l.sku,l.qty,st.di,boothId,batch); if(!res.ok){toast(res.reason);break;} done.push(l.qty+' '+res.sName); }
+    if(!done.length)return;
     mClose();saveS();
-    toast(`🏠 ${qty} ${res.sName} from the garage → ${to.name}${res.rec.boothName?' ('+res.rec.boothName+')':''}`);
+    toast(`🏠 ${done.join(' · ')} → ${to.name}${(hasBooths(to)&&boothId)?' ('+boothName(to,boothId)+')':''}`);
     return;
   }
   const from=S.shows.find(s=>s.id===fromId), to=S.shows.find(s=>s.id===toId);
   if(!from||!to){toast('Show not found');return;}
   from.packedInventory=from.packedInventory||{}; to.packedInventory=to.packedInventory||{};
-  const avail=from.packedInventory[sku]||0;
-  if(qty>avail&&!confirm(`${from.name} only shows ${avail} packed. Transfer anyway?`))return;
-  from.packedInventory[sku]=(from.packedInventory[sku]||0)-qty;
-  to.packedInventory[sku]=(to.packedInventory[sku]||0)+qty;
+  const short=lines.filter(l=>l.qty>(from.packedInventory[l.sku]||0));
+  if(short.length&&!confirm(`${from.name} only shows ${short.map(l=>(from.packedInventory[l.sku]||0)+' '+l.short).join(', ')} packed. Transfer anyway?`))return;
   if(!S.transfers)S.transfers=[];
-  S.transfers.push({id:'tr_'+Date.now(),ts:new Date().toISOString(),date:_todayKey(),sku,qty,fromShowId:fromId,fromName:from.name,toShowId:toId,toName:to.name});
+  lines.forEach((l,k)=>{
+    from.packedInventory[l.sku]=(from.packedInventory[l.sku]||0)-l.qty;
+    to.packedInventory[l.sku]=(to.packedInventory[l.sku]||0)+l.qty;
+    S.transfers.push({id:'tr_'+Date.now()+'_'+k,batch,ts:new Date().toISOString(),date:_todayKey(),sku:l.sku,qty:l.qty,fromShowId:fromId,fromName:from.name,toShowId:toId,toName:to.name});
+  });
   mClose();saveS();
-  const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
-  toast(`🔄 Moved ${qty} ${sName}: ${from.name} → ${to.name}`);
+  toast(`🔄 Moved ${lines.map(l=>l.qty+' '+l.short).join(' · ')}: ${from.name} → ${to.name}`);
+}
+function _undoTransferRow(tr){
+  if(tr.fromShowId===GARAGE_ID)return garageToShowUndo(tr);
+  const from=S.shows.find(s=>s.id===tr.fromShowId), to=S.shows.find(s=>s.id===tr.toShowId);
+  if(from){from.packedInventory=from.packedInventory||{};from.packedInventory[tr.sku]=(from.packedInventory[tr.sku]||0)+tr.qty;}
+  if(to){to.packedInventory=to.packedInventory||{};to.packedInventory[tr.sku]=(to.packedInventory[tr.sku]||0)-tr.qty;}
+  S.transfers=S.transfers.filter(x=>x.id!==tr.id);
+  return {ok:true};
 }
 function delTransfer(id){
   if(!S.transfers)return;
   const tr=S.transfers.find(x=>x.id===id);if(!tr)return;
   if(!confirm('Undo this transfer? Units move back from '+tr.toName+' to '+tr.fromName+'.'))return;
-  if(tr.fromShowId===GARAGE_ID){
-    const res=garageToShowUndo(tr);
-    if(!res.ok){toast(res.reason);return;}
-    saveS();toast('↩️ Back in the garage');return;
-  }
-  const from=S.shows.find(s=>s.id===tr.fromShowId), to=S.shows.find(s=>s.id===tr.toShowId);
-  if(from){from.packedInventory=from.packedInventory||{};from.packedInventory[tr.sku]=(from.packedInventory[tr.sku]||0)+tr.qty;}
-  if(to){to.packedInventory=to.packedInventory||{};to.packedInventory[tr.sku]=(to.packedInventory[tr.sku]||0)-tr.qty;}
-  S.transfers=S.transfers.filter(x=>x.id!==id);
-  saveS();toast('Transfer undone');
+  const res=_undoTransferRow(tr);
+  if(!res.ok){toast(res.reason);return;}
+  saveS();toast(tr.fromShowId===GARAGE_ID?'↩️ Back in the garage':'Transfer undone');
+}
+// Undo everything that was brought in one tap. Stops at the first refusal
+// (a finalized day) and reports it; rows already reversed stay reversed.
+function delTransferBatch(batch){
+  const rows=(S.transfers||[]).filter(x=>x&&(x.batch||x.id)===batch); if(!rows.length)return;
+  const tr=rows[0];
+  if(!confirm('Undo this transfer? '+rows.map(r=>r.qty+' '+((SKUS.find(s=>s.key===r.sku)||{}).short||r.sku)).join(', ')+' move back from '+tr.toName+' to '+tr.fromName+'.'))return;
+  let n=0;
+  for(const r of rows){ const res=_undoTransferRow(r); if(!res.ok){toast(res.reason);break;} n++; }
+  if(n)saveS();
+  if(n===rows.length)toast(tr.fromShowId===GARAGE_ID?'↩️ Back in the garage':'Transfer undone');
+}
+// Ledger rows grouped by the tap that made them, newest first.
+function transferBatches(filter){
+  const rows=(S.transfers||[]).filter(x=>x&&(!filter||filter(x)));
+  const map=new Map();
+  rows.forEach(r=>{ const k=r.batch||r.id; if(!map.has(k))map.set(k,{batch:k,ts:r.ts,date:r.date,dayDate:r.dayDate||'',fromShowId:r.fromShowId,fromName:r.fromName,toShowId:r.toShowId,toName:r.toName,boothName:r.boothName||'',di:r.di,rows:[]}); map.get(k).rows.push(r); });
+  return Array.from(map.values()).sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||'')));
+}
+function transferBatchLabel(b){ return b.rows.map(r=>r.qty+' '+((SKUS.find(s=>s.key===r.sku)||{}).short||r.sku)).join(' · '); }
+// What a show is holding, where it came from, and where it went — the
+// stock card on the show screen. Packed at start + brought from the garage
+// = everything sent to the show; sold and on hand / returned close it out.
+function showStockCardHTML(sh){
+  if(!sh||!(sh.status==='active'||sh.status==='completed'))return '';
+  const start=showPackedAtStart(sh), brought=showGarageIn(sh), sold=showUnitsSold(sh);
+  const held=sh.status==='active'?showOnHand(sh):endShowReturns(sh);
+  const T=o=>SKUS.reduce((t,s)=>t+(o[s.key]||0),0);
+  const anyB=T(brought)>0;
+  const cell=(v,c)=>`<td style="text-align:right;padding:3px 4px;${c||''}">${v}</td>`;
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">📦 Show stock — where every unit came from</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Size</th><th style="text-align:right;padding:3px 4px">Packed</th><th style="text-align:right;padding:3px 4px;color:var(--gold)">🏠 Brought</th><th style="text-align:right;padding:3px 4px">Total</th><th style="text-align:right;padding:3px 4px">Sold</th><th style="text-align:right;padding:3px 4px">${sh.status==='active'?'On hand':'Returned'}</th></tr>
+      ${SKUS.map(s=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${s.short}</td>${cell(start[s.key]||0)}${cell((brought[s.key]||0)?'+'+brought[s.key]:'—','color:var(--gold);font-weight:800')}${cell((start[s.key]||0)+(brought[s.key]||0),'font-weight:800')}${cell(sold[s.key]||0)}${cell(held[s.key]||0,'font-weight:800;color:var(--gold)')}</tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px">Total</td>${cell(T(start))}${cell(anyB?'+'+T(brought):'—','color:var(--gold)')}${cell(T(start)+T(brought))}${cell(T(sold))}${cell(T(held),'color:var(--gold)')}</tr>
+    </table>
+    ${anyB?`<div style="font-size:10px;color:var(--muted);margin-top:6px">${transferBatches(x=>x.fromShowId===GARAGE_ID&&x.toShowId===sh.id).map(b=>'🏠 '+(b.dayDate||'')+(b.boothName?' · '+_esc(b.boothName):'')+': '+transferBatchLabel(b)).join('<br>')}</div>`:''}
+  </div>`;
+}
+// The day screen's delivery card: what came from the garage for this day,
+// one line per tap, with an undo, plus the button to bring more.
+function dayGarageCardHTML(sh,di){
+  const d=(sh.days||[])[di]; if(!d)return '';
+  const batches=transferBatches(x=>x.fromShowId===GARAGE_ID&&x.toShowId===sh.id&&x.di===di);
+  const canBring=sh.status==='active'&&!d.locked;
+  if(!batches.length&&!canBring)return '';
+  return `<div class="card" style="margin:0 0 8px;padding:10px;background:var(--card2);border-color:var(--goldbd)">
+    <div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:800;margin-bottom:5px">🏠 Brought from the garage — ${_esc(d.date||('Day '+(di+1)))}</div>
+    ${batches.length?batches.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;padding:3px 0">
+      <span style="min-width:0"><b>${transferBatchLabel(b)}</b>${b.boothName?' <span style="color:var(--muted)">→ '+_esc(b.boothName)+'</span>':''}</span>
+      ${d.locked?'':`<span style="cursor:pointer;color:var(--muted);font-weight:900" title="Undo" onclick="delTransferBatch('${b.batch}')">✕</span>`}
+    </div>`).join('')+`<div style="font-size:10px;color:var(--muted);margin-top:4px">Already in this day's opening count. Sold = opening + restock − ending.</div>`:`<div style="font-size:11px;color:var(--muted)">Nothing brought from home for this day yet.</div>`}
+    ${canBring?`<button class="btn btn-xs btn-full" style="margin-top:8px;background:rgba(255,215,0,0.12);border:1px solid var(--goldbd);color:var(--gold)" onclick="openTransferModal('${sh.id}')">🏠 Bring more from the garage</button>`:''}
+  </div>`;
 }
 
 // ===================================================
@@ -4449,6 +4579,7 @@ function rShow(){
   ${_pd?`<div class="wb gold" style="margin-bottom:12px">🚫 <strong>Passed / Not Doing.</strong> ${_esc(passedReason(sh)||'No reason recorded')}${passedRevisit(sh)?`<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}${sh.passedAt?`<div style="font-weight:400;font-size:10px;margin-top:3px;color:var(--muted)">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}<div style="font-weight:400;font-size:11px;margin-top:5px;color:var(--muted)">Everything below is preserved history. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div></div>`:''}
   ${actBtn}
   ${passBtn}
+  ${_pd?'':showStockCardHTML(sh)}
   ${(!_pd&&(sh.status==='active'||sh.status==='planned'))?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock · ${sh.status==='active'?'bring more from the garage':'to/from another show'}</button>`:''}
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
@@ -4477,8 +4608,8 @@ function rShow(){
       const tag=rowBad?'<span style="color:var(--red)">🔴 mismatch</span>':(dayCarry.length?'<span style="color:var(--gold)">🟡 overridden</span>':((hasM&&hasE)?'<span style="color:var(--green)">🟢 ok</span>':'<span style="color:var(--muted)">—</span>'));
       let r=`<div style="padding:6px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700"><span>${d.date||('Day '+(i+1))}${d.locked?' 🔒':''}</span>${tag}</div>
-        <div style="font-size:11px;color:var(--muted)">Opening ${openT==null?'—':openT}${restockT?' + Restock '+restockT:''} − Sold ${soldT==null?'—':soldT}${lostT?' − Lost/Damaged '+lostT:''} = Ending ${endT==null?'—':endT}${lostT?` <span style="opacity:.7">(lost units still count as COGS)</span>`:''}${d.carryReason?` · note: ${(''+d.carryReason).replace(/</g,'&lt;')}`:''}</div>`;
-      if(dayCarry.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Opening ≠ last night ending: ${dayCarry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>
+        <div style="font-size:11px;color:var(--muted)">Opening ${openT==null?'—':openT}${dayGarageInTotal(d)?' <span style="color:var(--gold)">(incl. 🏠 '+dayGarageInTotal(d)+' from garage)</span>':''}${restockT?' + Restock '+restockT:''} − Sold ${soldT==null?'—':soldT}${lostT?' − Lost/Damaged '+lostT:''} = Ending ${endT==null?'—':endT}${lostT?` <span style="opacity:.7">(lost units still count as COGS)</span>`:''}${d.carryReason?` · note: ${(''+d.carryReason).replace(/</g,'&lt;')}`:''}</div>`;
+      if(dayCarry.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Opening ≠ expected: ${dayCarry.map(m=>m.short+' '+m.morn+' (expected '+m.expected+(m.brought?' = '+m.prevEve+' last night + 🏠 '+m.brought:'')+')').join(', ')}</div>
         <div style="display:flex;gap:6px;margin-top:4px"><button class="btn btn-xs btn-ghost" onclick="fixCarryFromPrev('${sh.id}',${i})">↩︎ Reset to last night</button><button class="btn btn-xs btn-ghost" onclick="reconcileCarry('${sh.id}',${i})">✓ Explain / keep</button></div>`; }
       if(dayNeg.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Ending &gt; opening (impossible sale — restock or fix): ${dayNeg.map(m=>m.short+' '+m.morn+'→'+m.eve).join(', ')}</div>`; }
       if(hasM&&hasE){ r+=`<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${!d.locked?(hasBooths(sh)?showBooths(sh).map(b=>`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i},'${b.id}')">± ${_esc(b.name)}</button>`).join(''):`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i})">± Restock / Damaged-Lost</button>`):''}${d.locked?`<button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${i})">🔓 Unlock day</button>`:`<button class="btn btn-xs btn-ghost" onclick="lockDay('${sh.id}',${i})">🔒 Finalize / lock day</button>`}</div>`; }
@@ -4839,6 +4970,7 @@ function openBoothDetail(shId,di,boothId){
       <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--gold);line-height:1.1">${onHandT} units</div><div style="font-size:10px;color:var(--muted)">${fmt(onHandRetail)} at full price</div></div>
     </div>
   </div>
+  ${(()=>{const g=boothGarageIn(d,boothId);const gt=SKUS.reduce((t,s)=>t+(g[s.key]||0),0);return gt?`<div style="font-size:11px;color:var(--gold);margin:-4px 0 8px">🏠 Brought from the garage to this booth today: <strong>${SKUS.filter(s=>g[s.key]).map(s=>g[s.key]+' '+s.short).join(' · ')}</strong> — already in the opening count.</div>`:'';})()}
   ${boothStockRowsHTML(sh,di,b)}
   ${lock?'<div class="wb gold" style="margin-top:10px;font-size:11px">🔒 This day is finalized. Unlock it on the day screen to change anything here.</div>':`
   <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;margin:14px 0 6px">Set this booth's stock</div>
@@ -5000,6 +5132,7 @@ function rDay(sh,di){
       <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haM?'var(--border)':'var(--gold)'}">
         <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#7EB8F7;margin-bottom:6px">🌅 Morning</div>
         ${SKUS.map(s=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${s.short}</span><span style="font-weight:800">${haM?(d.morningCount[s.key]||0):'—'}</span></div>`).join('')}
+        ${dayGarageInTotal(d)?`<div style="text-align:center;font-size:10px;color:var(--gold);margin-top:4px">incl. 🏠 +${dayGarageInTotal(d)} from garage</div>`:''}
         ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:8px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haM?'btn-ghost':'btn-gold'} btn-full" style="margin-top:8px" onclick="showCntModal('${sh.id}',${di},'morning')">${haM?'Edit':'Count'}</button>`}
       </div>
       <div style="flex:1;background:var(--card2);border-radius:8px;padding:8px;border:1px solid ${haE?'var(--border)':(haM?'var(--gold)':'var(--border)')}">
@@ -5015,6 +5148,7 @@ function rDay(sh,di){
         ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>`}
       </div>
     </div>
+    ${dayGarageCardHTML(sh,di)}
     ${moneyCheck}
     ${(haP&&!(haM&&haE))?`<div class="wb red" style="margin-top:6px">⚠️ Money logged but counts missing — this day's profit ignores product cost until you count.</div>`:''}
     ${(()=>{const st=(sh.repIds||[]).some(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active&&!r.isSelf;});return (isA&&st&&pmtT>0&&dayPay<=0)?`<div class="wb red" style="margin-top:6px">💵 Staffed day with money logged — rep day pay not entered yet.</div>`:'';})()}
@@ -5173,7 +5307,9 @@ function showCntModal(shId,di,type,boothId){
   const prevDay=di>0?sh.days[di-1]:null;
   const prevSrc=prevDay?(boothId?(dayBoothRead(prevDay,boothId)||{}):prevDay):null;
   let def=eSku();
-  if(type==='morning'){if(prevSrc&&prevSrc.eveningCount)def={...prevSrc.eveningCount};else if(cur.morningCount)def={...cur.morningCount};}
+  const gIn=boothId?boothGarageIn(d,boothId):dayGarageIn(d);
+  const gInT=SKUS.reduce((t,s)=>t+(gIn[s.key]||0),0);
+  if(type==='morning'){if(cur.morningCount)def={...cur.morningCount};else if(prevSrc&&prevSrc.eveningCount){def={};SKUS.forEach(s=>def[s.key]=(parseInt(prevSrc.eveningCount[s.key])||0)+(gIn[s.key]||0));}}
   else{def=cur.eveningCount?{...cur.eveningCount}:(cur.morningCount?{...cur.morningCount}:eSku());}
   const prevEve=(type==='morning'&&prevSrc)?(prevSrc.eveningCount||null):null;
   const bArg=boothId?("'"+boothId+"'"):'null';
@@ -5181,8 +5317,8 @@ function showCntModal(shId,di,type,boothId){
   mOpen(`<div class="mh"><div class="mt">${type==='morning'?'🌅 Morning Count':'🌙 Evening Count'}</div><button class="mx" onclick="mClose()">×</button></div>
   ${boothId?`<div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:2px">🏬 ${_esc(boothName(sh,boothId))}</div>`:''}
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${type==='morning'?('Count everything at this booth right now.'+(boothId?' This booth only — the other booths get counted on their own cards.':'')):('Count all unsold items at end of day.'+(boothId?' This booth only.':''))}</div>
-  ${prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:''}
-  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}</div>`:'')}</div>
+  ${prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night${gInT?' + what you brought from the garage':''}</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:''}
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}${(gIn[s.key]||0)?' + 🏠 '+gIn[s.key]+' brought = '+((parseInt(prevEve[s.key])||0)+gIn[s.key]):''}</div>`:'')}</div>
   <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}',${bArg})">Save ${type==='morning'?'Morning':'Evening'} Count${who}</button>`);
 }
@@ -5202,7 +5338,7 @@ function saveCount(shId,di,type,boothId){
   else{
     tgt.eveningCount=c;
     // Tomorrow opens where tonight ended — per booth when the show has booths.
-    if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount)ntgt.morningCount={...c}; }
+    if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount){ const ng=boothId?boothGarageIn(nextDay,boothId):dayGarageIn(nextDay); ntgt.morningCount={}; SKUS.forEach(s=>ntgt.morningCount[s.key]=(parseInt(c[s.key])||0)+(ng[s.key]||0)); } }
   }
   const lbl=(boothId?boothName(sh,boothId)+' — ':'')+type+' count';
   invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId||null,type:lbl,changes:diffs.length?diffs:['(no change)'],by:'owner'});
@@ -5210,7 +5346,8 @@ function saveCount(shId,di,type,boothId){
   let warn='';
   const prevEve=(di>0)?(boothId?((dayBoothRead(sh.days[di-1],boothId)||{}).eveningCount||null):sh.days[di-1].eveningCount):null;
   if(type==='morning'&&prevEve){
-    const mm=SKUS.some(s=>(prevEve[s.key]||0)!==(c[s.key]||0));
+    const gNow=boothId?boothGarageIn(d,boothId):dayGarageIn(d);
+    const mm=SKUS.some(s=>((prevEve[s.key]||0)+(gNow[s.key]||0))!==(c[s.key]||0));
     if(mm){ d.carryReason=null; warn=' ⚠️ Does NOT match last night — see Reconciliation.'; }
   }
   if(boothId){ rollupDay(sh,di); if(nextDay)rollupDay(sh,di+1); }
@@ -5219,7 +5356,7 @@ function saveCount(shId,di,type,boothId){
 function lockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; d.locked=true; d.lockTs=new Date().toISOString(); invLogPush(sh,{ts:d.lockTs,di,date:d.date,type:'lock',changes:['day finalized/locked'],by:'owner'}); saveS();toast('🔒 Day finalized'); }
 function unlockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; const reason=(typeof prompt==='function')?prompt('Reason for unlocking this finalized day?'):'unlocked'; if(reason===null)return; d.locked=false; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'unlock',changes:['unlocked: '+(reason||'(no reason)')],by:'owner'}); saveS();toast('🔓 Day unlocked'); }
 function reconcileCarry(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; const reason=(typeof prompt==='function')?prompt('Explain the change from last night (e.g. restocked 12 C5S, recounted, damaged/lost):'):'reviewed'; if(reason===null)return; d.carryReason=reason||'(reviewed)'; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'reconcile',changes:['override accepted: '+d.carryReason],by:'owner'}); saveS();toast('✅ Reconciliation noted'); }
-function fixCarryFromPrev(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di],prev=sh.days[di-1]; if(!prev||!prev.eveningCount)return; d.morningCount={...prev.eveningCount}; d.carryReason=null; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'autofix',changes:['opening reset to last night ending'],by:'owner'}); saveS();toast('✅ Opening reset to last night ending'); }
+function fixCarryFromPrev(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di],prev=sh.days[di-1]; if(!prev||!prev.eveningCount)return; const gi=dayGarageIn(d); d.morningCount={}; SKUS.forEach(s=>d.morningCount[s.key]=(parseInt(prev.eveningCount[s.key])||0)+(gi[s.key]||0)); d.carryReason=null; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'autofix',changes:['opening reset to last night ending'+(dayGarageInTotal(d)?' + '+dayGarageInTotal(d)+' from garage':'')],by:'owner'}); saveS();toast('✅ Opening reset to last night ending'+(dayGarageInTotal(d)?' + garage delivery':'')); }
 // Per-day restock (units brought in) + damaged/lost/given (units that left but earned no money). Option A: lost units still count as COGS.
 function openAdjustModal(shId,di,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
