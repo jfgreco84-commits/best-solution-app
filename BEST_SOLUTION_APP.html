@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v37';
+const APP_VERSION='v38';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -2976,9 +2976,15 @@ function showOnHand(sh){
   const r={}; SKUS.forEach(s=>r[s.key]=0);
   if(!sh||sh.status!=='active')return r;            // only active shows hold stock out of the garage
   const days=sh.days||[];
+  // v38: a garage delivery booked onto a day that has not been counted yet
+  // (tomorrow's restock, entered tonight) is already at the show, so it is
+  // added on top of the last count. It is NOT added to the packed fallback,
+  // because packedInventory already carries every delivery.
+  const pending={}; SKUS.forEach(s=>pending[s.key]=0);
   for(let i=days.length-1;i>=0;i--){ const d=days[i]; if(!d)continue;
-    if(d.eveningCount){ SKUS.forEach(s=>r[s.key]=parseInt(d.eveningCount[s.key])||0); return r; }
-    if(d.morningCount){ const rk=d.restock||{}; SKUS.forEach(s=>r[s.key]=(parseInt(d.morningCount[s.key])||0)+(parseInt(rk[s.key])||0)); return r; }
+    if(d.eveningCount){ SKUS.forEach(s=>r[s.key]=(parseInt(d.eveningCount[s.key])||0)+pending[s.key]); return r; }
+    if(d.morningCount){ const rk=d.restock||{}; SKUS.forEach(s=>r[s.key]=(parseInt(d.morningCount[s.key])||0)+(parseInt(rk[s.key])||0)+pending[s.key]); return r; }
+    const rk=d.restock||{}; SKUS.forEach(s=>pending[s.key]+=parseInt(rk[s.key])||0);
   }
   if(sh.packedInventory)SKUS.forEach(s=>r[s.key]=parseInt(sh.packedInventory[s.key])||0);
   return r;
@@ -3043,11 +3049,11 @@ function rStock(){
   }).join('')}
   ${view==='garage'?`<div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>`:''}
   <div style="display:flex;gap:8px;margin:12px 0">
-    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock Between Shows</button>
+    <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock · from the garage or between shows</button>
   </div>
   ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
-    ${[...(S.transfers||[])].slice().reverse().slice(0,20).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}<span style="color:var(--muted)"> · ${tr.date||''}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
+    ${[...(S.transfers||[])].slice().reverse().slice(0,20).map(tr=>{const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;return`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${tr.qty} ${sName}</strong> · ${tr.fromName} → ${tr.toName}${tr.boothName?' ('+_esc(tr.boothName)+')':''}<span style="color:var(--muted)"> · ${tr.dayDate?'for '+tr.dayDate:(tr.date||'')}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransfer('${tr.id}')">↩︎</span></div>`;}).join('')}
   </div>`:''}
   <div style="height:10px"></div>`;
 }
@@ -3989,27 +3995,174 @@ function delDiscount(shId,id){
 // ===================================================
 // INVENTORY TRANSFERS (Change 1) — move packed stock between shows.
 // NOT a sale; never touches day counts, payments, revenue, or units-sold.
+//
+// v38 — THE GARAGE IS A SOURCE. "I am at the show and I need to bring more
+// product from home tomorrow" used to have no button: Pack for Show runs once
+// when the show starts, and the transfer picker only knew other shows.
+// Now From can be the garage. A garage delivery does three things at once, so
+// no number has to be fixed by hand afterwards:
+//   1. garage count goes down          (S.inventory)
+//   2. the show's packed total goes up  (sh.packedInventory — end-of-show
+//                                        returns read packed − sold − lost)
+//   3. it lands as +Restock on the day it is for, and on the booth if the
+//      show has booths — which is exactly what Restock already means in
+//      this app: "extra units you brought to the booth that day". Sold is
+//      still opening + restock − ending, so the morning count stays what
+//      it always was (last night's ending) and nothing double-counts.
+// One ledger row per delivery in S.transfers, undo reverses all three.
+// Show → garage mid-show is NOT offered: product goes home when the show
+// closes (End Show returns everything), which is the path that already
+// exists and reconciles.
 // ===================================================
+const GARAGE_ID='garage', GARAGE_NAME='🏠 Garage';
 function transferableShows(){ return (S.shows||[]).filter(s=>(s.status==='active'||s.status==='planned')&&!isPassed(s)); } // no shipping stock to a show we are not working
+// Only a show that has already started can take a garage delivery. A planned
+// show gets its stock from Pack for Show, which is the same physical act.
+function garageDeliveryShows(){ return transferableShows().filter(s=>s.status==='active'); }
+// Which day a delivery is for: today's day while it is still open, else the
+// next day that has not been counted at close, else the last day.
+function transferDefaultDay(sh){
+  const days=(sh&&sh.days)||[]; if(!days.length)return 0;
+  const today=_todayKey();
+  const open=d=>!!d&&!d.locked&&!d.eveningCount;
+  let i=days.findIndex(d=>d&&d.date===today); if(i>=0&&open(days[i]))return i;
+  i=days.findIndex(d=>open(d)&&(!d.date||d.date>=today)); if(i>=0)return i;
+  i=days.findIndex(d=>open(d)); if(i>=0)return i;
+  return days.length-1;
+}
+// The model half of a garage delivery. Pure: validates, moves the units,
+// writes the ledger row, returns {ok, rec | reason}. No DOM, no save.
+function garageToShow(sh,sku,qty,di,boothId){
+  qty=parseInt(qty)||0;
+  if(!sh)return {ok:false,reason:'Show not found'};
+  if(!SKUS.some(s=>s.key===sku))return {ok:false,reason:'Unknown product'};
+  if(qty<=0)return {ok:false,reason:'Enter a quantity'};
+  if(sh.status!=='active')return {ok:false,reason:sh.name+' has not started. Use Pack for Show to load it from the garage.'};
+  const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day is not on this show.'};
+  if(d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
+  if(hasBooths(sh)){ if(!boothId||!showBooths(sh).some(b=>b.id===boothId))return {ok:false,reason:'Pick which booth gets it.'}; }
+  else boothId=null;
+  S.inventory=S.inventory||{};
+  S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)-qty);
+  sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[sku]=(parseInt(sh.packedInventory[sku])||0)+qty;
+  const tgt=boothId?dayBoothWrite(d,boothId):d;
+  if(!tgt.restock||typeof tgt.restock!=='object')tgt.restock={};
+  tgt.restock[sku]=(parseInt(tgt.restock[sku])||0)+qty;
+  if(boothId)rollupDay(sh,di);
+  const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
+  const rec={id:'tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),ts:new Date().toISOString(),date:_todayKey(),sku,qty,
+    fromShowId:GARAGE_ID,fromName:GARAGE_NAME,toShowId:sh.id,toName:sh.name,di,dayDate:d.date||'',boothId:boothId||null,boothName:boothId?boothName(sh,boothId):''};
+  if(!Array.isArray(S.transfers))S.transfers=[];
+  S.transfers.push(rec);
+  invLogPush(sh,{ts:rec.ts,di,date:d.date,booth:boothId||null,type:'garage delivery',
+    changes:['+'+qty+' '+sName+' from the garage'+(boothId?' → '+boothName(sh,boothId):'')+' (restock on '+(d.date||('Day '+(di+1)))+')'],by:'owner'});
+  return {ok:true,rec,sName};
+}
+// Reverse of garageToShow. The restock it added comes back off (floored at 0
+// in case the day's restock was edited by hand since), the packed total and
+// the garage go back, the ledger row is removed.
+function garageToShowUndo(tr){
+  if(!tr||tr.fromShowId!==GARAGE_ID)return {ok:false,reason:'Not a garage delivery.'};
+  const sh=(S.shows||[]).find(s=>s.id===tr.toShowId);
+  if(!sh)return {ok:false,reason:'Show not found'};
+  const d=(sh.days||[])[tr.di];
+  if(d&&d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
+  const qty=parseInt(tr.qty)||0;
+  S.inventory=S.inventory||{}; S.inventory[tr.sku]=(parseInt(S.inventory[tr.sku])||0)+qty;
+  sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[tr.sku]=Math.max(0,(parseInt(sh.packedInventory[tr.sku])||0)-qty);
+  if(d){
+    const boothId=(tr.boothId&&hasBooths(sh))?tr.boothId:null;
+    const tgt=boothId?dayBoothWrite(d,boothId):d;
+    if(tgt.restock&&typeof tgt.restock==='object')tgt.restock[tr.sku]=Math.max(0,(parseInt(tgt.restock[tr.sku])||0)-qty);
+    if(boothId)rollupDay(sh,tr.di);
+  }
+  const sName=(SKUS.find(s=>s.key===tr.sku)||{}).short||tr.sku;
+  invLogPush(sh,{ts:new Date().toISOString(),di:tr.di,date:d?d.date:'',booth:tr.boothId||null,type:'garage delivery undone',
+    changes:['-'+qty+' '+sName+' back to the garage'],by:'owner'});
+  S.transfers=(S.transfers||[]).filter(x=>x.id!==tr.id);
+  return {ok:true};
+}
+// The modal keeps its own small state so From can switch between the garage
+// and a show and the To / day / booth pickers follow. Typed values survive a
+// redraw because they are read back off the inputs first.
+let _trState=null;
 function openTransferModal(presetFromId){
-  const shows=transferableShows();
-  if(shows.length<2){ toast('Need 2+ active/planned shows to transfer between'); return; }
-  const from=presetFromId&&shows.find(s=>s.id===presetFromId)?presetFromId:shows[0].id;
-  const toDefault=(shows.find(s=>s.id!==from)||{}).id;
-  const opt=(sel)=>shows.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}${s.status==='active'?' 🔴':''}</option>`).join('');
-  mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock Between Shows</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Moves packed units from one show to another (e.g. one booth ran out). This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
-  <div class="fg"><label class="fl">Product</label><select class="fi" id="tr_sku">${SKUS.map(s=>`<option value="${s.key}">${s.name}</option>`).join('')}</select></div>
-  <div class="fg"><label class="fl">Quantity</label><input class="fi" type="number" id="tr_qty" placeholder="0" min="1" step="1" inputmode="numeric"></div>
-  <div class="fg"><label class="fl">From Show</label><select class="fi" id="tr_from">${opt(from)}</select></div>
-  <div class="fg"><label class="fl">To Show</label><select class="fi" id="tr_to">${opt(toDefault)}</select></div>
-  <button class="btn btn-gold btn-full" onclick="saveTransfer()">✅ Transfer</button>`);
+  const shows=transferableShows(), deliverable=garageDeliveryShows();
+  if(shows.length<2&&!deliverable.length){ toast('Need a running show (for a garage delivery) or 2+ active/planned shows to transfer between'); return; }
+  const preset=presetFromId&&shows.find(s=>s.id===presetFromId);
+  let from,to;
+  if(preset&&preset.status==='active'){ from=GARAGE_ID; to=preset.id; }            // "bring more to THIS show"
+  else if(preset){ from=preset.id; to=(shows.find(s=>s.id!==from)||{}).id||''; }
+  else if(deliverable.length){ from=GARAGE_ID; to=deliverable[0].id; }
+  else { from=shows[0].id; to=(shows.find(s=>s.id!==from)||{}).id||''; }
+  const toSh=(S.shows||[]).find(s=>s.id===to);
+  _trState={sku:SKUS[0].key,qty:'',from,to,di:toSh?transferDefaultDay(toSh):0,booth:(toSh&&hasBooths(toSh))?showBooths(toSh)[0].id:''};
+  trRender();
+}
+function trReadState(){
+  const st=_trState||{};
+  const v=id=>{const e=$$(id);return e&&e.value!=null?String(e.value):null;};
+  const sku=v('tr_sku'),qty=v('tr_qty'),from=v('tr_from'),to=v('tr_to'),di=v('tr_day'),booth=v('tr_booth');
+  if(sku)st.sku=sku; if(qty!=null)st.qty=qty; if(from)st.from=from; if(to)st.to=to;
+  if(di!=null&&di!=='')st.di=parseInt(di)||0; if(booth!=null)st.booth=booth;
+  return st;
+}
+function trTargets(from){ return from===GARAGE_ID?garageDeliveryShows():transferableShows().filter(s=>s.id!==from); }
+function trRefresh(changed){
+  const st=trReadState();
+  const targets=trTargets(st.from);
+  if(!targets.some(s=>s.id===st.to)){ st.to=(targets[0]||{}).id||''; changed='to'; }
+  if(changed==='from'||changed==='to'){
+    const toSh=(S.shows||[]).find(s=>s.id===st.to);
+    st.di=toSh?transferDefaultDay(toSh):0;
+    st.booth=(toSh&&hasBooths(toSh))?showBooths(toSh)[0].id:'';
+  }
+  trRender();
+}
+function trRender(){
+  const st=_trState||(_trState={});
+  const shows=transferableShows(), deliverable=garageDeliveryShows();
+  const fromOpts=(deliverable.length?[{id:GARAGE_ID,name:GARAGE_NAME,status:''}]:[]).concat(shows);
+  const targets=trTargets(st.from);
+  const opt=(list,sel)=>list.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${_esc(s.name)}${s.status==='active'?' 🔴':''}</option>`).join('');
+  const isGarage=st.from===GARAGE_ID;
+  const toSh=(S.shows||[]).find(s=>s.id===st.to);
+  const avail=isGarage?((S.inventory||{})[st.sku]||0):(((shows.find(s=>s.id===st.from)||{}).packedInventory||{})[st.sku]||0);
+  let landing='';
+  if(isGarage&&toSh){
+    const days=toSh.days||[];
+    const dayOpt=days.map((d,i)=>`<option value="${i}"${i===st.di?' selected':''}>${_esc(d.date||('Day '+(i+1)))}${d.locked?' 🔒':(d.eveningCount?' (counted)':'')}</option>`).join('');
+    const booths=showBooths(toSh);
+    landing=`<div class="fg"><label class="fl">For which day</label><select class="fi" id="tr_day" onchange="trRefresh('day')">${dayOpt}</select></div>
+    ${booths.length?`<div class="fg"><label class="fl">Which booth gets it</label><select class="fi" id="tr_booth" onchange="trRefresh('booth')">${booths.map(b=>`<option value="${b.id}"${b.id===st.booth?' selected':''}>${_esc(b.name)}</option>`).join('')}</select></div>`:''}
+    <div class="wb gold" style="font-size:11px;margin-bottom:12px">Lands as <strong>+Restock</strong> on that day${booths.length?' at that booth':''}. Do your morning count the normal way (last night's ending, the default) — the app adds these units on top, so don't count them into the morning number or they'll be counted twice. Garage now: <strong>${avail}</strong> ${(SKUS.find(s=>s.key===st.sku)||{}).short||''}.</div>`;
+  }
+  mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${isGarage?'Bring more product from home to a show that is already running.':'Move packed units from one show to another (e.g. one booth ran out).'} This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
+  <div class="fg"><label class="fl">From</label><select class="fi" id="tr_from" onchange="trRefresh('from')">${opt(fromOpts,st.from)}</select></div>
+  <div class="fg"><label class="fl">To</label>${targets.length?`<select class="fi" id="tr_to" onchange="trRefresh('to')">${opt(targets,st.to)}</select>`:`<div style="font-size:12px;color:var(--red);padding:6px 0">${isGarage?'No show is running right now. Start one with Pack for Show.':'No other show to send to. Pick 🏠 Garage as From to bring product from home.'}</div>`}</div>
+  <div class="fg"><label class="fl">Product</label><select class="fi" id="tr_sku" onchange="trRefresh('sku')">${SKUS.map(s=>`<option value="${s.key}"${s.key===st.sku?' selected':''}>${s.name}</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">Quantity</label><input class="fi" type="number" id="tr_qty" value="${_esc(st.qty||'')}" placeholder="0" min="1" step="1" inputmode="numeric" oninput="_trState&&(_trState.qty=this.value)"></div>
+  ${landing}
+  <button class="btn btn-gold btn-full" ${targets.length?'':'disabled style="opacity:.5"'} onclick="saveTransfer()">✅ ${isGarage?'Bring it':'Transfer'}</button>`);
 }
 function saveTransfer(){ if(_dupGuard())return;
-  const sku=$$('tr_sku').value, qty=parseInt($$('tr_qty').value)||0;
-  const fromId=$$('tr_from').value, toId=$$('tr_to').value;
+  const st=trReadState();
+  const sku=st.sku, qty=parseInt(st.qty)||0;
+  const fromId=st.from, toId=st.to;
   if(qty<=0){toast('Enter a quantity');return;}
-  if(fromId===toId){toast('Pick two different shows');return;}
+  if(!toId){toast('Pick where it goes');return;}
+  if(fromId===toId){toast('Pick two different places');return;}
+  if(fromId===GARAGE_ID){
+    const to=(S.shows||[]).find(s=>s.id===toId); if(!to){toast('Show not found');return;}
+    const avail=(S.inventory||{})[sku]||0;
+    if(qty>avail&&!confirm(`The garage only shows ${avail}. Bring ${qty} anyway? (Garage count will go to 0 — fix it on the Stock tab if it was wrong.)`))return;
+    const res=garageToShow(to,sku,qty,st.di,st.booth||null);
+    if(!res.ok){toast(res.reason);return;}
+    mClose();saveS();
+    toast(`🏠 ${qty} ${res.sName} from the garage → ${to.name}${res.rec.boothName?' ('+res.rec.boothName+')':''}`);
+    return;
+  }
   const from=S.shows.find(s=>s.id===fromId), to=S.shows.find(s=>s.id===toId);
   if(!from||!to){toast('Show not found');return;}
   from.packedInventory=from.packedInventory||{}; to.packedInventory=to.packedInventory||{};
@@ -4027,6 +4180,11 @@ function delTransfer(id){
   if(!S.transfers)return;
   const tr=S.transfers.find(x=>x.id===id);if(!tr)return;
   if(!confirm('Undo this transfer? Units move back from '+tr.toName+' to '+tr.fromName+'.'))return;
+  if(tr.fromShowId===GARAGE_ID){
+    const res=garageToShowUndo(tr);
+    if(!res.ok){toast(res.reason);return;}
+    saveS();toast('↩️ Back in the garage');return;
+  }
   const from=S.shows.find(s=>s.id===tr.fromShowId), to=S.shows.find(s=>s.id===tr.toShowId);
   if(from){from.packedInventory=from.packedInventory||{};from.packedInventory[tr.sku]=(from.packedInventory[tr.sku]||0)+tr.qty;}
   if(to){to.packedInventory=to.packedInventory||{};to.packedInventory[tr.sku]=(to.packedInventory[tr.sku]||0)-tr.qty;}
@@ -4291,7 +4449,7 @@ function rShow(){
   ${_pd?`<div class="wb gold" style="margin-bottom:12px">🚫 <strong>Passed / Not Doing.</strong> ${_esc(passedReason(sh)||'No reason recorded')}${passedRevisit(sh)?`<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}${sh.passedAt?`<div style="font-weight:400;font-size:10px;margin-top:3px;color:var(--muted)">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}<div style="font-weight:400;font-size:11px;margin-top:5px;color:var(--muted)">Everything below is preserved history. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div></div>`:''}
   ${actBtn}
   ${passBtn}
-  ${(!_pd&&(sh.status==='active'||sh.status==='planned'))?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock to/from Another Show</button>`:''}
+  ${(!_pd&&(sh.status==='active'||sh.status==='planned'))?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock · ${sh.status==='active'?'bring more from the garage':'to/from another show'}</button>`:''}
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
