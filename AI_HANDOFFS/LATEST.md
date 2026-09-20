@@ -1,15 +1,40 @@
 # LATEST
 
-Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (this branch, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (this branch, in review)
 
 | | |
 |---|---|
-| **Date** | 2026-09-06 |
-| **Branch** | `claude/cranberry-fest-booth-calendar-s77yge` (restarted after #32 merged) |
-| **Base** | `1410e8f` on `main` |
-| **App version** | v36 → **v37** |
+| **Date** | 2026-09-20 |
+| **Branch** | `claude/transfer-stock-garage-shows-n4yvaj` |
+| **Base** | `1850c0f` on `main` |
+| **App version** | v37 → **v38** |
 | **Review state** | **Awaiting review.** |
 | **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v38 adds
+
+**The garage is a source in Transfer Stock.** "I am at the show and need to
+bring more from home tomorrow" had no button: Pack for Show runs once when a
+show starts and the transfer picker only listed other shows. Now From offers
+🏠 Garage whenever a show is running, and opened from a running show the modal
+is already Garage → this show, on the right day.
+
+A delivery does three things at once: garage down, the show's packed total up,
+and the units land as **+Restock on the day they are for** (on the chosen booth
+if the show has booths). That is what Restock already meant, so tomorrow's
+morning count stays last night's ending, there is no reconciliation mismatch,
+and the delivered units are sold-counted exactly once. **Garage + at-shows
+never changes by a unit.** One ledger row per delivery, undo reverses all
+three. Show → show transfers are untouched; show → garage mid-show is not
+offered (End Show is the path home).
+
+**Verified:** 110/110 on the new suite, 699/699 across the other five, and
+427/430 on `passed-not-doing` — the same 3 fail on unmodified `main`. Rendered
+and saved through a real Chromium DOM.
+
+---
+
+## Previously: what v37 added
 
 ## What v37 adds
 

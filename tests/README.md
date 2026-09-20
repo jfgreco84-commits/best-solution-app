@@ -10,6 +10,7 @@ node tests/booking-pipeline-filters.test.js
 node tests/product-debt-invoices.test.js
 node tests/passed-not-doing.test.js
 node tests/booth-splits-and-calendar.test.js
+node tests/garage-transfers.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -102,6 +103,20 @@ stock, gross, COGS and unit count MUST NOT move by a unit, because what leaves
 one booth arrives at another. They also pin that a booth's on-hand figure is
 arithmetic while the booth is open and the counted number once it has closed,
 and that a finalized day refuses a move, an undo and a stock edit alike.
+
+`garage-transfers.test.js` covers bringing more product from the garage to a
+show that is already running (v38). Transfer Stock used to list only other
+shows, and Pack for Show runs once when a show starts, so "I'm at the show and
+need to bring more from home tomorrow" had no button. The invariant it protects
+is that a garage delivery is ONE physical act recorded in three places that
+must agree: the garage count goes down, the show's packed total goes up, and
+the units land as +Restock on the day (and booth) they are for. Most checks
+assert that garage + at-shows never changes by a unit, that the next morning
+count can stay what it always was (last night's ending) with no reconciliation
+mismatch, that the units sold out of the delivery are counted exactly once,
+and that undo puts all three back. Section 8 pins that show → show transfers
+are byte-for-byte the old behaviour: no day is written and the garage never
+notices.
 
 ## Fixtures are synthetic
 
