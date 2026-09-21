@@ -1,15 +1,45 @@
 # LATEST
 
-Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (v38, deployed) · **[v39 delivery = opening](2026-09-20-v39-delivery-is-opening.md)** (this branch, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (v38, deployed) · **[v39 delivery = opening](2026-09-20-v39-delivery-is-opening.md)** (v39, deployed) · **[v40 money by person](2026-09-21-v40-money-by-person.md)** (this branch, in review)
 
 | | |
 |---|---|
-| **Date** | 2026-09-20 |
-| **Branch** | `claude/transfer-stock-garage-shows-n4yvaj` (restarted after #35 merged) |
-| **Base** | `652b5fe` on `main` |
-| **App version** | v38 → **v39** |
+| **Date** | 2026-09-21 |
+| **Branch** | `claude/transfer-stock-garage-shows-n4yvaj` (restarted after #36 merged) |
+| **Base** | `b502a10` on `main` |
+| **App version** | v39 → **v40** |
 | **Review state** | **Awaiting review.** |
 | **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
+
+## What v40 adds
+
+**The money count splits by person.** Isaiah works the table and takes money
+on his own phone and into his own pocket. The Money Count modal now has a
+**👥 Split this drawer by person** button: a card per person with its own
+payment rows and a live subtotal, above the drawer's grand total.
+
+The rule is the booth rule one level down: **a seller is an input, the drawer
+is the total.** Entries live in `<drawer>.sellerPayments[repId]` and the
+drawer's `payments` are rebuilt from the sum, so the day total, the cash
+check, collected revenue, the P&L, the closeout and every export keep reading
+`payments` and get the right number for free. On a booth show it composes:
+seller → booth → day. Money counted flat carries into the split and back out
+again, so the two can never disagree.
+
+Where it shows: a **👥 Who rang it up** card on the show screen (Person ·
+Cash · Card · Apps · Total), per-person lines on the day screen's Money
+column, a line on the booth screen, and per-day plus whole-show sections in
+the CSV. Anyone credited with money is added to the show's crew.
+
+A day that was never split behaves exactly as before. No migration.
+
+**Verified:** 90/90 on the new suite, 866/866 across the other six, and
+427/430 on `passed-not-doing` — the same 3 fail on unmodified `main`.
+Rendered and driven through a real Chromium DOM.
+
+---
+
+## Previously: what v39 added
 
 ## What v39 adds
 

@@ -11,6 +11,7 @@ node tests/product-debt-invoices.test.js
 node tests/passed-not-doing.test.js
 node tests/booth-splits-and-calendar.test.js
 node tests/garage-transfers.test.js
+node tests/money-by-person.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -123,6 +124,23 @@ show → show transfers still write no day and never touch the garage. Section
 9 pins the one-time migration of v38 rows, which landed as +Restock, onto the
 opening count, including the case where the morning had already been
 recounted with the new product on the table and must not be raised twice.
+
+`money-by-person.test.js` covers splitting a money drawer between the people
+who took the money. The rule is the booth rule one level down: A SELLER IS AN
+INPUT, THE DRAWER IS THE TOTAL. Per-person entries live in
+`<drawer>.sellerPayments[repId]` -- the day on an ordinary show, the booth
+entry on a show that runs booths -- and whenever the split is non-empty the
+drawer's own `payments` are rebuilt from the sum, so the day total, the
+cash-vs-product check, collected revenue, the P&L and every export keep
+reading `payments` and get the right number for free. A change that lets a
+person's total and the drawer total drift apart is the failure this file
+exists to catch, so most checks assert both sides at once. Section 4 pins the
+composition on a booth show (seller to booth to day), including that a second
+rollup changes nothing. Section 6 pins that the split and the total can never
+disagree: an all-zero row is dropped, an all-zero split is no split, and
+turning the split off leaves exactly one flat count behind. Section 9 pins
+that `saveMoney` handed an explicit target never writes to the day the modal
+happened to have open.
 
 ## Fixtures are synthetic
 

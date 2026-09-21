@@ -296,7 +296,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v39';
+const APP_VERSION='v40';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -1899,6 +1899,67 @@ function dayBoothWrite(d,boothId){
 }
 function boothMoney(en){ return calcPmt((en&&en.payments)||{}); }
 /* ---------------------------------------------------------------------
+   MONEY BY PERSON (v40)
+   ---------------------------------------------------------------------
+   Isaiah works the table beside Froggy and takes money on his own phone
+   and into his own pocket. His cash, card and Venmo have to be enterable
+   on their own and still add into the drawer.
+
+   The rule is the booth rule, one level down:
+
+       A SELLER IS AN INPUT. THE DRAWER IS THE TOTAL.
+
+   Per-person entries live in <drawer>.sellerPayments[repId], where the
+   drawer is the DAY on an ordinary show and the BOOTH ENTRY on a show
+   that runs booths. Whenever the split is non-empty the drawer's own
+   payments are REBUILT from the sum, so every figure downstream — the
+   day total, the cash-vs-product check, collected revenue, the P&L, the
+   closeout wizard and every export — keeps reading payments exactly the
+   way it always did and gets the right number for free. Nothing
+   downstream had to learn what a seller is.
+
+   On a booth show it composes: seller → booth → day, because rollupDay
+   re-rolls each booth from its own sellers before summing the booths.
+
+   An all-zero row is not a split: a person who rang nothing is dropped
+   rather than parked in the books at $0. Turning the split off clears it
+   and leaves one flat count behind, so the two can never disagree.
+   ====================================================================== */
+function drawerSellers(src){ const m=(src&&src.sellerPayments); if(!m||typeof m!=='object')return [];
+  return Object.keys(m).filter(k=>m[k]&&typeof m[k]==='object'&&calcPmt(m[k])>0); }
+function hasSellerSplit(src){ return drawerSellers(src).length>0; }
+function sellerPmt(src,repId){ const m=(src&&src.sellerPayments)||{}; return calcPmt(m[repId]||{}); }
+function sellerName(repId){ const r=(S.reps||[]).find(x=>x.id===repId); return r?r.name:repId; }
+function sellerIsOwner(repId){ const r=(S.reps||[]).find(x=>x.id===repId); return !!(r&&r.isSelf); }
+// Rebuild this drawer's payments from its per-person split. No split, no change.
+function rollupSellers(src){
+  const ids=drawerSellers(src); if(!ids.length)return false;
+  const p={}; PMTS.forEach(x=>p[x.key]=0);
+  ids.forEach(id=>{ const e=src.sellerPayments[id]||{}; PMTS.forEach(x=>p[x.key]+=parseFloat(e[x.key])||0); });
+  src.payments=p; src.paymentsAuto=false; return true;
+}
+// Every money drawer on a show: the booth entries when it runs booths, else the day itself.
+function eachDrawer(sh,fn){
+  const bl=showBooths(sh);
+  (sh&&sh.days||[]).forEach((d,i)=>{
+    if(bl.length){ bl.forEach(b=>{ const en=dayBoothRead(d,b.id); if(en)fn(en,d,i,b); }); }
+    else fn(d,d,i,null);
+  });
+}
+// Who rang up what across the whole show, biggest first.
+function showSellerTotals(sh){
+  const acc={};
+  eachDrawer(sh,src=>{ drawerSellers(src).forEach(id=>{
+    if(!acc[id]){ acc[id]={repId:id,name:sellerName(id),isSelf:sellerIsOwner(id),total:0,payments:{}}; PMTS.forEach(x=>acc[id].payments[x.key]=0); }
+    const e=src.sellerPayments[id]||{};
+    PMTS.forEach(x=>{ const v=parseFloat(e[x.key])||0; acc[id].payments[x.key]+=v; acc[id].total+=v; });
+  }); });
+  return Object.keys(acc).map(k=>acc[k]).sort((a,b)=>b.total-a.total);
+}
+function sellerCash(pm){ return parseFloat(pm.cash)||0; }
+function sellerCard(pm){ return (parseFloat(pm.square)||0)+(parseFloat(pm.debit)||0); }
+function sellerApps(pm){ return (parseFloat(pm.venmo)||0)+(parseFloat(pm.zelle)||0)+(parseFloat(pm.cashapp)||0)+(parseFloat(pm.paypal)||0); }
+/* ---------------------------------------------------------------------
    BOOTH-TO-BOOTH TRANSFERS
    ---------------------------------------------------------------------
    Booth 2 runs out of C5 Small at noon and Booth 1 has a case under the
@@ -2042,6 +2103,7 @@ function rollupDay(sh,di){
   PMTS.forEach(x=>p[x.key]=0);
   let anyM=false;
   booths.forEach(b=>{ const en=dayBoothRead(d,b.id); if(!en)return;
+    rollupSellers(en);   // seller → booth, before booth → day
     if(en.morningCount){anyM=true;SKUS.forEach(s=>m[s.key]+=parseInt(en.morningCount[s.key])||0);}
     if(en.eveningCount)SKUS.forEach(s=>e[s.key]+=parseInt(en.eveningCount[s.key])||0);
     if(en.restock)SKUS.forEach(s=>rk[s.key]+=parseInt(en.restock[s.key])||0);
@@ -4401,6 +4463,15 @@ function exportShowCSV(shId){
   // Flat / hourly / manual workers (e.g. Olivia)
   if((sh.workers||[]).length){ rows.push([]); rows.push(['Workers (flat/hourly/manual)','Role','Type','Payout','Paid','Owed','Pay Method','Note']);
     (sh.workers||[]).forEach(w=>{ const pay=workerPayout(w); const paid=parseFloat(w.paid)||0; rows.push([w.name||'',w.role||'',w.type||'',pay.toFixed(2),paid.toFixed(2),Math.max(0,pay-paid).toFixed(2),w.payMethod||'',w.payNote||'']); }); }
+  // Money by person, when a drawer was split. Per day first, then the show.
+  const _sellers=showSellerTotals(sh);
+  if(_sellers.length){
+    rows.push([]); rows.push(['Money by person','Day','Date','Booth','Cash','Card','Apps','Total']);
+    eachDrawer(sh,(src,d,i,b)=>{ drawerSellers(src).forEach(id=>{ const pm=src.sellerPayments[id]||{};
+      rows.push([sellerName(id),i+1,d.date||'',b?b.name:'',sellerCash(pm).toFixed(2),sellerCard(pm).toFixed(2),sellerApps(pm).toFixed(2),calcPmt(pm).toFixed(2)]); }); });
+    rows.push([]); rows.push(['Money by person (whole show)','','','','Cash','Card','Apps','Total']);
+    _sellers.forEach(r=>rows.push([r.name,'','','',sellerCash(r.payments).toFixed(2),sellerCard(r.payments).toFixed(2),sellerApps(r.payments).toFixed(2),r.total.toFixed(2)]));
+  }
   // Booths, when the show has them. The written sheet has to look like the
   // notebook: each booth counted on its own, then the grand total underneath.
   if(hasBooths(sh)){
@@ -4580,6 +4651,7 @@ function rShow(){
   ${actBtn}
   ${passBtn}
   ${_pd?'':showStockCardHTML(sh)}
+  ${_pd?'':showSellerCardHTML(sh)}
   ${(!_pd&&(sh.status==='active'||sh.status==='planned'))?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock · ${sh.status==='active'?'bring more from the garage':'to/from another show'}</button>`:''}
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
@@ -4984,6 +5056,7 @@ function openBoothDetail(shId,di,boothId){
   </div>
   <button class="btn btn-sm btn-full" style="margin-top:8px;background:rgba(79,195,247,0.14);border:1px solid rgba(79,195,247,0.4);color:#7EB8F7" ${others.length?'':'disabled'} onclick="openBoothTransfer('${shId}',${di},'${boothId}')">🔄 Move product to another booth</button>
   ${others.length?'':'<div style="font-size:11px;color:var(--muted);margin-top:5px">Add a second booth in ✏️ Edit Show before you can move product between them.</div>'}`}
+  ${(()=>{const ids=drawerSellers(en);return ids.length?`<div style="font-size:11px;color:var(--gold);margin-top:8px">👥 Drawer by person: <strong>${ids.map(id=>_esc(sellerName(id))+' '+fmt(sellerPmt(en,id))).join(' · ')}</strong></div>`:'';})()}
   ${tx.length?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;margin:14px 0 6px">Moves today</div>
     ${tx.map(t=>{const out=t.from===boothId;
       return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px">
@@ -5144,6 +5217,7 @@ function rDay(sh,di){
         <div style="text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;color:#00D26A;margin-bottom:6px">💰 Money</div>
         ${PMTS.map(p=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:var(--muted)">${p.label}</span><span style="font-weight:700">${haP?((d.payments[p.key]||0)>0?fmt(d.payments[p.key]):'—'):''}</span></div>`).join('')}
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;color:var(--green);margin-top:4px"><span>Total</span><span>${haP?fmt(pmtT):'—'}</span></div>
+        ${(()=>{const ids=drawerSellers(d);return ids.length?`<div style="margin-top:4px;border-top:1px solid var(--border);padding-top:3px">${ids.map(id=>`<div style="display:flex;justify-content:space-between;font-size:10px;padding:1px 0"><span style="color:var(--gold)">${_esc(sellerName(id))}</span><span style="font-weight:700">${fmt(sellerPmt(d,id))}</span></div>`).join('')}</div>`:'';})()}
         ${(d.paymentsAuto&&(d.repSales||[]).length)?'<div style="font-size:10px;color:#7EB8F7;text-align:center;margin-top:2px">↑ auto-summed from reps</div>':''}
         ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>`}
       </div>
@@ -5387,42 +5461,180 @@ function saveAdjust(shId,di,boothId){
   invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId||null,type:(boothId?boothName(sh,boothId)+' — adjust':'adjust'),changes:[[rc&&('restock '+rc),lc&&('lost '+lc)].filter(Boolean).join(' · ')||'cleared'],by:'owner'});
   mClose();saveS();toast('✅ Adjustments saved');renderCur();
 }
+// The money modal holds its own small state so the flat count and the
+// per-person split can be switched back and forth without losing typing.
+let _mm=null;
+function mmState(){ return _mm||(_mm={shId:'',di:0,boothId:null,on:false,ids:[],flat:{},split:{}}); }
 function showMoneyModal(shId,di,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const d=sh.days[di]; boothId=boothId||null;
   if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each drawer.'); return; }
   const src=boothId?(dayBoothRead(d,boothId)||{}):d;
-  const pmts=src.payments||{};
-  let exp=0;
-  if(src.morningCount&&src.eveningCount){ exp=calcRev(daySold(src),sh.prices||null); }
+  // Who to offer: whoever already has money on this drawer, then the owner,
+  // then this show's crew. The picker below reaches the rest of the roster.
+  const own=(S.reps||[]).find(r=>r.isSelf);
+  const ids=[]; const push=x=>{ if(x&&ids.indexOf(x)<0)ids.push(x); };
+  drawerSellers(src).forEach(push);
+  push(own&&own.id);
+  (sh.repIds||[]).forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id); if(r&&r.active)push(id); });
+  const split={}; ids.forEach(id=>{ const e=((src.sellerPayments||{})[id])||{}; const row={}; PMTS.forEach(p=>row[p.key]=parseFloat(e[p.key])||0); split[id]=row; });
+  const flat={}; PMTS.forEach(p=>flat[p.key]=parseFloat((src.payments||{})[p.key])||0);
+  _mm={shId,di,boothId,on:hasSellerSplit(src),ids,flat,split};
+  mmRender();
+}
+function mmRead(){
+  const st=mmState();
+  if(st.on){ st.ids.forEach(id=>{ const e=st.split[id]||(st.split[id]={});
+    PMTS.forEach(p=>{ const el=$$('sp_'+id+'_'+p.key); if(el&&el.value!=null&&el.value!=='')e[p.key]=parseFloat(el.value)||0; }); }); }
+  else { PMTS.forEach(p=>{ const el=$$('pm_'+p.key); if(el&&el.value!=null&&el.value!=='')st.flat[p.key]=parseFloat(el.value)||0; }); }
+  return st;
+}
+function mmSplitTotal(st){ return st.ids.reduce((t,id)=>t+calcPmt(st.split[id]||{}),0); }
+// Seven methods per person is a wall of boxes on a phone. In the split the
+// four that actually get used are shown, and the rare three appear only when
+// they already carry money or the person asks for them. A hidden row keeps
+// whatever it holds, because the save reads the state, not the inputs.
+const MM_CORE=['cash','square','debit','venmo'];
+function mmMethods(st,id){
+  const e=st.split[id]||{};
+  return PMTS.filter(p=>st.all||MM_CORE.indexOf(p.key)>=0||(parseFloat(e[p.key])||0)>0);
+}
+function mmAllMethods(){ const st=mmRead(); st.all=!st.all; mmRender(); }
+// Switching modes carries the money across rather than dropping it: into the
+// split it seeds the first person, out of the split it becomes the sum.
+function mmToggle(){
+  const st=mmRead();
+  if(!st.on){
+    const flatT=calcPmt(st.flat);
+    if(flatT>0&&mmSplitTotal(st)<=0&&st.ids.length)st.split[st.ids[0]]=Object.assign({},st.flat);
+    st.on=true;
+  }else{
+    const p={}; PMTS.forEach(x=>p[x.key]=0);
+    st.ids.forEach(id=>{ const e=st.split[id]||{}; PMTS.forEach(x=>p[x.key]+=parseFloat(e[x.key])||0); });
+    st.flat=p; st.on=false;
+  }
+  mmRender();
+}
+function mmAddSeller(){
+  const st=mmRead(); const el=$$('mm_add'); const id=el&&el.value;
+  if(!id){ toast('Pick a person'); return; }
+  if(st.ids.indexOf(id)<0){ st.ids.push(id); st.split[id]=st.split[id]||{}; }
+  st.on=true; mmRender();
+}
+function mmDropSeller(id){
+  const st=mmRead(); const k=st.ids.indexOf(id); if(k<0)return;
+  // A split with nobody in it is not a split. Removing the last row is the
+  // "one total" button's job, so it is refused here.
+  if(st.ids.length<2){ toast('Use the button above to go back to one total'); return; }
+  st.ids.splice(k,1); delete st.split[id]; mmRender();
+}
+function updPmt(){ let t=0; PMTS.forEach(p=>{const el=$$('pm_'+p.key);t+=parseFloat(el&&el.value)||0;}); const e=$$('pmtTot'); if(e)e.textContent=fmt(t); }
+function updSplitPmt(){
+  const st=mmState(); let g=0;
+  st.ids.forEach(id=>{ const e=st.split[id]||{}; let t=0;
+    PMTS.forEach(p=>{ const el=$$('sp_'+id+'_'+p.key);
+      t+=(el&&el.value!=null&&el.value!=='')?(parseFloat(el.value)||0):(parseFloat(e[p.key])||0); });
+    const sub=$$('sub_'+id); if(sub)sub.textContent=fmt(t); g+=t; });
+  const e=$$('pmtTot'); if(e)e.textContent=fmt(g);
+}
+function mmRender(){
+  const st=mmState();
+  const sh=S.shows.find(x=>x.id===st.shId); if(!sh)return;
+  const d=sh.days[st.di]; if(!d)return;
+  const boothId=st.boothId;
+  const src=boothId?(dayBoothRead(d,boothId)||{}):d;
+  let exp=0; if(src.morningCount&&src.eveningCount){ exp=calcRev(daySold(src),sh.prices||null); }
   const repTot=calcPmt(sumRepSalesForDay(d)); const hasRepSales=!boothId&&(d.repSales||[]).length>0&&repTot>0;
-  const bArg=boothId?("'"+boothId+"'"):'null';
+  const grand=st.on?mmSplitTotal(st):calcPmt(st.flat);
+  const spare=(S.reps||[]).filter(r=>r.active&&st.ids.indexOf(r.id)<0);
+  const body=st.on
+    ? st.ids.map(id=>{
+        const e=st.split[id]||{};
+        return `<div class="card" style="margin-bottom:8px;padding:10px;background:var(--card2)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:900;color:var(--gold)">${_esc(sellerName(id))}${sellerIsOwner(id)?' 👑':''}</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span id="sub_${id}" style="font-size:15px;font-weight:900;color:var(--green)">${fmt(calcPmt(e))}</span>
+              ${st.ids.length>1?`<span style="cursor:pointer;color:var(--muted);font-weight:900" title="Remove" onclick="mmDropSeller('${id}')">×</span>`:''}
+            </div>
+          </div>
+          ${mmMethods(st,id).map(p=>`<div class="mr"><span style="font-size:16px;width:24px">${p.icon}</span><span style="width:64px;font-size:12px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="sp_${id}_${p.key}" value="${e[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updSplitPmt()"></div>`).join('')}
+        </div>`; }).join('')
+      +(spare.length?`<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+          <select class="fi" id="mm_add" style="flex:1">${spare.map(r=>`<option value="${r.id}">${_esc(r.name)}</option>`).join('')}</select>
+          <button class="btn btn-sm btn-ghost" onclick="mmAddSeller()">+ Add person</button>
+        </div>`:'')
+    : PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${st.flat[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('');
   mOpen(`<div class="mh"><div class="mt">💰 Money Count</div><button class="mx" onclick="mClose()">×</button></div>
   ${boothId?`<div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:6px">🏬 ${_esc(boothName(sh,boothId))} — this booth's drawer only</div>`:''}
   ${hasRepSales?`<div class="wb" style="margin-bottom:12px;background:rgba(79,195,247,0.1);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7;font-size:12px">This day has old per-rep sales data totaling <strong>${fmt(repTot)}</strong> (from before per-rep tracking was removed). Saving a count here overrides it.</div>`:''}
   ${exp>0?`<div class="wb gold" style="margin-bottom:12px">Expected from inventory sold${boothId?' at this booth':''}: <strong>${fmt(exp)}</strong></div>`:''}
-  ${PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${pmts[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('')}
+  <button class="btn btn-sm btn-full" style="margin-bottom:10px;background:${st.on?'rgba(255,215,0,0.14)':'transparent'};border:1px solid ${st.on?'var(--goldbd)':'var(--border)'};color:${st.on?'var(--gold)':'var(--muted)'}" onclick="mmToggle()">${st.on?'👥 Splitting by person — tap for one total':'👥 Split this drawer by person'}</button>
+  ${st.on?`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Enter what each person took. They add into the drawer total below, and each person stays on the books separately.</div>`:''}
+  ${body}
+  ${st.on?`<div style="text-align:center;margin:-2px 0 10px"><span style="cursor:pointer;font-size:11px;color:#7EB8F7;font-weight:700" onclick="mmAllMethods()">${st.all?'− Fewer payment methods':'+ Zelle, Cash App, PayPal'}</span></div>`:''}
   <div style="background:var(--card2);border-radius:9px;padding:12px;margin:10px 0;display:flex;justify-content:space-between;align-items:center">
     <span style="font-weight:900">TOTAL COLLECTED</span>
-    <span id="pmtTot" style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(calcPmt(pmts))}</span>
+    <span id="pmtTot" style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(grand)}</span>
   </div>
-  <button class="btn btn-gold btn-full" onclick="saveMoney('${shId}',${di},${bArg})">Save Money Count</button>`);
+  <button class="btn btn-gold btn-full" onclick="saveMoney()">Save Money Count</button>`);
 }
-function updPmt(){let t=0;PMTS.forEach(p=>t+=parseFloat($$('pm_'+p.key).value)||0);$$('pmtTot').textContent=fmt(t);}
+// Callable two ways: bare, from the modal, or with an explicit target. When a
+// target is named and it is not the one the modal is holding, the money is
+// read as a flat count off the inputs, so a save can never land on a day the
+// caller did not name.
 function saveMoney(shId,di,boothId){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  boothId=boothId||null;
-  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each drawer.'); return; }
-  const d=sh.days[di];
-  const p={};PMTS.forEach(x=>p[x.key]=parseFloat($$('pm_'+x.key).value)||0);
-  if(boothId){
-    dayBoothWrite(d,boothId).payments=p;
-    rollupDay(sh,di);
-    invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId,type:boothName(sh,boothId)+' — money count',changes:[fmt(calcPmt(p))+' collected'],by:'owner'});
-  }else{
-    d.payments=p; d.paymentsAuto=false; // manual count = override of the rep auto-sum
+  let st=mmRead();
+  if(shId!=null){
+    di=parseInt(di)||0; boothId=boothId||null;
+    if(st.shId!==shId||st.di!==di||(st.boothId||null)!==boothId){
+      const flat={}; PMTS.forEach(p=>{ const el=$$('pm_'+p.key); flat[p.key]=parseFloat(el&&el.value)||0; });
+      st=_mm={shId,di,boothId,on:false,ids:[],flat,split:{}};
+    }
   }
-  mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+'Money count saved!');
+  const sh=S.shows.find(x=>x.id===st.shId); if(!sh)return;
+  const d=sh.days[st.di]; if(!d)return;
+  if(d.locked){ toast('🔒 Day is locked. Unlock it to edit.'); return; }
+  const tgtBooth=st.boothId;
+  if(hasBooths(sh)&&!tgtBooth){ toast('This show has separate booths — count each drawer.'); return; }
+  const tgt=tgtBooth?dayBoothWrite(d,tgtBooth):d;
+  let label='', added=[];
+  if(st.on){
+    const map={}, names=[];
+    st.ids.forEach(id=>{ const e=st.split[id]||{}; const row={}; let t=0;
+      PMTS.forEach(p=>{ const v=parseFloat(e[p.key])||0; row[p.key]=v; t+=v; });
+      if(t>0){ map[id]=row; names.push(sellerName(id)+' '+fmt(t)); } });
+    tgt.sellerPayments=map;
+    if(!rollupSellers(tgt)){ const z={}; PMTS.forEach(x=>z[x.key]=0); tgt.payments=z; tgt.paymentsAuto=false; delete tgt.sellerPayments; }
+    // Anyone credited with money on this show worked it, so put them on the crew.
+    Object.keys(map).forEach(id=>{ if(sellerIsOwner(id))return;
+      sh.repIds=sh.repIds||[]; if(sh.repIds.indexOf(id)<0){ sh.repIds.push(id); added.push(sellerName(id)); } });
+    label=names.length?names.join(' · '):'cleared';
+  }else{
+    const p={}; PMTS.forEach(x=>p[x.key]=parseFloat(st.flat[x.key])||0);
+    tgt.payments=p; tgt.paymentsAuto=false; delete tgt.sellerPayments;
+    label=fmt(calcPmt(p))+' collected';
+  }
+  if(tgtBooth)rollupDay(sh,st.di);
+  invLogPush(sh,{ts:new Date().toISOString(),di:st.di,date:d.date,booth:tgtBooth||null,
+    type:(tgtBooth?boothName(sh,tgtBooth)+' — ':'')+'money count'+(st.on?' (by person)':''),changes:[label],by:'owner'});
+  mClose();saveS();
+  toast((tgtBooth?boothName(sh,tgtBooth)+': ':'')+'Money count saved!'+(added.length?' '+added.join(', ')+' added to the crew.':''));
+}
+// Who rang it up — the whole-show card on the show screen.
+function showSellerCardHTML(sh){
+  const rows=showSellerTotals(sh); if(rows.length<1)return '';
+  const g=rows.reduce((t,r)=>t+r.total,0);
+  const cell=(v,st2)=>`<td style="text-align:right;padding:3px 4px;${st2||''}">${fmt(v)}</td>`;
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">👥 Who rang it up</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Person</th><th style="text-align:right;padding:3px 4px">Cash</th><th style="text-align:right;padding:3px 4px">Card</th><th style="text-align:right;padding:3px 4px">Apps</th><th style="text-align:right;padding:3px 4px">Total</th></tr>
+      ${rows.map(r=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px;font-weight:700">${_esc(r.name)}${r.isSelf?' 👑':''}</td>${cell(sellerCash(r.payments))}${cell(sellerCard(r.payments))}${cell(sellerApps(r.payments))}${cell(r.total,'font-weight:900;color:var(--gold)')}</tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px">Total</td>${cell(rows.reduce((t,r)=>t+sellerCash(r.payments),0))}${cell(rows.reduce((t,r)=>t+sellerCard(r.payments),0))}${cell(rows.reduce((t,r)=>t+sellerApps(r.payments),0))}${cell(g,'color:var(--gold)')}</tr>
+    </table>
+    <div style="font-size:10px;color:var(--muted);margin-top:6px">Card = Square + Debit. Apps = Venmo, Zelle, Cash App, PayPal. These add into the day totals — they are not a second set of books.</div>
+  </div>`;
 }
 function showExpModal(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
