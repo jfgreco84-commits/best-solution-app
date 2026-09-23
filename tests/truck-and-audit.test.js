@@ -274,4 +274,32 @@ R.section('9. History before the recount is left alone');
   chk('9b. closed after it: flagged',codes(ctx,sh),['overTable']);
 }
 
+// ===========================================================================
+R.section('10. Crews rotate: each day says who is in which booth');
+// ===========================================================================
+{
+  const h=world(),{ctx}=h;
+  const sh=cranberry(h); const [A,B,C]=ctx.showBooths(sh).map(b=>b.id);
+  ['a','b','c','d','e','f'].forEach(x=>ctx.S.reps.push({id:'r_'+x,name:x.toUpperCase(),active:true,isSelf:false,payments:[]}));
+  ctx.setBoothReps(sh,A,['r_a','r_b']);
+  chk('10a. no day entry: the booth default is used',ctx.dayBoothCrew(sh,0,A),['r_a','r_b']);
+  // Day 1 by hand.
+  [['r_a',A],['r_b',A],['r_c',B],['r_d',B],['r_e',C],['r_f',C]].forEach(([r,b])=>{ if(ctx.dayBoothCrew(sh,0,b).indexOf(r)<0)ctx.dayCrewToggle(sh,0,b,r); });
+  chk('10b. day 1 booths',[A,B,C].map(b=>ctx.dayBoothCrew(sh,0,b)),[['r_a','r_b'],['r_c','r_d'],['r_e','r_f']]);
+  // Day 2: rotate.
+  ctx.dayCrewRotateFrom(sh,1);
+  chk('10c. day 2 rotated: booth 1 has booth 3 crew, booth 2 has booth 1 crew',[A,B,C].map(b=>ctx.dayBoothCrew(sh,1,b)),[['r_e','r_f'],['r_a','r_b'],['r_c','r_d']]);
+  chk('10d. day 1 did not change',ctx.dayBoothCrew(sh,0,A),['r_a','r_b']);
+  // One person, one booth per day.
+  ctx.dayCrewToggle(sh,1,C,'r_a');
+  chk('10e. moving A to booth 3 takes A off booth 2 that day',[ctx.dayBoothCrew(sh,1,B),ctx.dayBoothCrew(sh,1,C)],[['r_b'],['r_c','r_d','r_a']]);
+  chk('10f. the booth card shows the day crew',/E \+ F/.test(ctx.boothDayCardHTML(sh,1,ctx.showBooths(sh)[0])),true);
+  ctx.showMoneyModal('cr',1,A);
+  chk('10g. booth 1 money split on day 2 offers E and F first',ctx._mm.ids.slice(0,2),['r_e','r_f']);
+  chk('10h. everyone who worked is on the show',['r_a','r_b','r_c','r_d','r_e','r_f'].every(r=>sh.repIds.indexOf(r)>=0),true);
+  ctx.openDayCrews('cr',1);
+  chk('10i. the crew screen offers the rotate button',/Rotate from/.test(h.modal()),true);
+  chk('10j. and the day screen has the button',/Who's in which booth today/.test(ctx.dayBoothsHTML(sh,1)),true);
+}
+
 R.done();

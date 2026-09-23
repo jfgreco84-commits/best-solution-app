@@ -2426,7 +2426,55 @@ function saveTruckCountUI(shId,di){
 }
 // ---- booth crew ------------------------------------------------------------
 function boothRepIds(sh,boothId){ const b=showBooths(sh).find(x=>x.id===boothId); return (b&&Array.isArray(b.repIds))?b.repIds.slice():[]; }
-function boothCrewLabel(sh,boothId){ const ids=boothRepIds(sh,boothId); return ids.map(id=>sellerName(id)).join(' + '); }
+// Crews rotate: each DAY says who works which booth (d.boothCrew[boothId]).
+// A day with no entry for a booth falls back to that booth's default crew.
+function dayBoothCrew(sh,di,boothId){
+  const d=(sh&&sh.days||[])[di], m=d&&d.boothCrew;
+  if(m&&Array.isArray(m[boothId]))return m[boothId].slice();
+  return boothRepIds(sh,boothId);
+}
+function dayHasOwnCrew(sh,di){ const d=(sh&&sh.days||[])[di]; return !!(d&&d.boothCrew&&Object.keys(d.boothCrew).length); }
+// Put one person on one booth for one day. A person works one booth a day,
+// so they come off any other booth that day.
+function dayCrewToggle(sh,di,boothId,repId){
+  const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day does not exist.'};
+  const booths=showBooths(sh); if(!booths.some(b=>b.id===boothId))return {ok:false,reason:'No such booth.'};
+  const m={}; booths.forEach(b=>m[b.id]=dayBoothCrew(sh,di,b.id));   // pin the whole day before editing it
+  const on=m[boothId].indexOf(repId)>=0;
+  booths.forEach(b=>{ m[b.id]=m[b.id].filter(x=>x!==repId); });
+  if(!on)m[boothId].push(repId);
+  d.boothCrew=m;
+  if(!Array.isArray(sh.repIds))sh.repIds=[];
+  if(!on&&sh.repIds.indexOf(repId)<0)sh.repIds.push(repId);
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId,type:'crew',
+    changes:[sellerName(repId)+(on?' off ':' → ')+boothName(sh,boothId)],by:'owner'});
+  return {ok:true,on:!on};
+}
+// Same people, each booth moves up one: Booth 1's crew goes to Booth 2, ..., last goes to Booth 1.
+function dayCrewRotateFrom(sh,di){
+  if(di<1)return {ok:false,reason:'Day 1 has no day before it.'};
+  const booths=showBooths(sh), d=(sh.days||[])[di]; if(!d||!booths.length)return {ok:false,reason:'Nothing to rotate.'};
+  const m={}; booths.forEach((b,i)=>{ const from=booths[(i-1+booths.length)%booths.length]; m[b.id]=dayBoothCrew(sh,di-1,from.id); });
+  d.boothCrew=m;
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'crew',changes:['rotated from '+((sh.days[di-1]||{}).date||'yesterday')],by:'owner'});
+  return {ok:true};
+}
+function boothCrewLabel(sh,boothId,di){ const ids=(di==null)?boothRepIds(sh,boothId):dayBoothCrew(sh,di,boothId); return ids.map(id=>sellerName(id)).join(' + '); }
+function openDayCrews(shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  const d=sh.days[di]; const reps=(S.reps||[]).filter(r=>r.active);
+  const rows=showBooths(sh).map(b=>{ const crew=dayBoothCrew(sh,di,b.id);
+    return `<div style="margin-bottom:12px"><div style="font-weight:900;font-size:14px;margin-bottom:5px">🏬 ${_esc(b.name)} <span style="font-size:11px;color:#7EB8F7;font-weight:700">${crew.length?_esc(crew.map(sellerName).join(' + ')):'nobody yet'}</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">${reps.map(r=>{ const on=crew.indexOf(r.id)>=0;
+        return `<button class="btn btn-xs ${on?'btn-gold':'btn-ghost'}" onclick="dayCrewToggleUI('${shId}',${di},'${b.id}','${r.id}')">${on?'✓ ':''}${_esc(r.name)}</button>`; }).join('')}</div></div>`; }).join('');
+  mOpen(`<div class="mh"><div class="mt">👥 Who's in which booth</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${_esc(sh.name)} · <strong>${_esc(d.date||('Day '+(di+1)))}</strong> only. Tap a name to put them on a booth; a person can only be on one booth a day, so they come off the other one.</div>
+  ${di>0?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px" onclick="dayCrewRotateUI('${shId}',${di})">🔄 Rotate from ${_esc((sh.days[di-1]||{}).date||'yesterday')} (Booth 1 crew → Booth 2 → Booth 3 → Booth 1)</button>`:''}
+  ${rows}
+  <button class="btn btn-gold btn-full" style="margin-top:6px" onclick="mClose();renderCur()">Done</button>`);
+}
+function dayCrewToggleUI(shId,di,boothId,repId){ const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const r=dayCrewToggle(sh,di,boothId,repId); if(!r.ok){toast('⚠️ '+r.reason);return;} saveS(); openDayCrews(shId,di); }
+function dayCrewRotateUI(shId,di){ const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const r=dayCrewRotateFrom(sh,di); if(!r.ok){toast('⚠️ '+r.reason);return;} saveS(); openDayCrews(shId,di); toast('🔄 Crews rotated'); }
 function setBoothReps(sh,boothId,ids){
   const b=showBooths(sh).find(x=>x.id===boothId); if(!b)return false;
   b.repIds=(ids||[]).filter((x,i,a)=>x&&a.indexOf(x)===i);
@@ -5222,7 +5270,7 @@ function boothDayCardHTML(sh,di,b){
   const lostT=SKUS.reduce((t,s)=>t+((en.lost&&en.lost[s.key])||0),0);
   const carry=truckMode(sh)?[]:boothCarryIssues(sh,b.id).filter(m=>m.di===di);
   const pulled=(truckMode(sh)&&di>0)?boothCarryIssues(sh,b.id).filter(m=>m.di===di):[];
-  const crew=boothCrewLabel(sh,b.id);
+  const crew=boothCrewLabel(sh,b.id,di);
   const cc=boothCashCheck(sh,di,b.id);
   const locked=!!d.locked;
   const bArg="'"+b.id+"'";
@@ -5271,7 +5319,8 @@ function dayBoothsHTML(sh,di){
   let h=`<div style="display:flex;justify-content:space-between;align-items:center;margin:2px 0 7px">
     <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800">🏬 ${booths.length} booths — count each one on its own</div>
     <button class="btn btn-xs btn-ghost" onclick="openBoothsModal('${sh.id}')">✏️ Booths</button>
-  </div>`;
+  </div>
+  <button class="btn btn-sm btn-full ${booths.some(b=>dayBoothCrew(sh,di,b.id).length)?'btn-ghost':'btn-gold'}" style="margin-bottom:8px" onclick="openDayCrews('${sh.id}',${di})">👥 Who's in which booth today${dayHasOwnCrew(sh,di)?' ✓':''}</button>`;
   h+=booths.map(b=>boothDayCardHTML(sh,di,b)).join('');
   const tx=dayTransfers(sh.days[di]);
   if(tx.length)h+=`<div class="card" style="margin:0 0 8px;padding:10px;background:var(--card2);border-color:rgba(79,195,247,0.3)">
@@ -5498,6 +5547,7 @@ function renderBoothsModal(){
   </div>
   ${rows}
   <button class="btn btn-ghost btn-sm btn-full" style="margin-top:4px" onclick="boothAddRow()">+ Add another booth</button>
+  <div style="font-size:11px;color:var(--muted);margin-top:8px">Names under each booth are its <strong>starting crew</strong>. Crews that rotate are set day by day with 👥 Who's in which booth today on each day's screen.</div>
   <div class="wb gold" style="margin-top:12px;font-size:11px">Turning booths ON moves any counts this show already has onto the first booth, so today's totals do not move by a penny. A booth that already has counts cannot be deleted here — clear its numbers first.</div>
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveBooths()">Save Booths</button>`);
 }
@@ -5818,7 +5868,7 @@ function showMoneyModal(shId,di,boothId){
   const own=(S.reps||[]).find(r=>r.isSelf);
   const ids=[]; const push=x=>{ if(x&&ids.indexOf(x)<0)ids.push(x); };
   drawerSellers(src).forEach(push);
-  if(boothId)boothRepIds(sh,boothId).forEach(push);
+  if(boothId)dayBoothCrew(sh,di,boothId).forEach(push);
   push(own&&own.id);
   (sh.repIds||[]).forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id); if(r&&r.active)push(id); });
   const split={}; ids.forEach(id=>{ const e=((src.sellerPayments||{})[id])||{}; const row={}; PMTS.forEach(p=>row[p.key]=parseFloat(e[p.key])||0); split[id]=row; });

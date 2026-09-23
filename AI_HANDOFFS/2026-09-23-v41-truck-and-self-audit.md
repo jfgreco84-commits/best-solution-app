@@ -96,6 +96,17 @@ The ✏️ Booths manager has a rep toggle row under each booth
 card and is offered first in that booth's money split. Crew members join the
 show's rep list.
 
+### Crews rotate day by day
+
+At Cranberry the two people in each booth move to a different booth each day.
+Each day carries its own assignment (`d.boothCrew[boothId]`); a day with none
+falls back to the booth's starting crew from the ✏️ Booths manager. The day
+screen has **👥 Who's in which booth today**: every booth on one screen, tap a
+name to place it, and a person can only be on one booth a day (placing them
+takes them off the other). **🔄 Rotate from yesterday** moves Booth 1's crew
+to Booth 2, 2 to 3, 3 to 1. The booth card and that booth's money split use
+that day's crew.
+
 ### One-time data updates
 
 - `garage_recount_20260923`: sets the garage to the physical count
@@ -113,7 +124,7 @@ state key.
 ## VERIFIED
 
 ```
-node tests/truck-and-audit.test.js               72/72   (new)
+node tests/truck-and-audit.test.js               82/82   (new)
 node tests/garage-transfers.test.js             167/167  (5k updated: booth show now counts the truck, 90 → 100)
 node tests/booth-splits-and-calendar.test.js    153/153
 node tests/money-by-person.test.js               90/90
@@ -139,7 +150,7 @@ migration runs on Justin's device on first load of v41.
 ## CRANBERRY CHECKLIST
 
 1. Open the app. Header shows 🛡️ (no bar). Stock tab reads 77 / 134 / 259 / 276 / 859 / 224.
-2. Cranberry → ✏️ Booths → tap the two people for Booth 2 and Booth 3.
+2. Each morning: day screen → 👥 Who's in which booth today (or 🔄 Rotate from yesterday).
 3. 🎒 Start Show / Pack → **Take All** → Start Show. Everything is in the truck.
 4. Each morning: count each booth's table. The truck card updates itself.
 5. Booth runs low: 🚚 Restock from truck at that booth.
