@@ -241,8 +241,9 @@
     <span class="hdr-logo">⚡</span>
     <div><div class="hdr-name">Best Solution</div><div class="hdr-sub">Dot Dynasty LLC</div></div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px"><span id="syncDot" onclick="go('settings')" title="Cloud sync — tap for details" style="width:10px;height:10px;border-radius:50%;background:#666;display:inline-block;cursor:pointer;flex-shrink:0"></span><div id="hdrR"></div></div>
+  <div style="display:flex;align-items:center;gap:10px"><span id="syncDot" onclick="go('settings')" title="Cloud sync — tap for details" style="width:10px;height:10px;border-radius:50%;background:#666;display:inline-block;cursor:pointer;flex-shrink:0"></span><span id="auditBadge" onclick="openAuditModal()" title="Inventory audit" style="font-size:12px;font-weight:900;cursor:pointer;flex-shrink:0">🛡️</span><div id="hdrR"></div></div>
 </div>
+<div id="auditBar" style="display:none;position:fixed;top:52px;left:0;right:0;z-index:99"></div>
 
 <!-- PAGES -->
 <div id="pages">
@@ -296,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v40';
+const APP_VERSION='v41';
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -880,6 +881,41 @@ function mrgWithheldMarkers(incoming,current){
 function applyOneTimeUpdates(d){
   d._applied=d._applied||{};
   mrgLedgerReconcile(d);
+
+  // v41: the garage count of Sep 23 2026. The app had 32oz 78 · 16oz 136 ·
+  // 8oz 249 · 2oz 316 · C5S 739 · C5L 264; the garage physically held
+  // 77 · 134 · 259 · 276 · 859 · 224 (the C5L and 2oz gaps traced to St.
+  // Martins and Wine & Harvest, the 8oz to Anthony's recount after close).
+  // Applied ONLY if the garage still reads exactly the old numbers, so a
+  // device that has already moved stock or been corrected is never touched.
+  if(!d._applied['garage_recount_20260923']){
+    const inv=d.inventory||{}, was={'32oz':78,'16oz':136,'8oz':249,'2oz':316,c5s:739,c5l:264}, now={'32oz':77,'16oz':134,'8oz':259,'2oz':276,c5s:859,c5l:224};
+    if(Object.keys(was).every(k=>(parseInt(inv[k])||0)===was[k])){
+      d.inventory=Object.assign({},inv,now);
+      const a=auditState(d);
+      a.log.push({ts:new Date().toISOString(),msg:'Garage set to the Sep 23 physical count: 32oz 77 · 16oz 134 · 8oz 259 · 2oz 276 · C5S 859 · C5L 224'});
+      a.baseline=new Date().toISOString();
+    }
+    d._applied['garage_recount_20260923']=true;
+  }
+  // v41: the audit starts clean. Everything closed before today was settled
+  // by the garage recount; from here on every show is checked.
+  if(!d._applied['audit_baseline_v41']){
+    const a=auditState(d); if(!a.baseline)a.baseline=new Date().toISOString();
+    d._applied['audit_baseline_v41']=true;
+  }
+  // v41: Cutty sells for Best Solution now, and works Cranberry in Froggy's booth.
+  if(!d._applied['cutty_cranberry_v41']){
+    d.reps=d.reps||[];
+    let cutty=d.reps.find(r=>r&&(r.id==='rep_cutty'||String(r.name||'').trim().toLowerCase()==='cutty'));
+    if(!cutty){ cutty={id:'rep_cutty',name:'Cutty',active:true,isSelf:false,payments:[]}; d.reps.push(cutty); }
+    cutty.active=true;
+    const own=d.reps.find(r=>r&&r.isSelf);
+    const cran=(d.shows||[]).find(sh=>sh&&(sh.id==='sh_auto_cranberryfest_1779985456780614'||/cranberry/i.test(sh.name||''))&&sh.status!=='completed');
+    const b1=cran&&Array.isArray(cran.booths)?cran.booths.find(b=>b&&b.id):null;
+    if(b1&&!(Array.isArray(b1.repIds)&&b1.repIds.length))setBoothReps(cran,b1.id,[own&&own.id,cutty.id].filter(Boolean));
+    d._applied['cutty_cranberry_v41']=true;
+  }
 
   // v39: garage deliveries land on the opening count, not on restock.
   if(!d._applied['garage_in_v39']){
@@ -1794,7 +1830,13 @@ function buildPlannedShow(e){
   };
 }
 
-function saveS(){S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();cloudQueuePush();}
+function saveS(){
+  // v41: a closed show whose counts were fixed afterwards pulls the garage along with it.
+  let moved=[]; try{ moved=auditSyncReturns(); }catch(e){ console.warn('auditSync',e); }
+  moved.forEach(m=>auditLogPush({ts:new Date().toISOString(),msg:m}));
+  S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();
+  if(moved.length)setTimeout(()=>toast('🛡️ Audit: '+moved.join(' · '),5000),2300);
+  cloudQueuePush();}
 function renderCur(){
   if(curPg==='home')rHome();else if(curPg==='section')rSection();else if(curPg==='stock')rStock();
   else if(curPg==='shows')rShows();else if(curPg==='show')rShow();
@@ -1804,6 +1846,7 @@ function renderCur(){
   else if(curPg==='pnl')rPnL();
   else if(curPg==='settings')rSettings();
   updateSupplyBadge();
+  try{ renderAuditBar(); }catch(e){}
 }
 function updateSupplyBadge(){
   const sup=S.supplies||[];
@@ -2115,6 +2158,7 @@ function rollupDay(sh,di){
   const allClosed=opened.length>0&&boothsAwaitingEvening(sh,di).length===0;
   d.morningCount=anyM?m:null;
   d.eveningCount=allClosed?e:null;   // never half a day — see the header note
+  if(d.truckIn&&typeof d.truckIn==='object')SKUS.forEach(s=>gi[s.key]+=parseInt(d.truckIn[s.key])||0);
   d.restock=rk; d.lost=ls; d.garageIn=gi; d.payments=p;
   d.paymentsAuto=false; d.boothRollup=true;
   return d;
@@ -2131,6 +2175,264 @@ function boothCarryIssues(sh,boothId){
     SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0,g=gi[s.key]||0,x=a+g; if(x!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,brought:g,expected:x,morn:b,diff:b-x}); });
   }
   return out;
+}
+/* ======================================================================
+   v41 — THE TRUCK, AND AN APP THAT AUDITS ITSELF
+   ----------------------------------------------------------------------
+   The Sep 2026 garage count came up 40 C5 Large and 40 2oz short. Both
+   were the same mistake: a morning count was raised above what the show
+   had actually packed (St. Martins C5L 42→84, Wine & Harvest 2oz 79→116).
+   The app never took those bottles out of the garage, then sent them back
+   to the garage at close. Nothing flagged it.
+
+   The rule that catches it, and that makes a truck possible:
+
+       EVERYTHING AT A SHOW IS EITHER ON A TABLE OR IN THE TRUCK.
+
+   showLedger walks a show day by day. What the show holds at the start of
+   a day is what it packed (minus deliveries still to come) minus what
+   left on the days before, plus today's garage delivery. Whatever is not
+   on the tables (morning count + restock) is in the truck. The truck can
+   never be negative: a table holding more than the show has is exactly
+   the St. Martins / Wine & Harvest mistake, and the audit says so the
+   moment it is saved.
+
+   On a booth show (Cranberry) the truck is real: most product rides in
+   it, each booth pulls what it needs. A booth opening above last night
+   is therefore NOT a mismatch, it is a pull from the truck, and the
+   day-to-day carry check gives way to the truck check. Restock at a booth
+   means "brought over from the truck". The truck can also be counted by
+   hand (d.truckCount) and the app compares it with what it expects.
+
+   auditAll runs on every save. Its findings drive the red bar under the
+   header, the badge beside the sync dot, and the Close Show gate.
+   Shows closed before settings.audit.baseline (the last garage recount) are
+   history the recount already settled, so they are left alone.
+   ====================================================================== */
+function truckMode(sh){ return hasBooths(sh); }
+// Audit state rides inside settings (no new top-level state key).
+function auditState(st){ st=st||S; st.settings=st.settings||{}; const a=st.settings.audit||(st.settings.audit={}); if(!Array.isArray(a.log))a.log=[]; return a; }
+function showDayKey(sh,i){
+  if(!sh||!/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate||''))return '';
+  const d=new Date(sh.startDate+'T12:00:00'); d.setDate(d.getDate()+i);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function skuSum(o){ return SKUS.reduce((t,s)=>t+((o&&o[s.key])||0),0); }
+function skuZero(){ const r={}; SKUS.forEach(s=>r[s.key]=0); return r; }
+// Day by day: start (all product at the show), table, truck, left, end.
+function showLedger(sh){
+  if(!sh||!sh.packedInventory)return null;
+  const days=sh.days||[], gi=days.map(d=>dayGarageIn(d)), g=skuZero();
+  gi.forEach(x=>SKUS.forEach(s=>g[s.key]+=x[s.key]||0));
+  let cur={}; SKUS.forEach(s=>cur[s.key]=(parseInt(sh.packedInventory[s.key])||0)-g[s.key]);
+  return days.map((d,i)=>{
+    const start={},table={},truck={},left={},end={};
+    const hasM=!!d.morningCount, hasE=!!d.eveningCount, L=(hasM&&hasE)?dayUnitsLeft(d):null;
+    SKUS.forEach(s=>{
+      start[s.key]=(cur[s.key]||0)+(gi[i][s.key]||0);
+      table[s.key]=hasM?((parseInt(d.morningCount[s.key])||0)+(parseInt((d.restock||{})[s.key])||0)):0;
+      truck[s.key]=start[s.key]-table[s.key];
+      left[s.key]=L?(L[s.key]||0):0;
+      end[s.key]=start[s.key]-left[s.key];
+    });
+    cur=end;
+    return {di:i,start,table,truck,left,end,hasM,hasE,counted:hasM&&hasE};
+  });
+}
+// The day whose numbers describe the show right now: the last one with a count.
+function ledgerNow(sh){
+  const L=showLedger(sh); if(!L||!L.length)return null;
+  for(let i=L.length-1;i>=0;i--)if(L[i].hasM)return L[i];
+  return L[0];
+}
+// Everything at the show right now, truck included (booth shows only use this).
+function truckShowOnHand(sh){
+  const L=showLedger(sh); if(!L||!L.length)return null;
+  let last=null; for(let i=L.length-1;i>=0;i--)if(L[i].hasM){last=L[i];break;}
+  if(!last)return L[0].start;
+  // plus anything already booked from the garage for a later, unopened day
+  const r={...(last.counted?last.end:last.start)};
+  (sh.days||[]).slice(last.di+1).forEach(d=>{ const g=dayGarageIn(d); SKUS.forEach(s=>r[s.key]+=g[s.key]||0); });
+  return r;
+}
+function truckNow(sh){ const n=ledgerNow(sh); return n?n.truck:skuZero(); }
+function truckShort(sh){
+  const out=[], L=showLedger(sh)||[];
+  L.forEach(r=>{ if(!r.hasM)return; SKUS.forEach(s=>{ if(r.truck[s.key]<0)out.push({di:r.di,sku:s.key,short:s.short,have:r.start[s.key],table:r.table[s.key],over:-r.truck[s.key]}); }); });
+  return out;
+}
+// What came off the truck onto each booth today vs last night's close.
+function truckPulls(sh,di){
+  const d=(sh.days||[])[di], p=(sh.days||[])[di-1]; const r=skuZero(); if(!d)return r;
+  SKUS.forEach(s=>{
+    const now=(parseInt((d.morningCount||{})[s.key])||0)+(parseInt((d.restock||{})[s.key])||0);
+    const had=(p&&p.eveningCount?(parseInt(p.eveningCount[s.key])||0):0)+(dayGarageIn(d)[s.key]||0);
+    r[s.key]=d.morningCount?(di===0?now:now-had):0;
+  });
+  return r;
+}
+function truckCountDiff(sh,di){
+  const d=(sh.days||[])[di]; if(!d||!d.truckCount||!d.truckCount.counts)return null;
+  const L=showLedger(sh); if(!L||!L[di])return null;
+  const r={}; let any=false;
+  SKUS.forEach(s=>{ r[s.key]=(parseInt(d.truckCount.counts[s.key])||0)-(L[di].truck[s.key]||0); if(r[s.key])any=true; });
+  return {diff:r,any,expected:L[di].truck,counted:d.truckCount.counts};
+}
+function saveTruckCount(shId,di,map){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return {ok:false,reason:'No such show.'};
+  const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day does not exist.'};
+  const c={}; SKUS.forEach(s=>c[s.key]=Math.max(0,parseInt((map||{})[s.key])||0));
+  d.truckCount={counts:c,ts:new Date().toISOString()};
+  const res=truckCountDiff(sh,di);
+  invLogPush(sh,{ts:d.truckCount.ts,di,date:d.date,type:'🚚 truck count',
+    changes:[SKUS.map(s=>s.short+' '+c[s.key]+(res&&res.diff[s.key]?' ('+(res.diff[s.key]>0?'+':'')+res.diff[s.key]+' vs expected)':'')).join(', ')],by:'owner'});
+  return {ok:true,res};
+}
+// ---- the audit ----------------------------------------------------------
+function auditSkip(sh){
+  if(!sh)return true;
+  if(sh.status!=='active'&&sh.status!=='completed')return true;
+  const b=S&&S.settings&&S.settings.audit&&S.settings.audit.baseline;
+  if(b&&sh.status==='completed'&&sh.completedAt&&sh.completedAt<b)return true;
+  return false;
+}
+function auditShow(sh){
+  const out=[]; if(auditSkip(sh))return out;
+  const days=sh.days||[], booths=truckMode(sh), today=_todayKey();
+  const add=(sev,di,code,msg)=>out.push({sev,showId:sh.id,show:sh.name,di,code,msg,key:sh.id+'|'+di+'|'+code+'|'+msg});
+  const dn=i=>(days[i]&&days[i].date)||('Day '+(i+1));
+  if(sh.status==='active'&&!sh.packedInventory)add('red',0,'unpacked','Show is running but was never packed, so the app does not know what it took from the garage.');
+  // 1. More on the tables than the show has.
+  const shortBy={}; truckShort(sh).forEach(x=>{ (shortBy[x.di]=shortBy[x.di]||[]).push(x); });
+  Object.keys(shortBy).forEach(k=>{ const di=+k, xs=shortBy[k];
+    add('red',di,'overTable',dn(di)+': '+(booths?'the booths hold':'the table holds')+' more than this show has. '+
+      xs.map(x=>x.short+' '+x.table+' counted, only '+x.have+' here (+'+x.over+')').join(' · ')+
+      '. If it came from the garage, use 🔄 Transfer Stock → 🏠 Garage. If it is a typo, fix the count.'); });
+  // 2. Days that were never counted, or money with no count.
+  let lastCounted=-1; days.forEach((d,i)=>{ if(d.morningCount||d.eveningCount)lastCounted=i; });
+  days.forEach((d,i)=>{
+    const key=showDayKey(sh,i), past=sh.status==='completed'||i<lastCounted||(key&&key<today);
+    const money=calcPmt(d.payments||{})>0;
+    if(booths){
+      const owe=boothsAwaitingEvening(sh,i);
+      if(owe.length&&past)add('red',i,'noClose',dn(i)+': '+owe.map(b=>b.name).join(', ')+' never counted at close. Those sales are not counted.');
+    } else if(d.morningCount&&!d.eveningCount&&past)add('red',i,'noClose',dn(i)+': no close count. That day\'s sales are not counted, and closing the show would send them back to the garage.');
+    if(!d.morningCount&&d.eveningCount)add('red',i,'noMorning',dn(i)+': close count but no morning count, so nothing sold that day is counted.');
+    if(money&&!(d.morningCount&&d.eveningCount)&&past)add('red',i,'moneyNoCount',dn(i)+': '+fmt(calcPmt(d.payments))+' collected but the day was not counted.');
+    const tc=truckCountDiff(sh,i);
+    if(tc&&tc.any)add('gold',i,'truckCount',dn(i)+': 🚚 truck count is off. '+SKUS.filter(s=>tc.diff[s.key]).map(s=>s.short+' '+(tc.diff[s.key]>0?'+':'')+tc.diff[s.key]).join(' · ')+' (counted vs expected).');
+  });
+  // 3. Impossible sales, and (single-table shows) openings that do not follow last night.
+  invNegativeSold(sh).forEach(m=>add('red',m.di,'negSold',dn(m.di)+': '+m.short+' ended at '+m.eve+' but only had '+m.morn+'.'));
+  if(!booths)invUnresolved(sh).forEach(m=>add('gold',m.di,'carry',dn(m.di)+': '+m.short+' opened at '+m.morn+', last night ended at '+m.expected+'. Explain or fix it in Reconciliation.'));
+  // 4. A closed show whose counts changed after the stock went home.
+  if(sh.status==='completed'&&sh.returned){ const now=endShowReturns(sh);
+    const dif=SKUS.filter(s=>(now[s.key]||0)!==(parseInt(sh.returned[s.key])||0));
+    if(dif.length)add('red',days.length-1,'returnDrift','Counts changed after this show closed. '+dif.map(s=>s.short+' '+(parseInt(sh.returned[s.key])||0)+'→'+(now[s.key]||0)).join(' · ')+'.'); }
+  // 5. Still open well after its last day.
+  if(sh.status==='active'){ const endK=showEndKey(sh); if(endK&&endK<today)add('gold',days.length-1,'staleActive','Last day was '+endK+' but the show is still open. Its stock is still "at the show" on paper until you close it.'); }
+  return out;
+}
+function auditAll(st){
+  st=st||S; const out=[];
+  SKUS.forEach(s=>{ const v=parseInt((st.inventory||{})[s.key])||0; if(v<0)out.push({sev:'red',showId:null,di:null,code:'garageNeg',msg:'Garage shows '+v+' '+s.short+'. You cannot have fewer than zero.',key:'garage|'+s.key}); });
+  (st.shows||[]).forEach(sh=>auditShow(sh).forEach(x=>out.push(x)));
+  return out;
+}
+// A show closed from v41 on remembers exactly what it sent home. If a count
+// is fixed afterwards, the garage follows, and the log says why.
+function auditSyncReturns(){
+  const moved=[];
+  (S.shows||[]).forEach(sh=>{
+    if(sh.status!=='completed'||!sh.returned||typeof sh.returned!=='object')return;
+    const now=endShowReturns(sh), delta={}; let any=false;
+    SKUS.forEach(s=>{ delta[s.key]=(now[s.key]||0)-(parseInt(sh.returned[s.key])||0); if(delta[s.key])any=true; });
+    if(!any)return;
+    SKUS.forEach(s=>S.inventory[s.key]=(parseInt(S.inventory[s.key])||0)+delta[s.key]);
+    sh.returned={...now};
+    const line=SKUS.filter(s=>delta[s.key]).map(s=>s.short+' '+(delta[s.key]>0?'+':'')+delta[s.key]).join(', ');
+    invLogPush(sh,{ts:new Date().toISOString(),type:'garage re-synced',changes:['count fixed after close → garage '+line],by:'audit'});
+    moved.push(sh.name+': garage '+line);
+  });
+  return moved;
+}
+function auditLogPush(entry){ const a=auditState(); a.log.push(entry); if(a.log.length>300)a.log=a.log.slice(-300); }
+function renderAuditBar(){
+  let issues=[]; try{ issues=auditAll(S); }catch(e){ console.warn('audit',e); }
+  const red=issues.filter(x=>x.sev==='red').length, n=issues.length;
+  const bar=$$('auditBar'), badge=$$('auditBadge');
+  if(badge){ badge.textContent=n?('⚠️ '+n):'🛡️'; badge.style.color=red?'var(--red)':n?'var(--gold)':'var(--green)'; badge.title=n?(n+' inventory issue'+(n>1?'s':'')+' — tap to see'):'Inventory audit: all clear'; }
+  if(bar){
+    const pg=$$('pages');
+    if(!n){ bar.style.display='none'; bar.innerHTML=''; if(pg&&pg.style)pg.style.top='52px'; }
+    else { bar.style.display='block';
+      if(pg&&pg.style)pg.style.top='86px';
+      bar.innerHTML=`<div onclick="openAuditModal()" style="cursor:pointer;height:34px;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:${red?'#3a1414':'#3a3208'};border-bottom:1px solid ${red?'var(--red)':'var(--gold)'};padding:9px 14px;font-size:12px;font-weight:700;color:${red?'var(--red)':'var(--gold)'}">⚠️ ${n} inventory issue${n>1?'s':''}: ${_esc(issues[0].show?issues[0].show+' · ':'')}${_esc(issues[0].msg.slice(0,90))}${issues[0].msg.length>90?'…':''} <span style="text-decoration:underline">See all ›</span></div>`; }
+  }
+  return issues;
+}
+function openAuditModal(){
+  const issues=auditAll(S);
+  const rows=issues.map(x=>`<div class="wb ${x.sev==='red'?'red':'gold'}" style="margin-bottom:8px;font-size:12px">
+    ${x.show?`<div style="font-weight:900;margin-bottom:3px">${_esc(x.show)}</div>`:''}${_esc(x.msg)}
+    ${x.showId?`<div style="margin-top:6px"><button class="btn btn-xs btn-ghost" onclick="mClose();auditGo('${x.showId}',${x.di==null?0:x.di})">Open it ›</button></div>`:''}</div>`).join('');
+  const log=(auditState().log||[]).slice(-8).reverse().map(e=>`<div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--border)">${_esc((e.ts||'').slice(0,16).replace('T',' '))} · ${_esc(e.msg||'')}</div>`).join('');
+  mOpen(`<div class="mh"><div class="mt">🛡️ Inventory Audit</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Runs every time anything is saved. Checks that no table holds more than the show has, every day that opened got counted at close, money always has a count behind it, the truck count matches, and a closed show's garage return matches its counts.${auditState().baseline?' Shows closed before '+_esc(auditState().baseline.slice(0,10))+' were settled by the garage recount and are not re-checked.':''}</div>
+  ${rows||'<div class="wb green" style="font-size:13px">✅ All clear. Garage, shows, booths and truck all add up.</div>'}
+  ${log?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:12px 0 4px">What the audit did on its own</div>${log}`:''}`);
+}
+function auditGo(shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  go('show',shId,di||0);
+}
+// ---- the truck card (booth shows) -----------------------------------------
+function truckCardHTML(sh,di){
+  if(!truckMode(sh)||!sh.packedInventory)return '';
+  const L=showLedger(sh); const r=L&&L[di]; if(!r)return '';
+  const pulls=truckPulls(sh,di), tc=truckCountDiff(sh,di);
+  const cell=(v,c)=>`<td style="text-align:right;padding:3px 4px;${c||''}">${v}</td>`;
+  const short=SKUS.some(s=>r.truck[s.key]<0);
+  return `<div class="card" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:${short?'var(--red)':'var(--border)'}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-size:15px;font-weight:900">🚚 Truck</div>
+      <button class="btn btn-xs btn-ghost" onclick="openTruckCount('${sh.id}',${di})">${tc?'Recount':'Count the truck'}</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Everything at the show that is not on a booth table. Booth openings and ± Restock at a booth come out of here.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Size</th><th style="text-align:right;padding:3px 4px">At show</th><th style="text-align:right;padding:3px 4px">On booths</th><th style="text-align:right;padding:3px 4px;color:var(--gold)">In truck</th>${tc?'<th style="text-align:right;padding:3px 4px">Counted</th>':''}</tr>
+      ${SKUS.map(s=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${s.short}</td>${cell(r.start[s.key])}${cell(r.table[s.key])}${cell(r.truck[s.key],'font-weight:900;color:'+(r.truck[s.key]<0?'var(--red)':'var(--gold)'))}${tc?cell(tc.counted[s.key]+(tc.diff[s.key]?' <span style="color:var(--red)">('+(tc.diff[s.key]>0?'+':'')+tc.diff[s.key]+')</span>':' ✓')):''}</tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px">Total</td>${cell(skuSum(r.start))}${cell(skuSum(r.table))}${cell(skuSum(r.truck),'color:var(--gold)')}${tc?cell(skuSum(tc.counted)):''}</tr>
+    </table>
+    ${di>0&&SKUS.some(s=>pulls[s.key])?`<div style="font-size:11px;color:#7EB8F7;margin-top:6px">Today vs last night: ${SKUS.filter(s=>pulls[s.key]).map(s=>s.short+' '+(pulls[s.key]>0?'+'+pulls[s.key]+' off the truck':(-pulls[s.key])+' back in the truck')).join(' · ')}</div>`:''}
+    ${short?`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ The booths hold more than the show has. Recheck the booth counts, or bring it from the garage with 🔄 Transfer Stock.</div>`:''}
+  </div>`;
+}
+function openTruckCount(shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  const L=showLedger(sh); const r=L&&L[di]; if(!r){ toast('Pack the show first.'); return; }
+  const d=sh.days[di], prev=(d.truckCount&&d.truckCount.counts)||null;
+  mOpen(`<div class="mh"><div class="mt">🚚 Count the Truck</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${_esc(sh.name)} · ${_esc(d.date||('Day '+(di+1)))}. Count ONLY what is in the truck. Booth tables are counted on their own cards.</div>
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">App expects: ${r.truck[s.key]}</div></div>
+  <div class="cr-c"><button class="crb" onclick="cA('tk_${s.key}',-1)">−</button><input class="cri" type="number" id="tk_${s.key}" value="${prev?(prev[s.key]||0):Math.max(0,r.truck[s.key])}" min="0"><button class="crb" onclick="cA('tk_${s.key}',1)">+</button></div></div>`).join('')}
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveTruckCountUI('${shId}',${di})">Save Truck Count</button>`);
+}
+function saveTruckCountUI(shId,di){
+  const m={}; SKUS.forEach(s=>m[s.key]=parseInt(($$('tk_'+s.key)||{}).value)||0);
+  const res=saveTruckCount(shId,di,m); if(!res.ok){ toast('⚠️ '+res.reason); return; }
+  mClose(); saveS();
+  const r=res.res; toast(r&&r.any?('⚠️ Truck is off: '+SKUS.filter(s=>r.diff[s.key]).map(s=>s.short+' '+(r.diff[s.key]>0?'+':'')+r.diff[s.key]).join(' · ')):'🚚 Truck matches ✓',4000);
+}
+// ---- booth crew ------------------------------------------------------------
+function boothRepIds(sh,boothId){ const b=showBooths(sh).find(x=>x.id===boothId); return (b&&Array.isArray(b.repIds))?b.repIds.slice():[]; }
+function boothCrewLabel(sh,boothId){ const ids=boothRepIds(sh,boothId); return ids.map(id=>sellerName(id)).join(' + '); }
+function setBoothReps(sh,boothId,ids){
+  const b=showBooths(sh).find(x=>x.id===boothId); if(!b)return false;
+  b.repIds=(ids||[]).filter((x,i,a)=>x&&a.indexOf(x)===i);
+  if(!Array.isArray(sh.repIds))sh.repIds=[];
+  b.repIds.forEach(id=>{ if(sh.repIds.indexOf(id)<0)sh.repIds.push(id); });
+  return true;
 }
 // Cash vs product for ONE booth on ONE day — same test the day already runs,
 // so a shortfall can be pinned on the booth (and the person) it came from.
@@ -2196,7 +2498,7 @@ function boothsApply(sh,names){
   const used=new Set(cur.slice(0,clean.length).map(b=>b.id));
   const next=clean.map((nm,i)=>{
     const keep=cur[i];
-    if(keep)return {id:keep.id,name:nm||keep.name||('Booth '+(i+1))};
+    if(keep)return Object.assign({id:keep.id,name:nm||keep.name||('Booth '+(i+1))},Array.isArray(keep.repIds)?{repIds:keep.repIds.slice()}:{});
     let n=i+1,id='booth'+n; while(used.has(id)){n++;id='booth'+n;} used.add(id);
     return {id,name:nm||('Booth '+(i+1))};
   });
@@ -2355,6 +2657,7 @@ function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[
 // table that morning, so the expected opening is last night's ending PLUS
 // what was brought. diff is measured against that expectation.
 function invCarryIssues(sh){ const out=[]; const days=sh.days||[];
+  if(truckMode(sh))return out;   // v41: on a booth show the truck explains the gap; truckShort guards it
   for(let i=1;i<days.length;i++){ const pe=days[i-1].eveningCount, mo=days[i].morningCount; if(!pe||!mo)continue;
     const gi=dayGarageIn(days[i]);
     SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0,g=gi[s.key]||0,x=a+g; if(x!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,brought:g,expected:x,morn:b,diff:b-x}); }); }
@@ -2364,7 +2667,7 @@ function invNegativeSold(sh){ const out=[]; (sh.days||[]).forEach((d,i)=>{ if(d.
 // Carry mismatches that have NOT been acknowledged with a reason on the receiving day.
 function invUnresolved(sh){ return invCarryIssues(sh).filter(m=>!((sh.days[m.di]||{}).carryReason)); }
 // Green = clean · Yellow = reviewed/overridden with a reason · Red = unresolved mismatch or impossible sale.
-function invStatus(sh){ const carry=invCarryIssues(sh),neg=invNegativeSold(sh); if(!carry.length&&!neg.length)return'green'; if(invUnresolved(sh).length||neg.length)return'red'; return'yellow'; }
+function invStatus(sh){ const carry=invCarryIssues(sh),neg=invNegativeSold(sh); if(truckShort(sh).length)return'red'; if(!carry.length&&!neg.length)return'green'; if(invUnresolved(sh).length||neg.length)return'red'; return'yellow'; }
 function invStatusMeta(st){ return st==='green'?{c:'var(--green)',l:'Reconciled',i:'🟢'}:st==='yellow'?{c:'var(--gold)',l:'Reviewed (override)',i:'🟡'}:{c:'var(--red)',l:'Mismatch — review needed',i:'🔴'}; }
 function invLogPush(sh,entry){ if(!sh.invLog)sh.invLog=[]; sh.invLog.push(entry); if(sh.invLog.length>200)sh.invLog=sh.invLog.slice(-200); }
 // Cash vs inventory: money collected vs full price of product that actually sold that day. A shortfall = discounts OR a cash problem.
@@ -3050,6 +3353,7 @@ function rSection(){
 function showOnHand(sh){
   const r={}; SKUS.forEach(s=>r[s.key]=0);
   if(!sh||sh.status!=='active')return r;            // only active shows hold stock out of the garage
+  if(truckMode(sh)&&sh.packedInventory){ const t=truckShowOnHand(sh); if(t){ SKUS.forEach(s=>r[s.key]=Math.max(0,t[s.key]||0)); return r; } }
   const days=sh.days||[];
   // v38: a garage delivery booked onto a day that has not been counted yet
   // (tomorrow's restock, entered tonight) is already at the show, so it is
@@ -4128,8 +4432,9 @@ function garageToShow(sh,sku,qty,di,boothId,batch){
   if(sh.status!=='active')return {ok:false,reason:sh.name+' has not started. Use Pack for Show to load it from the garage.'};
   const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day is not on this show.'};
   if(d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
-  if(hasBooths(sh)){ if(!boothId||!showBooths(sh).some(b=>b.id===boothId))return {ok:false,reason:'Pick which booth gets it.'}; }
+  if(hasBooths(sh)){ if(boothId!==TRUCK_ID&&(!boothId||!showBooths(sh).some(b=>b.id===boothId)))return {ok:false,reason:'Pick which booth gets it.'}; }
   else boothId=null;
+  if(boothId===TRUCK_ID)return garageToTruck(sh,sku,qty,di,batch);
   S.inventory=S.inventory||{};
   S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)-qty);
   sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[sku]=(parseInt(sh.packedInventory[sku])||0)+qty;
@@ -4148,6 +4453,25 @@ function garageToShow(sh,sku,qty,di,boothId,batch){
     changes:['+'+qty+' '+sName+' from the garage'+(boothId?' → '+boothName(sh,boothId):'')+' (opening on '+(d.date||('Day '+(di+1)))+')'],by:'owner'});
   return {ok:true,rec,sName};
 }
+// v41: on a booth show a delivery can land in the TRUCK. It is part of what
+// the show holds from that day on, but on no booth table until a booth pulls it.
+const TRUCK_ID='truck';
+function garageToTruck(sh,sku,qty,di,batch){
+  const d=sh.days[di];
+  S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)-qty);
+  sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[sku]=(parseInt(sh.packedInventory[sku])||0)+qty;
+  if(!d.truckIn||typeof d.truckIn!=='object')d.truckIn={};
+  d.truckIn[sku]=(parseInt(d.truckIn[sku])||0)+qty;
+  rollupDay(sh,di);
+  const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
+  const id='tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+  const rec={id,batch:batch||id,ts:new Date().toISOString(),date:_todayKey(),sku,qty,landed:'truck',
+    fromShowId:GARAGE_ID,fromName:GARAGE_NAME,toShowId:sh.id,toName:sh.name,di,dayDate:d.date||'',boothId:TRUCK_ID,boothName:'🚚 Truck'};
+  if(!Array.isArray(S.transfers))S.transfers=[];
+  S.transfers.push(rec);
+  invLogPush(sh,{ts:rec.ts,di,date:d.date,type:'garage delivery',changes:['+'+qty+' '+sName+' from the garage → 🚚 truck ('+(d.date||('Day '+(di+1)))+')'],by:'owner'});
+  return {ok:true,rec,sName};
+}
 // Reverse of garageToShow: garageIn and the morning count come back down
 // (floored at 0), packed and the garage go back, the ledger row is removed.
 // A pre-v39 row that landed as restock is reversed from restock instead.
@@ -4160,7 +4484,10 @@ function garageToShowUndo(tr){
   const qty=parseInt(tr.qty)||0;
   S.inventory=S.inventory||{}; S.inventory[tr.sku]=(parseInt(S.inventory[tr.sku])||0)+qty;
   sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[tr.sku]=Math.max(0,(parseInt(sh.packedInventory[tr.sku])||0)-qty);
-  if(d){
+  if(d&&tr.landed==='truck'){
+    if(d.truckIn&&typeof d.truckIn==='object')d.truckIn[tr.sku]=Math.max(0,(parseInt(d.truckIn[tr.sku])||0)-qty);
+    rollupDay(sh,tr.di);
+  } else if(d){
     const boothId=(tr.boothId&&hasBooths(sh))?tr.boothId:null;
     const tgt=boothId?dayBoothWrite(d,boothId):d;
     if(tr.landed==='restock'){ if(tgt.restock&&typeof tgt.restock==='object')tgt.restock[tr.sku]=Math.max(0,(parseInt(tgt.restock[tr.sku])||0)-qty); }
@@ -4218,7 +4545,7 @@ function openTransferModal(presetFromId){
   else if(deliverable.length){ from=GARAGE_ID; to=deliverable[0].id; }
   else { from=shows[0].id; to=(shows.find(s=>s.id!==from)||{}).id||''; }
   const toSh=(S.shows||[]).find(s=>s.id===to);
-  _trState={qtys:{},from,to,di:toSh?transferDefaultDay(toSh):0,booth:(toSh&&hasBooths(toSh))?showBooths(toSh)[0].id:''};
+  _trState={qtys:{},from,to,di:toSh?transferDefaultDay(toSh):0,booth:(toSh&&hasBooths(toSh))?TRUCK_ID:''};
   trRender();
 }
 function trReadState(){
@@ -4239,7 +4566,7 @@ function trRefresh(changed){
   if(changed==='from'||changed==='to'){
     const toSh=(S.shows||[]).find(s=>s.id===st.to);
     st.di=toSh?transferDefaultDay(toSh):0;
-    st.booth=(toSh&&hasBooths(toSh))?showBooths(toSh)[0].id:'';
+    st.booth=(toSh&&hasBooths(toSh))?TRUCK_ID:'';
   }
   trRender();
 }
@@ -4259,8 +4586,8 @@ function trRender(){
     const dayOpt=days.map((d,i)=>`<option value="${i}"${i===st.di?' selected':''}>${_esc(d.date||('Day '+(i+1)))}${d.locked?' 🔒':(d.eveningCount?' (counted)':'')}</option>`).join('');
     const booths=showBooths(toSh);
     landing=`<div class="fg"><label class="fl">For which day</label><select class="fi" id="tr_day" onchange="trRefresh('day')">${dayOpt}</select></div>
-    ${booths.length?`<div class="fg"><label class="fl">Which booth gets it</label><select class="fi" id="tr_booth" onchange="trRefresh('booth')">${booths.map(b=>`<option value="${b.id}"${b.id===st.booth?' selected':''}>${_esc(b.name)}</option>`).join('')}</select></div>`:''}
-    <div class="wb gold" style="font-size:11px;margin-bottom:12px">These units are added to that day's <strong>opening count</strong>${booths.length?' at that booth':''} — last night's ending + what you brought = what is on the table. The garage goes down by the same amount, and the show's "brought from garage" total goes up.</div>`;
+    ${booths.length?`<div class="fg"><label class="fl">Which booth gets it</label><select class="fi" id="tr_booth" onchange="trRefresh('booth')"><option value="${TRUCK_ID}"${st.booth===TRUCK_ID?' selected':''}>🚚 Truck (booths pull from it)</option>${booths.map(b=>`<option value="${b.id}"${b.id===st.booth?' selected':''}>${_esc(b.name)}</option>`).join('')}</select></div>`:''}
+    ${(booths.length&&st.booth===TRUCK_ID)?`<div class="wb gold" style="font-size:11px;margin-bottom:12px">These units go into the <strong>🚚 truck</strong>. The garage goes down, the truck goes up, and no booth count changes until a booth pulls them.</div>`:`<div class="wb gold" style="font-size:11px;margin-bottom:12px">These units are added to that day's <strong>opening count</strong>${booths.length?' at that booth':''} — last night's ending + what you brought = what is on the table. The garage goes down by the same amount, and the show's "brought from garage" total goes up.</div>`}`;
   }
   const rows=SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">${isGarage?'Garage':'Packed'}: ${parseInt(src[s.key])||0}</div></div>
     <div class="cr-c"><button class="crb" onclick="trA('${s.key}',-1)">−</button><input class="cri" type="number" id="tr_q_${s.key}" value="${parseInt(st.qtys[s.key])||0}" min="0" step="1" inputmode="numeric" oninput="trReadState()"><button class="crb" onclick="trA('${s.key}',1)">+</button></div></div>`).join('');
@@ -4290,12 +4617,12 @@ function saveTransfer(){ if(_dupGuard())return;
     if(to.status!=='active'){toast(to.name+' has not started. Use Pack for Show.');return;}
     if(!d){toast('That day is not on this show.');return;}
     if(d.locked){toast('That day is finalized. Unlock it first.');return;}
-    if(hasBooths(to)&&(!boothId||!showBooths(to).some(b=>b.id===boothId))){toast('Pick which booth gets it.');return;}
+    if(hasBooths(to)&&boothId!==TRUCK_ID&&(!boothId||!showBooths(to).some(b=>b.id===boothId))){toast('Pick which booth gets it.');return;}
     const done=[];
     for(const l of lines){ const res=garageToShow(to,l.sku,l.qty,st.di,boothId,batch); if(!res.ok){toast(res.reason);break;} done.push(l.qty+' '+res.sName); }
     if(!done.length)return;
     mClose();saveS();
-    toast(`🏠 ${done.join(' · ')} → ${to.name}${(hasBooths(to)&&boothId)?' ('+boothName(to,boothId)+')':''}`);
+    toast(`🏠 ${done.join(' · ')} → ${to.name}${(hasBooths(to)&&boothId)?' ('+(boothId===TRUCK_ID?'🚚 truck':boothName(to,boothId))+')':''}`);
     return;
   }
   const from=S.shows.find(s=>s.id===fromId), to=S.shows.find(s=>s.id===toId);
@@ -4893,7 +5220,9 @@ function boothDayCardHTML(sh,di,b){
   const rev=sold?calcRev(sold,sh.prices||null):0;
   const restockT=SKUS.reduce((t,s)=>t+((en.restock&&en.restock[s.key])||0),0);
   const lostT=SKUS.reduce((t,s)=>t+((en.lost&&en.lost[s.key])||0),0);
-  const carry=boothCarryIssues(sh,b.id).filter(m=>m.di===di);
+  const carry=truckMode(sh)?[]:boothCarryIssues(sh,b.id).filter(m=>m.di===di);
+  const pulled=(truckMode(sh)&&di>0)?boothCarryIssues(sh,b.id).filter(m=>m.di===di):[];
+  const crew=boothCrewLabel(sh,b.id);
   const cc=boothCashCheck(sh,di,b.id);
   const locked=!!d.locked;
   const bArg="'"+b.id+"'";
@@ -4912,7 +5241,7 @@ function boothDayCardHTML(sh,di,b){
   const movedIn=boothTransferTotal(d,b.id,'in'), movedOut=boothTransferTotal(d,b.id,'out');
   let h=`<div class="card" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:${(haM&&haE&&haP)?'var(--greenbd)':'var(--goldbd)'}">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;cursor:pointer" onclick="openBoothDetail('${sh.id}',${di},${bArg})">
-      <div style="font-size:15px;font-weight:900">🏬 ${_esc(b.name)} <span style="font-size:11px;color:var(--gold);font-weight:700">stock ›</span></div>
+      <div style="font-size:15px;font-weight:900">🏬 ${_esc(b.name)} <span style="font-size:11px;color:var(--gold);font-weight:700">stock ›</span>${crew?`<div style="font-size:11px;color:#7EB8F7;font-weight:700">👥 ${_esc(crew)}</div>`:''}</div>
       <span class="chip ${stateCls}" style="font-size:10px">${state}</span>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:11px;color:var(--muted)">
@@ -4926,11 +5255,12 @@ function boothDayCardHTML(sh,di,b){
     </div>`;
   if(restockT||lostT)h+=`<div style="font-size:10px;color:var(--muted);margin-top:6px">${restockT?'+ Restock '+restockT+' ':''}${lostT?'· Lost/Damaged '+lostT+' (still costs COGS)':''}</div>`;
   if(carry.length)h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ Opening ≠ this booth's ending last night: ${carry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>`;
+  if(pulled.length)h+=`<div style="margin-top:6px;font-size:11px;color:#7EB8F7">🚚 ${pulled.map(m=>m.short+' '+(m.diff>0?'+'+m.diff+' off the truck':(-m.diff)+' back to the truck')).join(' · ')}</div>`;
   if(sold)h+=`<div style="margin-top:7px;font-size:12px;color:var(--muted)">Sold <b style="color:var(--gold)">${soldT}</b> units · full price <b style="color:var(--gold)">${fmt(rev)}</b> · collected <b style="color:var(--green)">${fmt(money)}</b></div>`;
   if(cc.state==='short')h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ ${_esc(b.name)} is ${fmt(cc.amt)} short: ${fmt(cc.collected)} in the drawer vs ${fmt(cc.rev)} of product gone. OK if they gave discounts — otherwise ask.</div>`;
   else if(cc.state==='over')h+=`<div class="wb gold" style="margin-top:6px;font-size:11px">⚠️ ${_esc(b.name)} is ${fmt(cc.amt)} OVER what sold. Re-check this booth's counts.</div>`;
   else if(cc.state==='ok')h+=`<div class="wb green" style="margin-top:6px;font-size:11px">✓ ${_esc(b.name)} balances — ${fmt(cc.collected)} collected.</div>`;
-  if(haM&&haE&&!locked)h+=`<button class="btn btn-xs btn-ghost btn-full" style="margin-top:7px" onclick="openAdjustModal('${sh.id}',${di},${bArg})">± Restock / Damaged-Lost at ${_esc(b.name)}</button>`;
+  if((haM&&haE||(truckMode(sh)&&haM))&&!locked)h+=`<button class="btn btn-xs btn-ghost btn-full" style="margin-top:7px" onclick="openAdjustModal('${sh.id}',${di},${bArg})">${truckMode(sh)?'🚚 Restock from truck / Damaged-Lost at ':'± Restock / Damaged-Lost at '}${_esc(b.name)}</button>`;
   return h+`</div>`;
 }
 function dayBoothsHTML(sh,di){
@@ -5136,12 +5466,13 @@ function saveBoothTransfer(shId,di,fromId){
 var _boothEdit=null;
 function openBoothsModal(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  _boothEdit={shId,names:showBooths(sh).map(b=>b.name||'')};
+  _boothEdit={shId,names:showBooths(sh).map(b=>b.name||''),crews:showBooths(sh).map(b=>boothRepIds(sh,b.id))};
   renderBoothsModal();
 }
 function boothEditRead(){ if(!_boothEdit)return; _boothEdit.names=_boothEdit.names.map((n,i)=>{const el=$$('bth_n_'+i);return el?String(el.value||''):n;}); }
 function boothAddRow(){ if(!_boothEdit)return; boothEditRead(); _boothEdit.names.push('Booth '+(_boothEdit.names.length+1)); renderBoothsModal(); }
-function boothDelRow(i){ if(!_boothEdit)return; boothEditRead(); _boothEdit.names.splice(i,1); renderBoothsModal(); }
+function boothDelRow(i){ if(!_boothEdit)return; boothEditRead(); _boothEdit.names.splice(i,1); if(_boothEdit.crews)_boothEdit.crews.splice(i,1); renderBoothsModal(); }
+function boothCrewToggle(i,repId){ if(!_boothEdit)return; boothEditRead(); const c=_boothEdit.crews||(_boothEdit.crews=[]); const cur=c[i]||(c[i]=[]); const k=cur.indexOf(repId); if(k>=0)cur.splice(k,1); else cur.push(repId); renderBoothsModal(); }
 function boothQuickSet(n){ if(!_boothEdit)return; boothEditRead();
   const names=[]; for(let i=0;i<n;i++)names.push((_boothEdit.names[i]||'').trim()||('Booth '+(i+1)));
   _boothEdit.names=names; renderBoothsModal(); }
@@ -5156,7 +5487,9 @@ function renderBoothsModal(){
       <div style="min-width:20px;font-size:12px;color:var(--muted);font-weight:800">${i+1}</div>
       <input class="fi" type="text" id="bth_n_${i}" value="${String(nm||'').replace(/"/g,'&quot;')}" placeholder="Booth ${i+1}" style="flex:1">
       ${hasData?'<span class="chip green" style="font-size:10px">has counts</span>':`<button class="btn btn-xs btn-ghost" onclick="boothDelRow(${i})">✕</button>`}
-    </div>`;
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin:-2px 0 10px 28px">${(S.reps||[]).filter(r=>r.active).map(r=>{ const on=((_boothEdit.crews||[])[i]||[]).indexOf(r.id)>=0;
+      return `<button class="btn btn-xs ${on?'btn-gold':'btn-ghost'}" onclick="boothCrewToggle(${i},'${r.id}')">${on?'✓ ':''}${_esc(r.name)}</button>`; }).join('')}</div>`;
   }).join('')||'<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Single booth — the day screen counts the whole show at once.</div>';
   mOpen(`<div class="mh"><div class="mt">🏬 Booths at this show</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${_esc(sh.name)} — one show, one booth fee, one pull from master stock. Booths just split the COUNTING so each person's table is counted and cashed out on its own, and every booth adds into the grand total.</div>
@@ -5174,6 +5507,7 @@ function saveBooths(){
   const sh=S.shows.find(s=>s.id===_boothEdit.shId);if(!sh)return;
   const res=boothsApply(sh,_boothEdit.names);
   if(!res.ok){ toast('⚠️ '+res.blocked.join(', ')+' already has counts — clear them first'); return; }
+  res.booths.forEach((b,i)=>setBoothReps(sh,b.id,(_boothEdit.crews||[])[i]||[]));
   const n=res.booths.length;
   _boothEdit=null; mClose(); saveS();
   toast(n?('✅ '+n+' booth'+(n>1?'s':'')+' on '+sh.name):'Back to a single booth');
@@ -5198,6 +5532,7 @@ function rDay(sh,di){
       <div style="font-size:17px;font-weight:900">${d.date||'Day '+(di+1)}</div>
       <span class="chip ${haM&&haE&&haP?'green':isA?'gold':''}">${haM&&haE&&haP?'✓ COMPLETE':isA?'IN PROGRESS':'—'}</span>
     </div>
+    ${truckCardHTML(sh,di)}
     ${dayBoothsHTML(sh,di)}
     ${hasBooths(sh)?`<div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800;margin:2px 0 6px">🧮 Grand total — all ${showBooths(sh).length} booths, auto-summed</div>`:''}
     <!-- 3-COLUMN COUNTS: Morning | Evening | Money -->
@@ -5288,8 +5623,9 @@ function openCloseout(shId,di){
   const staffed=(sh.repIds||[]).some(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active;});
   const dayTotal=calcPmt(d.payments);
   const carry=invCarryIssues(sh).filter(m=>m.di===di), neg=invNegativeSold(sh).filter(m=>m.di===di);
-  const reconBad=(carry.length&&!d.carryReason)||neg.length>0;
-  const reconOK=!carry.length&&!neg.length;
+  const tShort=truckShort(sh).filter(m=>m.di===di);
+  const reconBad=(carry.length&&!d.carryReason)||neg.length>0||tShort.length>0;
+  const reconOK=!carry.length&&!neg.length&&!tShort.length;
   const cc=dayCashCheck(sh,di);
   const cashLine=cc.state==='short'?(' · cash short '+fmt(cc.amt)+' vs product sold (ok if discounts)'):cc.state==='over'?(' · cash '+fmt(cc.amt)+' OVER — recheck counts'):cc.state==='ok'?' · cash matches inventory':'';
   const ic=v=>v===true?'✅':v==='opt'?'◽':'⬜';
@@ -5368,7 +5704,7 @@ function confirmPack(shId){
   }
   const pk={};SKUS.forEach(s=>pk[s.key]=Math.min(parseInt($$('pk_'+s.key).value)||0,S.inventory[s.key]||0));
   SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)-pk[s.key]);
-  sh.status='active';sh.packedInventory={...pk};sh.days[0].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
+  sh.status='active';sh.packedInventory={...pk};if(!truckMode(sh))sh.days[0].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
   mClose();saveS();toast('Show started! Inventory packed.');
 }
 // boothId is optional. Given one, the modal counts THAT booth and compares it
@@ -5391,7 +5727,11 @@ function showCntModal(shId,di,type,boothId){
   mOpen(`<div class="mh"><div class="mt">${type==='morning'?'🌅 Morning Count':'🌙 Evening Count'}</div><button class="mx" onclick="mClose()">×</button></div>
   ${boothId?`<div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:2px">🏬 ${_esc(boothName(sh,boothId))}</div>`:''}
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${type==='morning'?('Count everything at this booth right now.'+(boothId?' This booth only — the other booths get counted on their own cards.':'')):('Count all unsold items at end of day.'+(boothId?' This booth only.':''))}</div>
-  ${prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night${gInT?' + what you brought from the garage':''}</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:''}
+  ${(type==='morning'&&boothId&&truckMode(sh))?(()=>{ const L=showLedger(sh), r=L&&L[di]; if(!r)return '<div class="wb red" style="margin-bottom:12px;font-size:12px">⚠️ This show has not been packed yet. Pack it first so the truck knows what it holds.</div>';
+      const other=skuZero(); showBooths(sh).forEach(b=>{ if(b.id===boothId)return; const en=dayBoothRead(d,b.id)||{}; if(en.morningCount)SKUS.forEach(s=>other[s.key]+=(parseInt(en.morningCount[s.key])||0)+(parseInt((en.restock||{})[s.key])||0)); });
+      const mine=skuZero(); if(cur.restock)SKUS.forEach(s=>mine[s.key]=parseInt(cur.restock[s.key])||0);
+      return `<div class="wb gold" style="margin-bottom:12px;font-size:12px">🚚 Count what is on <strong>this booth's table</strong>. Anything above ${prevEve?'last night':'zero'} comes off the truck. Available for this booth: ${SKUS.map(s=>s.short+' '+Math.max(0,r.start[s.key]-other[s.key]-mine[s.key])).join(' · ')}</div>`; })()
+    :(prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night${gInT?' + what you brought from the garage':''}</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:'')}
   ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}${(gIn[s.key]||0)?' + 🏠 '+gIn[s.key]+' brought = '+((parseInt(prevEve[s.key])||0)+gIn[s.key]):''}</div>`:'')}</div>
   <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}',${bArg})">Save ${type==='morning'?'Morning':'Evening'} Count${who}</button>`);
@@ -5419,12 +5759,15 @@ function saveCount(shId,di,type,boothId){
   // Cross-day continuity check on a morning entry — flag if it doesn't match last night's ending
   let warn='';
   const prevEve=(di>0)?(boothId?((dayBoothRead(sh.days[di-1],boothId)||{}).eveningCount||null):sh.days[di-1].eveningCount):null;
-  if(type==='morning'&&prevEve){
+  if(type==='morning'&&prevEve&&!truckMode(sh)){
     const gNow=boothId?boothGarageIn(d,boothId):dayGarageIn(d);
     const mm=SKUS.some(s=>((prevEve[s.key]||0)+(gNow[s.key]||0))!==(c[s.key]||0));
     if(mm){ d.carryReason=null; warn=' ⚠️ Does NOT match last night — see Reconciliation.'; }
   }
   if(boothId){ rollupDay(sh,di); if(nextDay)rollupDay(sh,di+1); }
+  // v41: every count is checked against what the show actually has.
+  const over=truckShort(sh).filter(x=>x.di===di||x.di===di+1);
+  if(over.length)warn=' 🛑 More than the show has: '+over.map(x=>x.short+' +'+x.over).join(', ')+'. Fix the count or bring it from the garage.';
   mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn);
 }
 function lockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; d.locked=true; d.lockTs=new Date().toISOString(); invLogPush(sh,{ts:d.lockTs,di,date:d.date,type:'lock',changes:['day finalized/locked'],by:'owner'}); saveS();toast('🔒 Day finalized'); }
@@ -5442,7 +5785,7 @@ function openAdjustModal(shId,di,boothId){
   const bArg=boothId?("'"+boothId+"'"):'null';
   mOpen(`<div class="mh"><div class="mt">± Restock / Damaged-Lost-Given</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${sh.name} · ${d.date||('Day '+(di+1))}${boothId?' · <strong style="color:var(--gold)">'+_esc(boothName(sh,boothId))+'</strong>':''}</div>
-  <div class="wb gold" style="font-size:11px;margin-bottom:12px">Restock = extra units you brought to the booth that day. Damaged / Lost / Given = units that left but earned no money. Both keep your sold count and COGS honest — lost/given units still count as COGS.</div>
+  <div class="wb gold" style="font-size:11px;margin-bottom:12px">Restock = extra units you brought to the booth that day${boothId&&truckMode(sh)?' <strong>from the truck</strong>':''}. Damaged / Lost / Given = units that left but earned no money. Both keep your sold count and COGS honest — lost/given units still count as COGS.</div>
   <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700"><div>Product</div><div>Restock +</div><div>Lost/Dmg −</div></div>
   ${SKUS.map(s=>`<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;margin-top:6px"><div style="font-size:12px">${s.short}</div><input class="fi" type="number" min="0" step="1" id="adj_r_${s.key}" value="${rk[s.key]||''}" placeholder="0"><input class="fi" type="number" min="0" step="1" id="adj_l_${s.key}" value="${ls[s.key]||''}" placeholder="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:14px" onclick="saveAdjust('${shId}',${di},${bArg})">Save Adjustments</button>`);
@@ -5475,6 +5818,7 @@ function showMoneyModal(shId,di,boothId){
   const own=(S.reps||[]).find(r=>r.isSelf);
   const ids=[]; const push=x=>{ if(x&&ids.indexOf(x)<0)ids.push(x); };
   drawerSellers(src).forEach(push);
+  if(boothId)boothRepIds(sh,boothId).forEach(push);
   push(own&&own.id);
   (sh.repIds||[]).forEach(id=>{ const r=(S.reps||[]).find(x=>x.id===id); if(r&&r.active)push(id); });
   const split={}; ids.forEach(id=>{ const e=((src.sellerPayments||{})[id])||{}; const row={}; PMTS.forEach(p=>row[p.key]=parseFloat(e[p.key])||0); split[id]=row; });
@@ -5687,16 +6031,19 @@ function endShowReturns(sh){
 function endShow(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const ret=endShowReturns(sh); const total=SKUS.reduce((t,s)=>t+(ret[s.key]||0),0);
+  const iss=auditShow(sh).filter(x=>x.sev==='red'&&x.code!=='returnDrift');
   mOpen(`<div class="mh"><div class="mt">📦 Close show — returning stock</div><button class="mx" onclick="mClose()">×</button></div>
+  ${iss.length?`<div class="wb red" style="margin-bottom:10px;font-size:12px"><strong>🛑 Fix these before you close.</strong> Closing now sends the wrong numbers back to the garage.<br>${iss.map(x=>'• '+_esc(x.msg)).join('<br>')}</div>`:'<div class="wb green" style="margin-bottom:10px;font-size:12px">🛡️ Audit clean: every day counted, nothing on a table the show did not have.</div>'}
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Packed − sold − lost = what goes back to master inventory (booth + anything still in the truck).</div>
   ${SKUS.map(s=>`<div class="sr"><span class="srl">${s.name}</span><span class="srv">+${ret[s.key]||0}</span></div>`).join('')}
   <div class="sr" style="border-bottom:none"><span class="srl b">Total returning</span><span class="srv b gold">${total} units</span></div>
-  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="confirmEndShow('${shId}')">✅ Confirm — close show & return stock</button>`);
+  <button class="btn ${iss.length?'btn-ghost':'btn-gold'} btn-full" style="margin-top:12px${iss.length?';border-color:var(--red);color:var(--red)':''}" onclick="confirmEndShow('${shId}')">${iss.length?'⚠️ Close anyway':'✅ Confirm — close show & return stock'}</button>`);
 }
 function confirmEndShow(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const ret=endShowReturns(sh);
   SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)+(ret[s.key]||0));
+  sh.returned={...ret}; sh.returnedAt=new Date().toISOString();
   invLogPush(sh,{ts:new Date().toISOString(),type:'close',changes:['returned to master: '+SKUS.map(s=>s.short+' +'+(ret[s.key]||0)).join(', ')],by:'owner'});
   sh.status='completed';sh.completedAt=new Date().toISOString();
   mClose();saveS();toast('Show closed! Inventory returned.');
