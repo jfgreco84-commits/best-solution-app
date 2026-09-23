@@ -319,7 +319,9 @@ R.section('5. A show with booths: the delivery goes to ONE booth');
   chk('5h. the day total carries it (rollup)',ctx.dayGarageIn(sh.days[1]).c5s,30);
   chk('5i. garage and packed moved',[ctx.S.inventory.c5s,sh.packedInventory.c5s],[170,130]);
   chk('5j. the ledger row names the booth',ctx.S.transfers[0].boothName,'Booth 2');
-  chk('5k. the show is holding 90',ctx.showOnHand(sh).c5s,90);
+  // v41: a booth show has a truck. Packed 100, the booths opened with 90, so
+  // 10 never left the truck: 60 on the booths + 10 in the truck + 30 brought.
+  chk('5k. the show is holding 100 (booths + truck + delivery)',ctx.showOnHand(sh).c5s,100);
 
   // Tomorrow: each booth opens with its own ending from last night, plus
   // what was brought to it. The count modal offers exactly that.

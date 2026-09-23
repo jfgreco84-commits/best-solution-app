@@ -1,13 +1,13 @@
 # LATEST
 
-Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (v38, deployed) · **[v39 delivery = opening](2026-09-20-v39-delivery-is-opening.md)** (v39, deployed) · **[v40 money by person](2026-09-21-v40-money-by-person.md)** (this branch, in review)
+Handoffs: **[v1](2026-08-26-show-sync.md)** (v33, deployed) · **[v2](2026-08-26-show-sync-v2.md)** (v34, deployed) · **[v3](2026-08-26-show-sync-v3.md)** (package, deployed) · **[v35 loader](2026-08-27-v35-approved-package-loader.md)** (v35, deployed) · **[v36 booths + calendar](2026-09-06-v36-booths-and-calendar.md)** (v36, deployed) · **[v37 booth stock + transfers](2026-09-06-v37-booth-stock-and-transfers.md)** (v37, deployed) · **[v38 garage → show](2026-09-20-v38-garage-to-show.md)** (v38, deployed) · **[v39 delivery = opening](2026-09-20-v39-delivery-is-opening.md)** (v39, deployed) · **[v40 money by person](2026-09-21-v40-money-by-person.md)** (v40, deployed) · **[v41 truck + self-audit](2026-09-23-v41-truck-and-self-audit.md)** (this branch, in review)
 
 | | |
 |---|---|
-| **Date** | 2026-09-21 |
-| **Branch** | `claude/transfer-stock-garage-shows-n4yvaj` (restarted after #36 merged) |
-| **Base** | `b502a10` on `main` |
-| **App version** | v39 → **v40** |
+| **Date** | 2026-09-23 |
+| **Branch** | `claude/garage-inventory-discrepancies-0swvjo` |
+| **Base** | `2f5174f` on `main` |
+| **App version** | v40 → **v41** (see the v41 handoff; the v40 notes below are history) |
 | **Review state** | **Awaiting review.** |
 | **Live data changed** | **No.** No real Supabase read or write has been made or attempted. |
 
