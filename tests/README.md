@@ -12,6 +12,7 @@ node tests/passed-not-doing.test.js
 node tests/booth-splits-and-calendar.test.js
 node tests/garage-transfers.test.js
 node tests/money-by-person.test.js
+node tests/cranberry-scoreboard.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,

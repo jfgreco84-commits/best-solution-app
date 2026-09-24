@@ -297,7 +297,9 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v41';
+const APP_VERSION='v42';
+// Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
+const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
 // Unit costs changed on 2026-08-01. Every COGS figure must use the schedule
 // that was in force on the date of the sale, not today's cost table.
@@ -915,6 +917,49 @@ function applyOneTimeUpdates(d){
     const b1=cran&&Array.isArray(cran.booths)?cran.booths.find(b=>b&&b.id):null;
     if(b1&&!(Array.isArray(b1.repIds)&&b1.repIds.length))setBoothReps(cran,b1.id,[own&&own.id,cutty.id].filter(Boolean));
     d._applied['cutty_cranberry_v41']=true;
+  }
+
+  // v42: Cranberry Fest 2026 sells at show-only prices. Only this show's
+  // price snapshot changes; the app-wide prices and every other show stay put.
+  if(!d._applied['cranberry_prices_v42']){
+    const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026')&&sh.status!=='completed');
+    if(cran){ cran.prices=Object.assign({},cran.prices||d.prices||{},CRANBERRY_PRICES_2026); d._applied['cranberry_prices_v42']=true; }
+  }
+  // v42: the Cranberry scoreboard teams. Les is added to the roster if missing.
+  if(!d._applied['cranberry_teams_v42']){
+    d.reps=d.reps||[];
+    const find=(id,rx)=>d.reps.find(r=>r&&(r.id===id||rx.test(String(r.name||'').trim())));
+    let les=find('rep_les',/^les$/i);
+    if(!les){ les={id:'rep_les',name:'Les',isSelf:false,active:true,payments:[]}; d.reps.push(les); }
+    const own=d.reps.find(r=>r&&r.isSelf), cutty=find('rep_cutty',/^cutty$/i), ant=find('rep_anthony',/^anthony$/i),
+          tj=find('rep_tj',/^t\.?\s*j\.?$/i), dave=find('rep_dave',/^dave$/i);
+    [les,cutty,ant,tj,dave].forEach(r=>{ if(r)r.active=true; });
+    const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026')&&sh.status!=='completed');
+    if(cran&&!(Array.isArray(cran.teams)&&cran.teams.length)){
+      const ids=a=>a.filter(Boolean).map(r=>r.id);
+      cran.teams=[
+        {id:'team_froggy_cutty',name:'Froggy + Cutty',repIds:ids([own,cutty])},
+        {id:'team_les_anthony', name:'Les + Anthony', repIds:ids([les,ant])},
+        {id:'team_tj_dave',     name:'TJ + Dave',     repIds:ids([tj,dave])}
+      ];
+      if(!Array.isArray(cran.repIds))cran.repIds=[];
+      cran.teams.forEach(t=>t.repIds.forEach(id=>{ if(cran.repIds.indexOf(id)<0)cran.repIds.push(id); }));
+    }
+    if(cran)d._applied['cranberry_teams_v42']=true;   // retried until the show exists
+  }
+  // v42: the Sep 24 Batman borrow (34 C5L, 80 2oz, 48 8oz) was entered while
+  // "Borrowed More" only wrote the debt (a July redeploy had dropped the
+  // stock half). Put those bottles in the garage once. Only runs on a device
+  // whose Batman tally actually holds them; marked done only when it lands.
+  if(!d._applied['batman_to_garage_20260924']){
+    const bm=d.batmanBorrow||{}, add={c5l:34,'2oz':80,'8oz':48};
+    if(Object.keys(add).every(k=>(parseInt(bm[k])||0)>=add[k])){
+      d.inventory=d.inventory||{};
+      Object.keys(add).forEach(k=>{ d.inventory[k]=(parseInt(d.inventory[k])||0)+add[k]; });
+      const a=auditState(d);
+      a.log.push({ts:new Date().toISOString(),msg:'Batman borrow Sep 24 added to the garage: C5L +34 · 2oz +80 · 8oz +48'});
+      d._applied['batman_to_garage_20260924']=true;
+    }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -3306,7 +3351,10 @@ function secBest(C){
   }
   return h;
 }
-// ---- BORROWED FROM BATMAN (fully isolated tally; never touches inventory/shows/P&L) ----
+// ---- BORROWED FROM BATMAN ----
+// batmanBorrow is the debt. + Borrowed More / - Returned also move the garage,
+// because the borrowed bottles are sold (restored v42; a July redeploy had
+// dropped it). Set Exact edits only the debt. Do NOT isolate this again.
 function bmInv(){ if(!S.batmanBorrow||typeof S.batmanBorrow!=="object")S.batmanBorrow={}; return S.batmanBorrow; }
 function bmBottles(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0),0);}
 function bmCost(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getCost(s.key),0);}
@@ -3314,7 +3362,7 @@ function bmRetail(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*ge
 function secBatman(){
   const b=bmInv(); const units=bmBottles(), cost=bmCost(), retail=bmRetail();
   let h=`<div class="card bb">
-    <div style="font-size:12px;color:var(--blue);line-height:1.5">🦇 Bottles borrowed from <strong>Batman (Adam West)</strong>, returned <strong>bottle for bottle</strong> once your pallet comes in. This list is 100% separate: it does NOT affect your master inventory, shows, COGS, or any P&L number.</div>
+    <div style="font-size:12px;color:var(--blue);line-height:1.5">🦇 Bottles borrowed from <strong>Batman (Adam West)</strong>, returned <strong>bottle for bottle</strong> once your pallet comes in. <strong>+ Borrowed More</strong> puts the bottles in the garage so you can sell them; <strong>Returned</strong> takes them back out. Selling one does not lower what you owe. <strong>Set Exact</strong> only fixes the owed tally.</div>
   </div>
   <div class="card gb">
     <div class="g3">
@@ -3501,21 +3549,21 @@ function showSetAllInv(){
 }
 function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);if(!isNaN(v))S.inventory[s.key]=Math.max(0,v);});mClose();saveS();toast('Inventory updated!');}
 
-// ---- Borrowed-from-Batman editors (write ONLY to S.batmanBorrow; never touch master inventory) ----
+// ---- Borrowed-from-Batman editors (Borrowed / Returned move the garage too; Set Exact is debt only) ----
 function showAddBatman(){
   mOpen(`<div class="mh"><div class="mt">🦇 Borrowed More from Batman</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you just borrow? This ADDS to what you owe him.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you just borrow? This ADDS to what you owe him AND puts them in the garage.</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bma_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applyAddBatman()">Add to What I Owe</button>`);
 }
-function applyAddBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' borrowed from Batman');}
+function applyAddBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' borrowed from Batman (added to the garage)');}
 function showReturnBatman(){
   mOpen(`<div class="mh"><div class="mt">− Returned to Batman</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe, bottle for bottle.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe, bottle for bottle, and takes them out of the garage.</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bmr_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applyReturnBatman()">Subtract Returned</button>`);
 }
-function applyReturnBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;n+=dec;}});mClose();saveS();toast('Returned '+n+' to Batman');}
+function applyReturnBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-dec);n+=dec;}});mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
 function showSetBatman(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Bottles Owed</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT number of each you currently owe Batman.</div>
@@ -5000,6 +5048,8 @@ function rShow(){
     const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
     return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
   </details>
+  ${_pd?'':teamScoreboardHTML(sh)}
+  ${showPricesLineHTML(sh)}
   ${preShowCalcHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
@@ -5334,6 +5384,131 @@ function dayBoothsHTML(sh,di){
   if(waiting.length)h+=`<div class="wb gold" style="margin-bottom:8px;font-size:12px">🌙 Still open: <strong>${waiting.map(b=>_esc(b.name)).join(', ')}</strong>. The day's grand total stays unfinished until every booth that opened has an evening count, so a half-closed day can never post a fake sale.</div>`;
   else if(opened.length)h+=`<div class="wb green" style="margin-bottom:8px;font-size:12px">✓ All ${opened.length} booths closed out. Grand total below: <strong>${fmt(money)}</strong> collected.</div>`;
   return h;
+}
+/* ---------------------------------------------------------------------
+   TEAM SCOREBOARD (v42, Cranberry Fest)
+   ---------------------------------------------------------------------
+   sh.teams = [{id,name,repIds}]. A team's booth on a day IS that day's crew
+   (dayBoothCrew), so marking the booth here and "Who's in which booth" are
+   one and the same. A team's money on a day is its booth's drawer; with no
+   booth marked it falls back to what its people rang up by name
+   (sellerPayments). Pay is day.repPay. Read-only except the booth picker.
+   --------------------------------------------------------------------- */
+function showTeams(sh){ const t=sh&&sh.teams; return Array.isArray(t)?t.filter(x=>x&&x.id):[]; }
+function teamBoothOnDay(sh,di,team){
+  const ids=team.repIds||[]; if(!ids.length)return null;
+  const b=showBooths(sh).find(b=>dayBoothCrew(sh,di,b.id).some(id=>ids.indexOf(id)>=0));
+  return b?b.id:null;
+}
+function setTeamBooth(sh,di,teamId,boothId){
+  const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day does not exist.'};
+  const team=showTeams(sh).find(t=>t.id===teamId); if(!team)return {ok:false,reason:'No such team.'};
+  const booths=showBooths(sh); if(boothId&&!booths.some(b=>b.id===boothId))return {ok:false,reason:'No such booth.'};
+  const m={}; booths.forEach(b=>m[b.id]=dayBoothCrew(sh,di,b.id).filter(id=>(team.repIds||[]).indexOf(id)<0));
+  if(boothId)m[boothId]=(team.repIds||[]).slice();   // one team per booth: whoever was on it that day comes off
+  d.boothCrew=m;
+  if(!Array.isArray(sh.repIds))sh.repIds=[];
+  (team.repIds||[]).forEach(id=>{ if(sh.repIds.indexOf(id)<0)sh.repIds.push(id); });
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId||'',type:'crew',
+    changes:[team.name+(boothId?' → '+boothName(sh,boothId):' off every booth')],by:'owner'});
+  return {ok:true};
+}
+function setTeamBoothUI(shId,di,teamId,boothId){ const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const r=setTeamBooth(sh,di,teamId,boothId||null); if(!r.ok){toast('⚠️ '+r.reason);return;} saveS(); renderCur(); }
+function teamDayMoney(sh,di,team){
+  const d=(sh.days||[])[di], p={}; PMTS.forEach(x=>p[x.key]=0);
+  if(!d)return {p,total:0,src:'none'};
+  const bId=teamBoothOnDay(sh,di,team);
+  if(bId){
+    const pm=(dayBoothRead(d,bId)||{}).payments||{};
+    PMTS.forEach(x=>p[x.key]=parseFloat(pm[x.key])||0);
+    return {p,total:calcPmt(p),src:'booth',boothId:bId};
+  }
+  const drawers=hasBooths(sh)?showBooths(sh).map(b=>dayBoothRead(d,b.id)).filter(Boolean):[d];
+  drawers.forEach(en=>{ const sp=(en&&en.sellerPayments)||{}; (team.repIds||[]).forEach(id=>{ const e=sp[id]||{}; PMTS.forEach(x=>p[x.key]+=parseFloat(e[x.key])||0); }); });
+  const total=calcPmt(p);
+  return {p,total,src:total>0?'people':'none'};
+}
+function teamDayPay(sh,di,team){ const d=(sh.days||[])[di]; return (team.repIds||[]).reduce((t,id)=>t+repDayPay(d,id),0); }
+function teamShowTotals(sh,team){
+  const p={}; PMTS.forEach(x=>p[x.key]=0); let total=0,pay=0;
+  (sh.days||[]).forEach((d,di)=>{ const m=teamDayMoney(sh,di,team); PMTS.forEach(x=>p[x.key]+=m.p[x.key]); total+=m.total; pay+=teamDayPay(sh,di,team); });
+  return {p,total,pay};
+}
+function _pmtChips(p){
+  const on=PMTS.filter(x=>(p[x.key]||0)>0);
+  if(!on.length)return '<span style="color:var(--muted);font-size:11px">no money in yet</span>';
+  return on.map(x=>`<span class="chip" style="font-size:10px;border-color:${x.color};color:${x.color}">${x.icon} ${x.label} ${fmt(p[x.key])}</span>`).join('');
+}
+function teamScoreboardHTML(sh){
+  const teams=showTeams(sh); if(!teams.length)return '';
+  const booths=showBooths(sh);
+  const scored=teams.map(t=>({t,tot:teamShowTotals(sh,t)})).sort((a,b)=>b.tot.total-a.tot.total);
+  const medal=['🥇','🥈','🥉'];
+  const anyMoney=scored.some(x=>x.tot.total>0);
+  const all={total:0,pay:0}; scored.forEach(x=>{all.total+=x.tot.total; all.pay+=x.tot.pay;});
+  const cards=scored.map((x,rank)=>{
+    const t=x.t, tot=x.tot;
+    const who=(t.repIds||[]).map(id=>sellerName(id)).join(' + ');
+    const days=(sh.days||[]).map((d,di)=>{
+      const m=teamDayMoney(sh,di,t), bId=teamBoothOnDay(sh,di,t), pay=teamDayPay(sh,di,t);
+      const sel=booths.length?`<select class="fi" style="width:auto;padding:3px 6px;font-size:12px;height:auto;margin:0" onchange="setTeamBoothUI('${sh.id}',${di},'${t.id}',this.value)">
+        <option value=""${bId?'':' selected'}>📍 Mark booth</option>${booths.map(b=>`<option value="${b.id}"${b.id===bId?' selected':''}>🏬 ${_esc(b.name)}</option>`).join('')}</select>`:'';
+      const payChips=(t.repIds||[]).map(id=>{ const r=(S.reps||[]).find(q=>q.id===id); if(!r)return '';
+        if(r.isSelf)return `<span style="font-size:10px;color:var(--muted)">${_esc(String(r.name).split(' ')[0])}: owner</span>`;
+        const v=repDayPay(d,id);
+        return `<span class="chip ${v>0?'gold':''}" style="font-size:10px;cursor:pointer" onclick="openRepDayPay('${sh.id}','${id}')">💵 ${_esc(r.name)} ${v>0?fmt(v):'+ pay'}</span>`; }).join(' ');
+      return `<div style="padding:7px 0;border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <div style="font-size:12px;font-weight:800">${_esc(d.date||('Day '+(di+1)))}</div>${sel}
+          <div style="font-size:15px;font-weight:900;color:var(--green)">${fmt(m.total)}</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">${_pmtChips(m.p)}</div>
+        ${m.src==='people'?'<div style="font-size:10px;color:var(--muted);margin-top:3px">No booth marked, so this is what they rang up by name.</div>':''}
+        <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:5px"><span style="font-size:10px;color:var(--muted)">Pay:</span>${payChips}${pay>0?`<span style="font-size:11px;font-weight:800;color:var(--gold)">= ${fmt(pay)}</span>`:''}</div>
+      </div>`;
+    }).join('');
+    return `<div class="card" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:${rank===0&&anyMoney?'var(--gold)':'var(--border)'}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+        <div><div style="font-size:16px;font-weight:900">${anyMoney?(medal[rank]||'🏅'):'🏅'} ${_esc(t.name)}</div><div style="font-size:11px;color:#7EB8F7;font-weight:700">${_esc(who)}</div></div>
+        <div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--green)">${fmt(tot.total)}</div><div style="font-size:10px;color:var(--muted)">${(sh.days||[]).length}-day total · pay ${fmt(tot.pay)}</div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 2px">${_pmtChips(tot.p)}</div>
+      ${days}
+    </div>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:12px;border-color:var(--gold)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:900">🏆 Scoreboard</div>
+      <div style="text-align:right;font-size:11px;color:var(--muted)">All teams <b style="color:var(--green);font-size:14px">${fmt(all.total)}</b> · pay ${fmt(all.pay)}</div>
+    </div>
+    ${cards}
+    <div style="font-size:10px;color:var(--muted);margin-top:2px">Pick each team's booth every day (same as "Who's in which booth"). Money comes from that booth's money count, so count each booth's drawer at close. Tap a name to enter that day's pay.</div>
+  </div>`;
+}
+function showPricesLineHTML(sh){
+  if(!sh||!sh.prices)return '';
+  const diff=SKUS.some(s=>sh.prices[s.key]!=null&&Math.abs(sh.prices[s.key]-getP(s.key))>0.001);
+  if(!diff)return '';
+  return `<div class="card" style="margin-bottom:12px;padding:10px;border-color:var(--goldbd)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:800">💲 Prices at this show only</div>
+      ${sh.status==='completed'?'':`<button class="btn btn-xs btn-ghost" onclick="openShowPrices('${sh.id}')">✏️ Edit</button>`}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">${SKUS.map(s=>`<span class="chip gold" style="font-size:11px">${s.short} ${fmt(sh.prices[s.key]!=null?sh.prices[s.key]:getP(s.key))}</span>`).join('')}</div>
+  </div>`;
+}
+function openShowPrices(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  mOpen(`<div class="mh"><div class="mt">💲 ${_esc(sh.name)} prices</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Only this show. Your normal prices in Settings do not change.</div>
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (normal ${fmt(getP(s.key))})</label><input class="fi" type="number" step="0.01" min="0" inputmode="decimal" id="shp_${s.key}" value="${sh.prices&&sh.prices[s.key]!=null?sh.prices[s.key]:getP(s.key)}"></div>`).join('')}
+  <button class="btn btn-gold btn-full" onclick="saveShowPrices('${shId}')">Save Show Prices</button>`);
+}
+function saveShowPrices(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  const P=Object.assign({},sh.prices||{});
+  SKUS.forEach(s=>{ const v=parseFloat(((($$('shp_'+s.key)||{}).value)||'').trim()); if(!isNaN(v)&&v>=0)P[s.key]=v; });
+  sh.prices=P; mClose(); saveS(); renderCur(); toast('💲 Show prices saved');
 }
 // Whole-show tally: every booth side by side, then the grand total. This is
 // the sheet the owner reads at the end of the weekend.
