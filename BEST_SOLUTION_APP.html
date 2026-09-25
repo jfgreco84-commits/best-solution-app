@@ -5378,6 +5378,11 @@ function boothDayCardHTML(sh,di,b){
       <span>${haM?`<b style="color:var(--gold)">${onHandT}</b> units ${boothOnHandIsCounted(sh,di,b.id)?'counted on this table':'should be on this table'}`:'Not counted yet'}${movedIn||movedOut?` · <span style="color:#7EB8F7">${movedIn?'+'+movedIn+' in':''}${movedIn&&movedOut?' ':''}${movedOut?'−'+movedOut+' out':''}</span>`:''}</span>
       ${locked?'':`<button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();openBoothTransfer('${sh.id}',${di},${bArg})">🔄 Move</button>`}
     </div>
+    ${haM?(()=>{const v=stockValue(sh,di,onHand);return `<div style="display:flex;gap:5px;margin:-3px 0 8px;font-size:11px">
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost</div><div style="font-weight:900;color:#ff9d9d">${fmt(v.cogs)}</div></div>
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail</div><div style="font-weight:900;color:var(--gold)">${fmt(v.retail)}</div></div>
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Profit</div><div style="font-weight:900;color:var(--green)">${fmt(v.profit)}</div></div>
+    </div>`;})():''}
     <div style="display:flex;gap:5px">
       ${col('🌅 Morning',{fg:'#7EB8F7',bd:haM?'var(--border)':'var(--gold)'},skuRows(en.morningCount||{},haM),mBtn)}
       ${col('🌙 Evening',{fg:'#B98AE6',bd:haE?'var(--border)':(haM?'var(--gold)':'var(--border)')},skuRows(en.eveningCount||{},haE),eBtn)}
@@ -5393,6 +5398,34 @@ function boothDayCardHTML(sh,di,b){
   if((haM&&haE||(truckMode(sh)&&haM))&&!locked)h+=`<button class="btn btn-xs btn-ghost btn-full" style="margin-top:7px" onclick="openAdjustModal('${sh.id}',${di},${bArg})">${truckMode(sh)?'🚚 Restock from truck / Damaged-Lost at ':'± Restock / Damaged-Lost at '}${_esc(b.name)}</button>`;
   return h+`</div>`;
 }
+// v43: what the stock is worth. Retail at THIS show's prices (Cranberry's
+// show-only prices included), cost at the COGS in effect that day.
+function stockValue(sh,di,units){
+  const u={}; SKUS.forEach(s=>u[s.key]=Math.max(0,parseInt((units||{})[s.key])||0));
+  const retail=calcRev(u,sh.prices||null), cogs=calcCOGSOn(u,showDayKey(sh,di),sh);
+  return {units:skuSum(u),retail,cogs,profit:retail-cogs};
+}
+// The tally: every booth's table, the truck, and the totals, in dollars.
+function boothValueTallyHTML(sh,di){
+  const booths=showBooths(sh); if(!booths.length)return '';
+  const rows=booths.map(b=>({name:b.name,v:stockValue(sh,di,boothOnHand(sh,di,b.id)),counted:!!((dayBoothRead(sh.days[di],b.id)||{}).morningCount)}));
+  const all={units:0,retail:0,cogs:0,profit:0}; rows.forEach(r=>['units','retail','cogs','profit'].forEach(k=>all[k]+=r.v[k]));
+  const L=truckMode(sh)?showLedger(sh):null, tr=L&&L[di]?stockValue(sh,di,L[di].truck):null;
+  const show=tr?{units:all.units+tr.units,retail:all.retail+tr.retail,cogs:all.cogs+tr.cogs,profit:all.profit+tr.profit}:null;
+  const td=(v,c)=>`<td style="text-align:right;padding:4px 3px;${c||''}">${v}</td>`;
+  const row=(label,v,st,note)=>`<tr style="border-top:1px solid var(--border);${st||''}"><td style="padding:4px 3px">${label}${note?`<div style="font-size:9px;color:var(--muted);font-weight:400">${note}</div>`:''}</td>${td(v.units)}${td(fmt(v.cogs),'color:#ff9d9d')}${td(fmt(v.retail),'color:var(--gold)')}${td(fmt(v.profit),'color:var(--green)')}</tr>`;
+  return `<div class="card" id="boothValueTally" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:var(--goldbd)">
+    <div style="font-size:15px;font-weight:900;margin-bottom:2px">💲 Stock value by booth</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">What is on each table right now. Cost = what you paid (COGS). Retail = sell price at this show. Profit = retail minus cost if it all sells.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px">Where</th><th style="text-align:right;padding:3px">Units</th><th style="text-align:right;padding:3px">Cost</th><th style="text-align:right;padding:3px">Retail</th><th style="text-align:right;padding:3px">Profit</th></tr>
+      ${rows.map(r=>row('🏬 '+_esc(r.name),r.v,'',r.counted?'':'not counted yet')).join('')}
+      ${row('All booths',all,'border-top:2px solid var(--border);font-weight:900')}
+      ${tr?row('🚚 Truck',tr,'',tr.units?'':'empty'):''}
+      ${show?row('Whole show',show,'border-top:2px solid var(--gold);font-weight:900;font-size:12px'):''}
+    </table>
+  </div>`;
+}
 function dayBoothsHTML(sh,di){
   const booths=showBooths(sh); if(!booths.length)return '';
   const waiting=boothsAwaitingEvening(sh,di);
@@ -5403,6 +5436,7 @@ function dayBoothsHTML(sh,di){
     <button class="btn btn-xs btn-ghost" onclick="openBoothsModal('${sh.id}')">✏️ Booths</button>
   </div>
   <button class="btn btn-sm btn-full ${booths.some(b=>dayBoothCrew(sh,di,b.id).length)?'btn-ghost':'btn-gold'}" style="margin-bottom:8px" onclick="openDayCrews('${sh.id}',${di})">👥 Who's in which booth today${dayHasOwnCrew(sh,di)?' ✓':''}</button>`;
+  h+=boothValueTallyHTML(sh,di);
   h+=booths.map(b=>boothDayCardHTML(sh,di,b)).join('');
   const tx=dayTransfers(sh.days[di]);
   if(tx.length)h+=`<div class="card" style="margin:0 0 8px;padding:10px;background:var(--card2);border-color:rgba(79,195,247,0.3)">

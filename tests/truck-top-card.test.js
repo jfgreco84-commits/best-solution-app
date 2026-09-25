@@ -75,4 +75,36 @@ chk('5b. the show card is there',/Cranberry/.test(st),true);
 chk('5c. with a truck line',/🚚 Truck<\/span> <span[^>]*>[^<]*C5-S: 250/.test(st),true);
 chk('5d. and a booths line',/🎪 Booths<\/span> <span[^>]*>[^<]*C5-S: 150/.test(st),true);
 
+R.section('6. Stock value by booth: cost, retail and profit, per booth and all together');
+{
+  const h2=boot(); const c2=h2.ctx;
+  c2.document.getElementById=ctx.document.getElementById;
+  c2.S.shows=[]; c2.S.transfers=[]; delete c2.S.cogsHistory; c2.S.costs={};
+  c2.S.inventory=cnt({'32oz':100,'16oz':150,'8oz':300,'2oz':400,'c5s':600,'c5l':200});
+  const dd=[];for(let i=0;i<3;i++)dd.push(c2._bsBlankDay(i+1,'Day '+(i+1)));
+  const cr={id:'cr2',name:'Cranberry',status:'planned',numDays:3,startDate:dayKey(0),location:'Warrens, WI',miles:0,
+    boothCost:0,boothPayments:[],dates:dd.map(d=>d.date),showExpenses:[],workers:[],repIds:[],
+    prices:{'32oz':30,'16oz':25,'8oz':20,'2oz':12.5,c5s:12.5,c5l:25},confirmed:true,lodging:0,packedInventory:null,days:dd};
+  c2.S.shows.push(cr); c2.boothsApply(cr,['Booth 1','Booth 2','Booth 3']);
+  c2.showPackModal('cr2'); c2.pkAll('cr2'); SK.forEach(k=>set('pk_'+k,c2.S.inventory[k])); c2.confirmPack('cr2');
+  const table=cnt({'32oz':24,'16oz':40,'8oz':72,'2oz':114,'c5s':174,'c5l':42});
+  c2.showBooths(cr).forEach(b=>c2.boothSetStock(cr,0,b.id,'morning',table));
+  const v=c2.stockValue(cr,0,c2.boothOnHand(cr,0,c2.showBooths(cr)[0].id));
+  const cost=24*c2.getCost('32oz')+40*c2.getCost('16oz')+72*c2.getCost('8oz')+114*c2.getCost('2oz')+174*c2.getCost('c5s')+42*c2.getCost('c5l');
+  chk('6a. one booth: 466 units',v.units,466);
+  chk('6b. one booth retail at Cranberry prices',v.retail,7810);
+  chk('6c. one booth cost at COGS',Math.round(v.cogs*100)/100,Math.round(cost*100)/100);
+  chk('6d. profit = retail − cost',Math.round(v.profit*100),Math.round((7810-cost)*100));
+  const t=c2.boothValueTallyHTML(cr,0);
+  chk('6e. tally lists every booth',['Booth 1','Booth 2','Booth 3'].every(n=>t.indexOf(n)>=0),true);
+  chk('6f. all booths retail $23,430.00',t.indexOf('$23,430.00')>=0,true);
+  chk('6g. has the truck row',/🚚 Truck/.test(t),true);
+  const truckRetail=c2.stockValue(cr,0,c2.showLedger(cr)[0].truck).retail;
+  chk('6h. whole show retail = booths + truck',t.indexOf(c2.fmt(23430+truckRetail))>=0,true);
+  const card=c2.boothDayCardHTML(cr,0,c2.showBooths(cr)[0]);
+  chk('6i. the booth card shows its own retail',card.indexOf('$7,810.00')>=0,true);
+  chk('6j. and its own cost',card.indexOf(c2.fmt(v.cogs))>=0,true);
+  chk('6k. day screen puts the tally above the booth cards',(()=>{const x=c2.dayBoothsHTML(cr,0);return x.indexOf('boothValueTally')>=0&&x.indexOf('boothValueTally')<x.indexOf('Booth 1 <span');})(),true);
+}
+
 R.done();
