@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v42';
+const APP_VERSION='v43';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -2453,6 +2453,35 @@ function truckCardHTML(sh,di){
     ${short?`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ The booths hold more than the show has. Recheck the booth counts, or bring it from the garage with 🔄 Transfer Stock.</div>`:''}
   </div>`;
 }
+// v43: the truck at the TOP of the show screen. The full truck card lives on
+// the day screen at the bottom; this is the at-a-glance "what is in the truck
+// right now" for a running booth show, as of the latest day with a count.
+function truckTopCardHTML(sh){
+  if(!sh||sh.status!=='active'||!truckMode(sh))return '';
+  if(!sh.packedInventory)return `<div class="card" style="margin-bottom:12px;border-color:var(--goldbd)"><div style="font-size:15px;font-weight:900">🚚 In the truck right now</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Nothing packed into this show yet. Tap 🔄 Transfer Stock and bring it from the 🏠 Garage to the 🚚 Truck.</div></div>`;
+  const n=ledgerNow(sh); if(!n)return '';
+  const d=(sh.days||[])[n.di]||{}, lbl=d.date||('Day '+(n.di+1));
+  const short=SKUS.some(s=>n.truck[s.key]<0);
+  const tot=skuSum(n.truck);
+  return `<div class="card" id="truckTop" style="margin-bottom:12px;border-color:${short?'var(--red)':'var(--goldbd)'}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="font-size:15px;font-weight:900">🚚 In the truck right now</div>
+      <div style="font-size:18px;font-weight:900;color:${short?'var(--red)':'var(--gold)'}">${tot} units</div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${_esc(lbl)}${n.hasM?'':' · no booth counted yet, so everything is still in the truck'}. At the show minus what is on the booth tables.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+      ${SKUS.map(s=>`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:6px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);font-weight:700">${s.short}</div>
+        <div style="font-size:20px;font-weight:900;color:${n.truck[s.key]<0?'var(--red)':'var(--gold)'}">${n.truck[s.key]}</div>
+        <div style="font-size:9px;color:var(--muted)">${n.table[s.key]} on booths</div></div>`).join('')}
+    </div>
+    ${short?`<div class="wb red" style="margin-top:8px;font-size:11px">⚠️ The booths hold more than the show has. Recheck the booth counts.</div>`:''}
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="btn btn-xs btn-ghost" style="flex:1" onclick="openTruckCount('${sh.id}',${n.di})">Count the truck</button>
+      <button class="btn btn-xs btn-ghost" style="flex:1" onclick="go('show','${sh.id}',${n.di})">Open ${_esc(lbl)} ›</button>
+    </div>
+  </div>`;
+}
 function openTruckCount(shId,di){
   const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
   const L=showLedger(sh); const r=L&&L[di]; if(!r){ toast('Pack the show first.'); return; }
@@ -3500,6 +3529,8 @@ function rStock(){
       return `<div class="card" style="margin-bottom:8px;border-color:rgba(79,195,247,0.3)">
         <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-weight:800;font-size:13px">🔴 ${sh.name}</span><span style="font-weight:900;color:var(--gold)">${tot} units</span></div>
         <div style="font-size:12px;color:var(--muted)">${SKUS.filter(s=>(o[s.key]||0)>0).map(s=>s.short+': '+o[s.key]).join(' · ')||'nothing on hand'}</div>
+        ${(truckMode(sh)&&sh.packedInventory&&ledgerNow(sh))?(()=>{const n=ledgerNow(sh);const tk=SKUS.filter(s=>n.truck[s.key]).map(s=>s.short+': '+n.truck[s.key]).join(' · ')||'empty';const bt=SKUS.filter(s=>n.table[s.key]).map(s=>s.short+': '+n.table[s.key]).join(' · ')||'nothing counted yet';
+          return `<div style="font-size:12px;margin-top:6px"><span style="color:var(--gold);font-weight:800">🚚 Truck</span> <span style="color:var(--muted)">${tk}</span></div><div style="font-size:12px;margin-top:2px"><span style="color:#7EB8F7;font-weight:800">🎪 Booths</span> <span style="color:var(--muted)">${bt}</span></div>`;})():''}
       </div>`;}).join('');
   })():''}
   ${SKUS.map(s=>{
@@ -5048,6 +5079,7 @@ function rShow(){
     const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
     return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
   </details>
+  ${_pd?'':truckTopCardHTML(sh)}
   ${_pd?'':teamScoreboardHTML(sh)}
   ${showPricesLineHTML(sh)}
   ${preShowCalcHTML(sh)}
@@ -5346,6 +5378,11 @@ function boothDayCardHTML(sh,di,b){
       <span>${haM?`<b style="color:var(--gold)">${onHandT}</b> units ${boothOnHandIsCounted(sh,di,b.id)?'counted on this table':'should be on this table'}`:'Not counted yet'}${movedIn||movedOut?` · <span style="color:#7EB8F7">${movedIn?'+'+movedIn+' in':''}${movedIn&&movedOut?' ':''}${movedOut?'−'+movedOut+' out':''}</span>`:''}</span>
       ${locked?'':`<button class="btn btn-xs btn-ghost" onclick="event.stopPropagation();openBoothTransfer('${sh.id}',${di},${bArg})">🔄 Move</button>`}
     </div>
+    ${haM?(()=>{const v=stockValue(sh,di,onHand);return `<div style="display:flex;gap:5px;margin:-3px 0 8px;font-size:11px">
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost</div><div style="font-weight:900;color:#ff9d9d">${fmt(v.cogs)}</div></div>
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail</div><div style="font-weight:900;color:var(--gold)">${fmt(v.retail)}</div></div>
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px;text-align:center"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:700">Profit</div><div style="font-weight:900;color:var(--green)">${fmt(v.profit)}</div></div>
+    </div>`;})():''}
     <div style="display:flex;gap:5px">
       ${col('🌅 Morning',{fg:'#7EB8F7',bd:haM?'var(--border)':'var(--gold)'},skuRows(en.morningCount||{},haM),mBtn)}
       ${col('🌙 Evening',{fg:'#B98AE6',bd:haE?'var(--border)':(haM?'var(--gold)':'var(--border)')},skuRows(en.eveningCount||{},haE),eBtn)}
@@ -5361,6 +5398,34 @@ function boothDayCardHTML(sh,di,b){
   if((haM&&haE||(truckMode(sh)&&haM))&&!locked)h+=`<button class="btn btn-xs btn-ghost btn-full" style="margin-top:7px" onclick="openAdjustModal('${sh.id}',${di},${bArg})">${truckMode(sh)?'🚚 Restock from truck / Damaged-Lost at ':'± Restock / Damaged-Lost at '}${_esc(b.name)}</button>`;
   return h+`</div>`;
 }
+// v43: what the stock is worth. Retail at THIS show's prices (Cranberry's
+// show-only prices included), cost at the COGS in effect that day.
+function stockValue(sh,di,units){
+  const u={}; SKUS.forEach(s=>u[s.key]=Math.max(0,parseInt((units||{})[s.key])||0));
+  const retail=calcRev(u,sh.prices||null), cogs=calcCOGSOn(u,showDayKey(sh,di),sh);
+  return {units:skuSum(u),retail,cogs,profit:retail-cogs};
+}
+// The tally: every booth's table, the truck, and the totals, in dollars.
+function boothValueTallyHTML(sh,di){
+  const booths=showBooths(sh); if(!booths.length)return '';
+  const rows=booths.map(b=>({name:b.name,v:stockValue(sh,di,boothOnHand(sh,di,b.id)),counted:!!((dayBoothRead(sh.days[di],b.id)||{}).morningCount)}));
+  const all={units:0,retail:0,cogs:0,profit:0}; rows.forEach(r=>['units','retail','cogs','profit'].forEach(k=>all[k]+=r.v[k]));
+  const L=truckMode(sh)?showLedger(sh):null, tr=L&&L[di]?stockValue(sh,di,L[di].truck):null;
+  const show=tr?{units:all.units+tr.units,retail:all.retail+tr.retail,cogs:all.cogs+tr.cogs,profit:all.profit+tr.profit}:null;
+  const td=(v,c)=>`<td style="text-align:right;padding:4px 3px;${c||''}">${v}</td>`;
+  const row=(label,v,st,note)=>`<tr style="border-top:1px solid var(--border);${st||''}"><td style="padding:4px 3px">${label}${note?`<div style="font-size:9px;color:var(--muted);font-weight:400">${note}</div>`:''}</td>${td(v.units)}${td(fmt(v.cogs),'color:#ff9d9d')}${td(fmt(v.retail),'color:var(--gold)')}${td(fmt(v.profit),'color:var(--green)')}</tr>`;
+  return `<div class="card" id="boothValueTally" style="margin:0 0 8px;padding:11px;background:var(--card2);border-color:var(--goldbd)">
+    <div style="font-size:15px;font-weight:900;margin-bottom:2px">💲 Stock value by booth</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">What is on each table right now. Cost = what you paid (COGS). Retail = sell price at this show. Profit = retail minus cost if it all sells.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px">Where</th><th style="text-align:right;padding:3px">Units</th><th style="text-align:right;padding:3px">Cost</th><th style="text-align:right;padding:3px">Retail</th><th style="text-align:right;padding:3px">Profit</th></tr>
+      ${rows.map(r=>row('🏬 '+_esc(r.name),r.v,'',r.counted?'':'not counted yet')).join('')}
+      ${row('All booths',all,'border-top:2px solid var(--border);font-weight:900')}
+      ${tr?row('🚚 Truck',tr,'',tr.units?'':'empty'):''}
+      ${show?row('Whole show',show,'border-top:2px solid var(--gold);font-weight:900;font-size:12px'):''}
+    </table>
+  </div>`;
+}
 function dayBoothsHTML(sh,di){
   const booths=showBooths(sh); if(!booths.length)return '';
   const waiting=boothsAwaitingEvening(sh,di);
@@ -5371,6 +5436,7 @@ function dayBoothsHTML(sh,di){
     <button class="btn btn-xs btn-ghost" onclick="openBoothsModal('${sh.id}')">✏️ Booths</button>
   </div>
   <button class="btn btn-sm btn-full ${booths.some(b=>dayBoothCrew(sh,di,b.id).length)?'btn-ghost':'btn-gold'}" style="margin-bottom:8px" onclick="openDayCrews('${sh.id}',${di})">👥 Who's in which booth today${dayHasOwnCrew(sh,di)?' ✓':''}</button>`;
+  h+=boothValueTallyHTML(sh,di);
   h+=booths.map(b=>boothDayCardHTML(sh,di,b)).join('');
   const tx=dayTransfers(sh.days[di]);
   if(tx.length)h+=`<div class="card" style="margin:0 0 8px;padding:10px;background:var(--card2);border-color:rgba(79,195,247,0.3)">
