@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v45';
+const APP_VERSION='v46';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -5135,6 +5135,18 @@ function printShowReport(shId){
 // ===================================================
 // SHOW DETAIL
 // ===================================================
+// v46: the show screen in tabs. Everything is still rendered (so every
+// modal, test and jump still finds it); only the chosen tab is shown.
+let showTab=null, showTabFor=null;
+const SHOW_TABS=[{k:'day',l:'📋 Today'},{k:'teams',l:'🏆 Teams'},{k:'money',l:'💵 Money'},{k:'stock',l:'📦 Stock'},{k:'info',l:'⚙️ Info'}];
+function showTabOf(sh){ if(showTabFor!==(sh&&sh.id)){ showTabFor=sh&&sh.id; showTab='day'; } return showTab||'day'; }
+function setShowTab(k){ showTab=k; document.querySelectorAll('#pg-show .stab-pane').forEach(el=>{ el.style.display=el.getAttribute('data-stab')===k?'block':'none'; });
+  document.querySelectorAll('#pg-show .stab').forEach(el=>{ el.classList.toggle('on',el.getAttribute('data-stab')===k); }); try{window.scrollTo(0,0);}catch(e){} }
+function showTabsBarHTML(sh){
+  const cur=showTabOf(sh);
+  const warn={stock:sh.status!=='planned'&&(invUnresolved(sh).length||invNegativeSold(sh).length)};
+  return `<div class="stabs" style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:0 0 12px">${SHOW_TABS.map(t=>{const [ic,...w]=t.l.split(' ');return `<button class="dtab stab ${t.k===cur?'on':''}" data-stab="${t.k}" onclick="setShowTab('${t.k}')" style="padding:6px 2px;border-radius:10px;text-align:center;line-height:1.2"><div style="font-size:16px">${warn[t.k]?'⚠️':ic}</div><div style="font-size:11px">${w.join(' ')}</div></button>`;}).join('')}</div>`;
+}
 function rShow(){
   if(!curShow)return;
   const sh=S.shows.find(s=>s.id===curShow);if(!sh){go('shows');return;}
@@ -5159,109 +5171,19 @@ function rShow(){
     const conf=showConflicts(sh);
     if(conf.length)h+=`<div class="wb" style="margin-bottom:10px;background:rgba(255,140,0,0.12);border:1px solid rgba(255,140,0,0.45);color:#ffc266;font-weight:700">🚨 Schedule Conflict: multiple shows on this date.<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">Overlaps with ${conf.map(c=>c.name+' ('+(c.dates?c.dates.join(' – '):c.startDate)+')').join(', ')}. Assign reps or choose which show to attend.</div></div>`;
     return h;})()}
-  <details class="clps"><summary>⏰ Show Hours & Call Times</summary>
-  ${(()=>{const dl=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
-    const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
-    return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
-  </details>
-  ${_pd?'':truckTopCardHTML(sh)}
-  ${_pd?'':teamScoreboardHTML(sh)}
-  ${showPricesLineHTML(sh)}
-  ${preShowCalcHTML(sh)}
-  <div class="card g2" style="margin-bottom:12px">
-    <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
-    <div><div class="sl">Profit</div><div class="sv ${t.profit>=0?'g':'r'}">${fmt(t.profit)}</div></div>
-    <div><div class="sl">COGS</div><div class="sv sm w">${fmt(t.cogs)}</div></div>
-    <div><div class="sl">Expenses</div><div class="sv sm w">${fmt(t.expenses)}</div></div>
-    <div><div class="sl">Tax Reserve</div><div class="sv sm r" style="font-size:14px">${fmt(t.taxRes)}</div></div>
-    <div><div class="sl">Keep</div><div class="sv sm g" style="font-size:14px">${fmt(Math.max(0,t.profit-t.taxRes))}</div></div>
-  </div>
-  ${_pd?'':breakEvenHTML(sh,{title:'what has to come through the drawer'})}
-  <div style="height:12px"></div>
-  ${showExpenseRowsHTML(sh)}
-  <div class="card" style="margin-bottom:12px;border-color:rgba(0,210,106,0.25)">
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">💵 REVENUE — POTENTIAL vs ACTUAL</div>
-    <div class="sr"><span class="srl">Potential (units sold × full price)</span><span class="srv gold">${fmt(showPotentialRev(sh))}</span></div>
-    <div class="sr"><span class="srl">Actual Collected (cash + card + apps)</span><span class="srv green">${fmt(showActualRev(sh))}</span></div>
-    <div class="sr"><span class="srl">Discounts / Freebies / Promos</span><span class="srv red">-${fmt(showDiscountTotal(sh))}</span></div>
-    <div class="sr" style="border-top:1px solid var(--border);margin-top:4px"><span class="srl b">Variance (Potential − Actual)</span><span class="srv b">${fmt(showPotentialRev(sh)-showActualRev(sh))}</span></div>
-    <button class="btn btn-xs btn-ghost" style="width:100%;margin-top:8px" onclick="openDiscountModal('${sh.id}')">+ Log Discount / Freebie / Promo</button>
-    ${(sh.discounts||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">${[...(sh.discounts||[])].slice().reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0"><span style="color:var(--muted);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.note||'(no note)'} <span style="opacity:.6">${x.date||''}</span></span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--red);font-weight:700">-${fmt(x.amount)}</span><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delDiscount('${sh.id}','${x.id}')">✕</span></span></div>`).join('')}</div>`:''}
-  </div>
-  ${boothScoreboardHTML(sh)}
   ${_pd?`<div class="wb gold" style="margin-bottom:12px">🚫 <strong>Passed / Not Doing.</strong> ${_esc(passedReason(sh)||'No reason recorded')}${passedRevisit(sh)?`<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}${sh.passedAt?`<div style="font-weight:400;font-size:10px;margin-top:3px;color:var(--muted)">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}<div style="font-weight:400;font-size:11px;margin-top:5px;color:var(--muted)">Everything below is preserved history. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div></div>`:''}
-  ${actBtn}
-  ${passBtn}
-  ${_pd?'':showStockCardHTML(sh)}
-  ${_pd?'':showSellerCardHTML(sh)}
+  ${showTabsBarHTML(sh)}
+  <div class="stab-pane" data-stab="day" style="display:${showTabOf(sh)==='day'?'block':'none'}">
+  ${_pd?'':truckTopCardHTML(sh)}
   ${(!_pd&&(sh.status==='active'||sh.status==='planned'))?`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal('${sh.id}')">🔄 Transfer Stock · ${sh.status==='active'?'bring more from the garage':'to/from another show'}</button>`:''}
-  <div style="display:flex;gap:8px;margin-bottom:12px">
-    <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
-    <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
-  </div>
   ${sh.status!=='planned'?`<div class="dtabs">${dtabs}</div>${rDay(sh,curDay)}`:''}
-  <details class="clps" ${sh.status!=='planned'&&(invUnresolved(sh).length||invNegativeSold(sh).length)?'open':''}><summary>📦 Inventory Reconciliation ${sh.status!=='planned'?invStatusMeta(invStatus(sh)).i:''}</summary>
-  ${sh.status!=='planned'?(()=>{
-    const st=invStatus(sh),meta=invStatusMeta(st),carry=invCarryIssues(sh),neg=invNegativeSold(sh),unres=invUnresolved(sh);
-    let h=`<div class="card" style="margin-top:12px;border-color:${meta.c}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">📦 Daily Inventory Reconciliation</div>
-        <span style="font-size:11px;font-weight:800;color:${meta.c}">${meta.i} ${meta.l}</span>
-      </div>`;
-    if(unres.length||neg.length){ h+=`<div class="wb" style="background:var(--redbg);border:1px solid var(--redbd);color:#ffb3b3;margin-bottom:8px"><strong>⚠️ Inventory mismatch detected.</strong> Review before you trust these numbers.</div>`; }
-    h+=(sh.days||[]).map((d,i)=>{
-      const hasM=!!d.morningCount,hasE=!!d.eveningCount;
-      const openT=hasM?SKUS.reduce((t,s)=>t+(d.morningCount[s.key]||0),0):null;
-      const endT=hasE?SKUS.reduce((t,s)=>t+(d.eveningCount[s.key]||0),0):null;
-      const _sd=(hasM&&hasE)?daySold(d):null;
-      const soldT=_sd?SKUS.reduce((t,s)=>t+(_sd[s.key]||0),0):null;
-      const restockT=SKUS.reduce((t,s)=>t+((d.restock&&d.restock[s.key])||0),0);
-      const lostT=SKUS.reduce((t,s)=>t+((d.lost&&d.lost[s.key])||0),0);
-      const dayCarry=carry.filter(m=>m.di===i),dayNeg=neg.filter(m=>m.di===i);
-      const rowBad=(dayCarry.length&&!d.carryReason)||dayNeg.length;
-      const tag=rowBad?'<span style="color:var(--red)">🔴 mismatch</span>':(dayCarry.length?'<span style="color:var(--gold)">🟡 overridden</span>':((hasM&&hasE)?'<span style="color:var(--green)">🟢 ok</span>':'<span style="color:var(--muted)">—</span>'));
-      let r=`<div style="padding:6px 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700"><span>${d.date||('Day '+(i+1))}${d.locked?' 🔒':''}</span>${tag}</div>
-        <div style="font-size:11px;color:var(--muted)">Opening ${openT==null?'—':openT}${dayGarageInTotal(d)?' <span style="color:var(--gold)">(incl. 🏠 '+dayGarageInTotal(d)+' from garage)</span>':''}${restockT?' + Restock '+restockT:''} − Sold ${soldT==null?'—':soldT}${lostT?' − Lost/Damaged '+lostT:''} = Ending ${endT==null?'—':endT}${lostT?` <span style="opacity:.7">(lost units still count as COGS)</span>`:''}${d.carryReason?` · note: ${(''+d.carryReason).replace(/</g,'&lt;')}`:''}</div>`;
-      if(dayCarry.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Opening ≠ expected: ${dayCarry.map(m=>m.short+' '+m.morn+' (expected '+m.expected+(m.brought?' = '+m.prevEve+' last night + 🏠 '+m.brought:'')+')').join(', ')}</div>
-        <div style="display:flex;gap:6px;margin-top:4px"><button class="btn btn-xs btn-ghost" onclick="fixCarryFromPrev('${sh.id}',${i})">↩︎ Reset to last night</button><button class="btn btn-xs btn-ghost" onclick="reconcileCarry('${sh.id}',${i})">✓ Explain / keep</button></div>`; }
-      if(dayNeg.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Ending &gt; opening (impossible sale — restock or fix): ${dayNeg.map(m=>m.short+' '+m.morn+'→'+m.eve).join(', ')}</div>`; }
-      if(hasM&&hasE){ r+=`<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${!d.locked?(hasBooths(sh)?showBooths(sh).map(b=>`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i},'${b.id}')">± ${_esc(b.name)}</button>`).join(''):`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i})">± Restock / Damaged-Lost</button>`):''}${d.locked?`<button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${i})">🔓 Unlock day</button>`:`<button class="btn btn-xs btn-ghost" onclick="lockDay('${sh.id}',${i})">🔒 Finalize / lock day</button>`}</div>`; }
-      return r+`</div>`;
-    }).join('');
-    if((sh.invLog||[]).length){ h+=`<details style="margin-top:8px"><summary style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;cursor:pointer">🧾 Change log (${sh.invLog.length})</summary><div style="margin-top:6px">${sh.invLog.slice(-15).reverse().map(e=>`<div style="font-size:10px;color:var(--muted);padding:2px 0">${(e.ts||'').replace('T',' ').slice(0,16)} · ${e.type} ${e.date||''} — ${((e.changes||[]).join(', ')).replace(/</g,'&lt;')}</div>`).join('')}</div></details>`; }
-    return h+`</div>`;
-  })():''}
-  </details>
-  <details class="clps"><summary>📋 Show Details — booth · miles · gas · tax</summary>
-  <div class="card" style="margin-top:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">SHOW DETAILS</div>
-      <button class="btn btn-xs" style="background:rgba(255,215,0,0.15);border:1px solid var(--goldbd);color:var(--gold)" onclick="showEditCosts('${sh.id}')">✏️ Edit Show</button>
-    </div>
-    <div class="sr"><span class="srl">Booth Cost</span><span class="srv">${fmt(sh.boothCost||0)}</span></div>
-    <div class="sr"><span class="srl">One-Way Miles</span><span class="srv">${sh.miles||0} mi</span></div>
-    <div class="sr"><span class="srl">Round Trips</span><span class="srv">${showRoundTrips(sh)}${(sh.roundTrips!=null&&sh.roundTrips!=='')?'':' (auto: 1/day)'}</span></div>
-    <div class="sr"><span class="srl">Total Miles Driven</span><span class="srv">${fmtN(showMiles(sh))} mi</span></div>
-    <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt(showMiles(sh)*S.settings.irsRate)}</span></div>
-    <div class="sr"><span class="srl">Gas Cost${(sh.gasOverride!=null&&sh.gasOverride!=='')?' (manual)':' (est.)'}</span><span class="srv">${fmt(showGas(sh))}</span></div>
-    <div class="sr"><span class="srl">Lodging / Hotel</span><span class="srv">${fmt(sh.lodging||0)}</span></div>
-    ${t.cardFees>0?`<div class="sr"><span class="srl">Card Fees (${((S.settings.sqFee||0)*100).toFixed(1)}% of card)</span><span class="srv red">-${fmt(t.cardFees)}</span></div>`:''}
-    ${t.salesTax>0?`<div class="sr"><span class="srl">Sales Tax collected (owed to state)</span><span class="srv red">-${fmt(t.salesTax)}</span></div>`:''}
-    ${t.gasAuto>0?`<div class="sr"><span class="srl">Gas (auto estimate, in profit)</span><span class="srv red">-${fmt(t.gasAuto)}</span></div>`:''}
-    ${t.booth>(sh.boothCost||0)?`<div class="sr"><span class="srl">Booth overpaid vs sticker</span><span class="srv red">-${fmt(t.booth-(sh.boothCost||0))}</span></div>`:''}
-    <div class="sr"><span class="srl">Tax Rate</span><span class="srv">${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?'':' (global)'}</span></div>
+  <div style="height:8px"></div>
+  ${actBtn}
   </div>
-  </details>
-  <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700">💸 OTHER EXPENSES</div>
-      <button class="btn btn-xs" style="background:rgba(255,165,0,0.15);border:1px solid rgba(255,165,0,0.4);color:#FFA500" onclick="showShowExpModal('${sh.id}')">+ Add</button>
-    </div>
-    ${(sh.showExpenses||[]).length===0?`<div style="font-size:12px;color:var(--muted)">No expenses logged yet. Tap + Add to log fuel, hotel, flights, supplies, etc.</div>`:`
-    ${(sh.showExpenses||[]).map(e=>{const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};return`<div class="sr"><span class="srl">${cat.icon} ${cat.label}${e.desc?' — '+e.desc:''}</span><span class="srv red">-${fmt(e.amount)}</span></div>`;}).join('')}
-    <div class="sr" style="border-top:1px solid rgba(255,165,0,0.2);margin-top:4px"><span class="srl b">Total Other Expenses</span><span class="srv red lg">-${fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0))}</span></div>`}
-  </div>
+  <div class="stab-pane" data-stab="teams" style="display:${showTabOf(sh)==='teams'?'block':'none'}">
+  ${_pd?'':teamScoreboardHTML(sh)}
+  ${boothScoreboardHTML(sh)}
+  ${_pd?'':showSellerCardHTML(sh)}
   ${(()=>{
     const allReps=(S.reps||[]).filter(r=>r.active);
     const assignedIds=sh.repIds||[];
@@ -5329,6 +5251,75 @@ function rShow(){
       })()}
     </div>`;
   })()}
+  </div>
+  <div class="stab-pane" data-stab="money" style="display:${showTabOf(sh)==='money'?'block':'none'}">
+  <div class="card g2" style="margin-bottom:12px">
+    <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
+    <div><div class="sl">Profit</div><div class="sv ${t.profit>=0?'g':'r'}">${fmt(t.profit)}</div></div>
+    <div><div class="sl">COGS</div><div class="sv sm w">${fmt(t.cogs)}</div></div>
+    <div><div class="sl">Expenses</div><div class="sv sm w">${fmt(t.expenses)}</div></div>
+    <div><div class="sl">Tax Reserve</div><div class="sv sm r" style="font-size:14px">${fmt(t.taxRes)}</div></div>
+    <div><div class="sl">Keep</div><div class="sv sm g" style="font-size:14px">${fmt(Math.max(0,t.profit-t.taxRes))}</div></div>
+  </div>
+  ${_pd?'':breakEvenHTML(sh,{title:'what has to come through the drawer'})}
+  <div style="height:12px"></div>
+  ${showExpenseRowsHTML(sh)}
+  <div class="card" style="margin-top:10px;border-color:rgba(255,165,0,0.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:#FFA500;text-transform:uppercase;font-weight:700">💸 OTHER EXPENSES</div>
+      <button class="btn btn-xs" style="background:rgba(255,165,0,0.15);border:1px solid rgba(255,165,0,0.4);color:#FFA500" onclick="showShowExpModal('${sh.id}')">+ Add</button>
+    </div>
+    ${(sh.showExpenses||[]).length===0?`<div style="font-size:12px;color:var(--muted)">No expenses logged yet. Tap + Add to log fuel, hotel, flights, supplies, etc.</div>`:`
+    ${(sh.showExpenses||[]).map(e=>{const cat=SHOW_EXP_CATS.find(c=>c.key===e.cat)||{icon:'💸',label:'Other'};return`<div class="sr"><span class="srl">${cat.icon} ${cat.label}${e.desc?' — '+e.desc:''}</span><span class="srv red">-${fmt(e.amount)}</span></div>`;}).join('')}
+    <div class="sr" style="border-top:1px solid rgba(255,165,0,0.2);margin-top:4px"><span class="srl b">Total Other Expenses</span><span class="srv red lg">-${fmt((sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0))}</span></div>`}
+  </div>
+  <div class="card" style="margin-bottom:12px;border-color:rgba(0,210,106,0.25)">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">💵 REVENUE — POTENTIAL vs ACTUAL</div>
+    <div class="sr"><span class="srl">Potential (units sold × full price)</span><span class="srv gold">${fmt(showPotentialRev(sh))}</span></div>
+    <div class="sr"><span class="srl">Actual Collected (cash + card + apps)</span><span class="srv green">${fmt(showActualRev(sh))}</span></div>
+    <div class="sr"><span class="srl">Discounts / Freebies / Promos</span><span class="srv red">-${fmt(showDiscountTotal(sh))}</span></div>
+    <div class="sr" style="border-top:1px solid var(--border);margin-top:4px"><span class="srl b">Variance (Potential − Actual)</span><span class="srv b">${fmt(showPotentialRev(sh)-showActualRev(sh))}</span></div>
+    <button class="btn btn-xs btn-ghost" style="width:100%;margin-top:8px" onclick="openDiscountModal('${sh.id}')">+ Log Discount / Freebie / Promo</button>
+    ${(sh.discounts||[]).length?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">${[...(sh.discounts||[])].slice().reverse().map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0"><span style="color:var(--muted);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.note||'(no note)'} <span style="opacity:.6">${x.date||''}</span></span><span style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span style="color:var(--red);font-weight:700">-${fmt(x.amount)}</span><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delDiscount('${sh.id}','${x.id}')">✕</span></span></div>`).join('')}</div>`:''}
+  </div>
+  ${showPricesLineHTML(sh)}
+  </div>
+  <div class="stab-pane" data-stab="stock" style="display:${showTabOf(sh)==='stock'?'block':'none'}">
+  ${_pd?'':showStockCardHTML(sh)}
+  ${preShowCalcHTML(sh)}
+  <details class="clps" ${sh.status!=='planned'&&(invUnresolved(sh).length||invNegativeSold(sh).length)?'open':''}><summary>📦 Inventory Reconciliation ${sh.status!=='planned'?invStatusMeta(invStatus(sh)).i:''}</summary>
+  ${sh.status!=='planned'?(()=>{
+    const st=invStatus(sh),meta=invStatusMeta(st),carry=invCarryIssues(sh),neg=invNegativeSold(sh),unres=invUnresolved(sh);
+    let h=`<div class="card" style="margin-top:12px;border-color:${meta.c}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">📦 Daily Inventory Reconciliation</div>
+        <span style="font-size:11px;font-weight:800;color:${meta.c}">${meta.i} ${meta.l}</span>
+      </div>`;
+    if(unres.length||neg.length){ h+=`<div class="wb" style="background:var(--redbg);border:1px solid var(--redbd);color:#ffb3b3;margin-bottom:8px"><strong>⚠️ Inventory mismatch detected.</strong> Review before you trust these numbers.</div>`; }
+    h+=(sh.days||[]).map((d,i)=>{
+      const hasM=!!d.morningCount,hasE=!!d.eveningCount;
+      const openT=hasM?SKUS.reduce((t,s)=>t+(d.morningCount[s.key]||0),0):null;
+      const endT=hasE?SKUS.reduce((t,s)=>t+(d.eveningCount[s.key]||0),0):null;
+      const _sd=(hasM&&hasE)?daySold(d):null;
+      const soldT=_sd?SKUS.reduce((t,s)=>t+(_sd[s.key]||0),0):null;
+      const restockT=SKUS.reduce((t,s)=>t+((d.restock&&d.restock[s.key])||0),0);
+      const lostT=SKUS.reduce((t,s)=>t+((d.lost&&d.lost[s.key])||0),0);
+      const dayCarry=carry.filter(m=>m.di===i),dayNeg=neg.filter(m=>m.di===i);
+      const rowBad=(dayCarry.length&&!d.carryReason)||dayNeg.length;
+      const tag=rowBad?'<span style="color:var(--red)">🔴 mismatch</span>':(dayCarry.length?'<span style="color:var(--gold)">🟡 overridden</span>':((hasM&&hasE)?'<span style="color:var(--green)">🟢 ok</span>':'<span style="color:var(--muted)">—</span>'));
+      let r=`<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700"><span>${d.date||('Day '+(i+1))}${d.locked?' 🔒':''}</span>${tag}</div>
+        <div style="font-size:11px;color:var(--muted)">Opening ${openT==null?'—':openT}${dayGarageInTotal(d)?' <span style="color:var(--gold)">(incl. 🏠 '+dayGarageInTotal(d)+' from garage)</span>':''}${restockT?' + Restock '+restockT:''} − Sold ${soldT==null?'—':soldT}${lostT?' − Lost/Damaged '+lostT:''} = Ending ${endT==null?'—':endT}${lostT?` <span style="opacity:.7">(lost units still count as COGS)</span>`:''}${d.carryReason?` · note: ${(''+d.carryReason).replace(/</g,'&lt;')}`:''}</div>`;
+      if(dayCarry.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Opening ≠ expected: ${dayCarry.map(m=>m.short+' '+m.morn+' (expected '+m.expected+(m.brought?' = '+m.prevEve+' last night + 🏠 '+m.brought:'')+')').join(', ')}</div>
+        <div style="display:flex;gap:6px;margin-top:4px"><button class="btn btn-xs btn-ghost" onclick="fixCarryFromPrev('${sh.id}',${i})">↩︎ Reset to last night</button><button class="btn btn-xs btn-ghost" onclick="reconcileCarry('${sh.id}',${i})">✓ Explain / keep</button></div>`; }
+      if(dayNeg.length){ r+=`<div style="font-size:11px;color:var(--red);margin-top:2px">Ending &gt; opening (impossible sale — restock or fix): ${dayNeg.map(m=>m.short+' '+m.morn+'→'+m.eve).join(', ')}</div>`; }
+      if(hasM&&hasE){ r+=`<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${!d.locked?(hasBooths(sh)?showBooths(sh).map(b=>`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i},'${b.id}')">± ${_esc(b.name)}</button>`).join(''):`<button class="btn btn-xs btn-ghost" onclick="openAdjustModal('${sh.id}',${i})">± Restock / Damaged-Lost</button>`):''}${d.locked?`<button class="btn btn-xs btn-ghost" onclick="unlockDay('${sh.id}',${i})">🔓 Unlock day</button>`:`<button class="btn btn-xs btn-ghost" onclick="lockDay('${sh.id}',${i})">🔒 Finalize / lock day</button>`}</div>`; }
+      return r+`</div>`;
+    }).join('');
+    if((sh.invLog||[]).length){ h+=`<details style="margin-top:8px"><summary style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;cursor:pointer">🧾 Change log (${sh.invLog.length})</summary><div style="margin-top:6px">${sh.invLog.slice(-15).reverse().map(e=>`<div style="font-size:10px;color:var(--muted);padding:2px 0">${(e.ts||'').replace('T',' ').slice(0,16)} · ${e.type} ${e.date||''} — ${((e.changes||[]).join(', ')).replace(/</g,'&lt;')}</div>`).join('')}</div></details>`; }
+    return h+`</div>`;
+  })():''}
+  </details>
   <details class="clps"><summary>🧴 Supplies Used ${fmt(showSupplyCost(sh))}</summary>
   ${(()=>{
     const auto=showAutoSupplyUnits(sh); const sc=showSupplyCost(sh);
@@ -5350,7 +5341,40 @@ function rShow(){
     </div>`;
   })()}
   </details>
+  </div>
+  <div class="stab-pane" data-stab="info" style="display:${showTabOf(sh)==='info'?'block':'none'}">
+  <details class="clps"><summary>⏰ Show Hours & Call Times</summary>
+  ${(()=>{const dl=(sh.dates&&sh.dates.length)?sh.dates:Array.from({length:sh.numDays||1},(_,i)=>'Day '+(i+1));
+    const rows=dl.map((lbl,i)=>{const ct=dayCallClose(sh,i);return `<div class="sr"><span class="srl">${lbl}</span><span class="srv">${ct.open} – ${ct.close} <span style="color:var(--muted);font-weight:400;font-size:11px">· call ${ct.call}</span></span></div>`;}).join('');
+    return `<div class="card" style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">⏰ Actual Show Hours · call/setup = 1 hr before open${sh.hoursVerified?' · ✓ verified':sh.hoursNeedConfirm?' · ⚠️ unverified':''}</div>${rows}<div style="font-size:10px;color:var(--muted);margin-top:6px">Total work hours (incl. 1 hr setup/day): <b>${fmtN(showWorkHoursTotal(sh))}h</b>. Edit times in ✏️ Edit Show.</div></div>`;})()}
+  </details>
+  <details class="clps"><summary>📋 Show Details — booth · miles · gas · tax</summary>
+  <div class="card" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">SHOW DETAILS</div>
+      <button class="btn btn-xs" style="background:rgba(255,215,0,0.15);border:1px solid var(--goldbd);color:var(--gold)" onclick="showEditCosts('${sh.id}')">✏️ Edit Show</button>
+    </div>
+    <div class="sr"><span class="srl">Booth Cost</span><span class="srv">${fmt(sh.boothCost||0)}</span></div>
+    <div class="sr"><span class="srl">One-Way Miles</span><span class="srv">${sh.miles||0} mi</span></div>
+    <div class="sr"><span class="srl">Round Trips</span><span class="srv">${showRoundTrips(sh)}${(sh.roundTrips!=null&&sh.roundTrips!=='')?'':' (auto: 1/day)'}</span></div>
+    <div class="sr"><span class="srl">Total Miles Driven</span><span class="srv">${fmtN(showMiles(sh))} mi</span></div>
+    <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt(showMiles(sh)*S.settings.irsRate)}</span></div>
+    <div class="sr"><span class="srl">Gas Cost${(sh.gasOverride!=null&&sh.gasOverride!=='')?' (manual)':' (est.)'}</span><span class="srv">${fmt(showGas(sh))}</span></div>
+    <div class="sr"><span class="srl">Lodging / Hotel</span><span class="srv">${fmt(sh.lodging||0)}</span></div>
+    ${t.cardFees>0?`<div class="sr"><span class="srl">Card Fees (${((S.settings.sqFee||0)*100).toFixed(1)}% of card)</span><span class="srv red">-${fmt(t.cardFees)}</span></div>`:''}
+    ${t.salesTax>0?`<div class="sr"><span class="srl">Sales Tax collected (owed to state)</span><span class="srv red">-${fmt(t.salesTax)}</span></div>`:''}
+    ${t.gasAuto>0?`<div class="sr"><span class="srl">Gas (auto estimate, in profit)</span><span class="srv red">-${fmt(t.gasAuto)}</span></div>`:''}
+    ${t.booth>(sh.boothCost||0)?`<div class="sr"><span class="srl">Booth overpaid vs sticker</span><span class="srv red">-${fmt(t.booth-(sh.boothCost||0))}</span></div>`:''}
+    <div class="sr"><span class="srl">Tax Rate</span><span class="srv">${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?'':' (global)'}</span></div>
+  </div>
+  </details>
   ${sh.notes?`<div class="card" style="margin-top:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Show Notes</div><div style="font-size:13px;white-space:pre-wrap">${(sh.notes||'').replace(/</g,'&lt;')}</div></div>`:''}
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportShowCSV('${sh.id}')">📄 Export CSV</button>
+    <button class="btn btn-ghost btn-sm" style="flex:1" onclick="printShowReport('${sh.id}')">🖨️ Print / PDF</button>
+  </div>
+  ${passBtn}
+  </div>
   <div style="height:10px"></div>`;
 }
 
