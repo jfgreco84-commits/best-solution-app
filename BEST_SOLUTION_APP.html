@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v43';
+const APP_VERSION='v44';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -2333,6 +2333,41 @@ function saveTruckCount(shId,di,map){
     changes:[SKUS.map(s=>s.short+' '+c[s.key]+(res&&res.diff[s.key]?' ('+(res.diff[s.key]>0?'+':'')+res.diff[s.key]+' vs expected)':'')).join(', ')],by:'owner'});
   return {ok:true,res};
 }
+// v44: the truck count is right, the show's packed number was wrong (boxes
+// miscounted at packing). Move the show's packed total by exactly the
+// difference so the truck the app expects IS the truck that was counted.
+// The garage is not touched: what was packed already left it, the number
+// written down for it was just wrong. Logged on the show and in the audit.
+function fixPackedFromTruckCount(shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return {ok:false,reason:'No such show.'};
+  if(!sh.packedInventory)return {ok:false,reason:'Pack the show first.'};
+  const tc=truckCountDiff(sh,di); if(!tc)return {ok:false,reason:'Count the truck first.'};
+  if(!tc.any)return {ok:false,reason:'The truck already matches.'};
+  const d=sh.days[di], ch={};
+  SKUS.forEach(s=>{ const v=tc.diff[s.key]||0; if(!v)return;
+    const before=parseInt(sh.packedInventory[s.key])||0;
+    sh.packedInventory[s.key]=Math.max(0,before+v); ch[s.key]={before,after:sh.packedInventory[s.key],diff:v}; });
+  const ts=new Date().toISOString();
+  const txt=SKUS.filter(s=>ch[s.key]).map(s=>s.short+' '+ch[s.key].before+'→'+ch[s.key].after+' ('+(ch[s.key].diff>0?'+':'')+ch[s.key].diff+')').join(', ');
+  if(!Array.isArray(sh.packFixes))sh.packFixes=[];
+  sh.packFixes.push({ts,di,date:d.date,changes:ch});
+  invLogPush(sh,{ts,di,date:d.date,type:'🚚 packed count fixed from truck count',changes:[txt],by:'owner'});
+  auditLogPush({ts,showId:sh.id,show:sh.name,type:'packFix',msg:'Packed count fixed from the truck count: '+txt});
+  return {ok:true,changes:ch,txt};
+}
+function confirmFixPacked(shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  const tc=truckCountDiff(sh,di); if(!tc||!tc.any){ toast('The truck already matches.'); return; }
+  mOpen(`<div class="mh"><div class="mt">✅ Fix the show to my truck count</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Use this when the boxes were counted wrong at packing. The show's packed total moves by the difference so the app's truck equals your count. The garage is not touched.</div>
+  <div class="wb gold" style="font-size:11px;margin-bottom:10px">⚠️ First make sure every booth is counted for this day and anything carried from the truck to a booth is entered as 🚚 Restock. Otherwise this hides a sale.</div>
+  ${SKUS.filter(s=>tc.diff[s.key]).map(s=>`<div class="sr"><span class="srl">${s.short}: app said ${tc.expected[s.key]}, you counted ${tc.counted[s.key]}</span><span class="srv" style="color:${tc.diff[s.key]>0?'var(--green)':'var(--red)'}">${tc.diff[s.key]>0?'+':''}${tc.diff[s.key]}</span></div>`).join('')}
+  <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="applyFixPacked('${shId}',${di})">Fix it</button>`);
+}
+function applyFixPacked(shId,di){
+  const r=fixPackedFromTruckCount(shId,di); if(!r.ok){ toast('⚠️ '+r.reason); return; }
+  mClose(); saveS(); toast('🚚 Show fixed: '+r.txt,5000);
+}
 // ---- the audit ----------------------------------------------------------
 function auditSkip(sh){
   if(!sh)return true;
@@ -2451,6 +2486,7 @@ function truckCardHTML(sh,di){
     </table>
     ${di>0&&SKUS.some(s=>pulls[s.key])?`<div style="font-size:11px;color:#7EB8F7;margin-top:6px">Today vs last night: ${SKUS.filter(s=>pulls[s.key]).map(s=>s.short+' '+(pulls[s.key]>0?'+'+pulls[s.key]+' off the truck':(-pulls[s.key])+' back in the truck')).join(' · ')}</div>`:''}
     ${short?`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ The booths hold more than the show has. Recheck the booth counts, or bring it from the garage with 🔄 Transfer Stock.</div>`:''}
+    ${tc&&tc.any?`<button class="btn btn-sm btn-gold btn-full" style="margin-top:8px" onclick="confirmFixPacked('${sh.id}',${di})">✅ My truck count is right. Fix the show</button>`:''}
   </div>`;
 }
 // v43: the truck at the TOP of the show screen. The full truck card lives on
@@ -2476,6 +2512,7 @@ function truckTopCardHTML(sh){
         <div style="font-size:9px;color:var(--muted)">${n.table[s.key]} on booths</div></div>`).join('')}
     </div>
     ${short?`<div class="wb red" style="margin-top:8px;font-size:11px">⚠️ The booths hold more than the show has. Recheck the booth counts.</div>`:''}
+    ${(()=>{const tc=truckCountDiff(sh,n.di);return tc&&tc.any?`<div class="wb gold" style="margin-top:8px;font-size:11px">🚚 Your truck count is off: ${SKUS.filter(s=>tc.diff[s.key]).map(s=>s.short+' '+(tc.diff[s.key]>0?'+':'')+tc.diff[s.key]).join(' · ')}</div><button class="btn btn-sm btn-gold btn-full" style="margin-top:6px" onclick="confirmFixPacked('${sh.id}',${n.di})">✅ My truck count is right. Fix the show</button>`:'';})()}
     <div style="display:flex;gap:6px;margin-top:8px">
       <button class="btn btn-xs btn-ghost" style="flex:1" onclick="openTruckCount('${sh.id}',${n.di})">Count the truck</button>
       <button class="btn btn-xs btn-ghost" style="flex:1" onclick="go('show','${sh.id}',${n.di})">Open ${_esc(lbl)} ›</button>
