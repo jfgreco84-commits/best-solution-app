@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v44';
+const APP_VERSION='v45';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -960,6 +960,54 @@ function applyOneTimeUpdates(d){
       a.log.push({ts:new Date().toISOString(),msg:'Batman borrow Sep 24 added to the garage: C5L +34 · 2oz +80 · 8oz +48'});
       d._applied['batman_to_garage_20260924']=true;
     }
+  }
+
+  // v45: Cranberry day 1 close, done for Froggy (Sep 25 night). Boxes were
+  // miscounted at packing. He hand-counted every booth and the truck. This
+  // enters each booth's ending count, logs anything a booth ended with above
+  // what it had as a restock off the truck, records the truck count, and
+  // moves the packed total by the difference (same as v44's Fix button).
+  // Runs once, only on day 1 (Sep 25) of the 2026 show, only when all three
+  // booths opened, the day is not finalized, and the count still applies.
+  if(!d._applied['cranberry_day1_close_v45']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25')&&sh.status==='active');
+      const day=cran&&cran.days&&cran.days[0];
+      const bs=cran?showBooths(cran):[];
+      const byName=n=>bs.find(b=>String(b.name||'').trim().toLowerCase()==='booth '+n);
+      const B={1:byName(1),2:byName(2),3:byName(3)};
+      const ok=cran&&day&&!day.locked&&cran.packedInventory&&B[1]&&B[2]&&B[3]&&[1,2,3].every(n=>{const e=dayBoothRead(day,B[n].id);return e&&e.morningCount;});
+      if(ok){
+        const EVE={
+          1:{'32oz':22,'16oz':35,'8oz':59,'2oz':72,c5s:132,c5l:23},
+          2:{'32oz':21,'16oz':37,'8oz':76,'2oz':9, c5s:130,c5l:36},
+          3:{'32oz':16,'16oz':36,'8oz':49,'2oz':90,c5s:148,c5l:16}};
+        const TRUCK={'32oz':0,'16oz':0,'8oz':72,'2oz':0,c5s:140,c5l:124};
+        const ts=new Date().toISOString(), notes=[];
+        [1,2,3].forEach(n=>{
+          const id=B[n].id, en=dayBoothWrite(day,id), ti=boothTransferIn(day,id), to=boothTransferOut(day,id), add={};
+          SKUS.forEach(s=>{
+            const had=(parseInt(en.morningCount[s.key])||0)+((en.restock||{})[s.key]||0)+(ti[s.key]||0)-(to[s.key]||0)-((en.lost||{})[s.key]||0);
+            const over=EVE[n][s.key]-had; if(over>0)add[s.key]=over;
+          });
+          if(Object.keys(add).length){ en.restock=en.restock||{}; Object.keys(add).forEach(k=>en.restock[k]=(parseInt(en.restock[k])||0)+add[k]);
+            notes.push(B[n].name+' restock off the truck: '+Object.keys(add).map(k=>(SKUS.find(x=>x.key===k)||{}).short+' +'+add[k]).join(', ')); }
+          boothSetStock(cran,0,id,'evening',EVE[n]);
+        });
+        day.truckCount={counts:Object.assign({},TRUCK),ts};
+        const L=showLedger(cran), ch=[];
+        SKUS.forEach(s=>{ const diff=TRUCK[s.key]-(L[0].truck[s.key]||0); if(!diff)return;
+          const before=parseInt(cran.packedInventory[s.key])||0; cran.packedInventory[s.key]=Math.max(0,before+diff);
+          ch.push(s.short+' '+before+'→'+cran.packedInventory[s.key]+' ('+(diff>0?'+':'')+diff+')'); });
+        const txt=ch.join(', ')||'no change';
+        if(!Array.isArray(cran.packFixes))cran.packFixes=[];
+        cran.packFixes.push({ts,di:0,date:day.date,note:'v45 day 1 close'});
+        invLogPush(cran,{ts,di:0,date:day.date,type:'🚚 day 1 close + packed count fixed from truck count',changes:notes.concat([txt]),by:'owner'});
+        const a=auditState(d);
+        a.log.push({ts,showId:cran.id,show:cran.name,type:'packFix',msg:'Cranberry day 1 closed from hand counts. '+notes.join(' · ')+(notes.length?' · ':'')+'Packed fixed: '+txt});
+        d._applied['cranberry_day1_close_v45']=true;
+      }
+    }catch(e){ console.error('cranberry_day1_close_v45',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
