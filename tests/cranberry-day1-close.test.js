@@ -25,8 +25,9 @@ function build(tweak){
   const seed={}; seed[KEY]=JSON.stringify(ctx.S);
   return boot(seed).ctx;
 }
-R.section('1. Opening the app closes day 1 and fixes the show');
-{
+R.section('1. RETIRED in v47: v45 no longer runs');
+{ const c=build(); chk('1-. v45 never applies now',c.S._applied['cranberry_day1_close_v45']||false,false); }
+if(false){
   const c=build(); const sh=c.S.shows.find(s=>s.id==='cran'); const [A,B,C]=c.showBooths(sh).map(b=>b.id);
   chk('1a. applied',c.S._applied['cranberry_day1_close_v45'],true);
   chk('1b. Booth 1 ending',SK.map(k=>c.dayBoothRead(sh.days[0],A).eveningCount[k]),[22,35,59,72,132,23]);
@@ -40,8 +41,7 @@ R.section('1. Opening the app closes day 1 and fixes the show');
   chk('1j. logged',c.S.settings.audit.log.some(x=>x.type==='packFix'&&/day 1 closed/.test(x.msg)),true);
   chk('1k. whole show now',SK.map(k=>c.showOnHand(sh)[k]),[59,108,256,171,550,199]);
 }
-R.section('2. Runs once and stays out of the way');
-{
+if(false){
   const c=build(); const sh=c.S.shows.find(s=>s.id==='cran');
   const seed={}; seed[KEY]=JSON.stringify(c.S); const c2=boot(seed).ctx; const sh2=c2.S.shows.find(s=>s.id==='cran');
   chk('2a. second load changes nothing',JSON.stringify(sh2.packedInventory),JSON.stringify(sh.packedInventory));
