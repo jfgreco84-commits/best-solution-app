@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v47';
+const APP_VERSION='v48';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -2243,7 +2243,7 @@ function boothSetStock(sh,di,boothId,which,map){
   const en=dayBoothWrite(d,boothId), c={};
   SKUS.forEach(s=>c[s.key]=Math.max(0,parseInt((map||{})[s.key])||0));
   const before=(which==='evening'?en.eveningCount:en.morningCount)||null;
-  if(which==='evening')en.eveningCount=c; else en.morningCount=c;
+  if(which==='evening')en.eveningCount=c; else { en.morningCount=c; delete en.morningSeeded; }
   rollupDay(sh,di);
   invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId,
     type:boothName(sh,boothId)+' — '+(which==='evening'?'ending':'opening')+' stock set',
@@ -2383,6 +2383,8 @@ function truckShowOnHand(sh){
   if(!last)return L[0].start;
   // plus anything already booked from the garage for a later, unopened day
   const r={...(last.counted?last.end:last.start)};
+  // v48: lost/damaged logged on a day that is still open has already left the show
+  if(!last.counted){ const lm=dayLostMap((sh.days||[])[last.di]||{}); SKUS.forEach(s=>r[s.key]-=parseInt(lm[s.key])||0); }
   (sh.days||[]).slice(last.di+1).forEach(d=>{ const g=dayGarageIn(d); SKUS.forEach(s=>r[s.key]+=g[s.key]||0); });
   return r;
 }
@@ -2403,7 +2405,7 @@ function truckPulls(sh,di){
   return r;
 }
 function truckCountDiff(sh,di){
-  const d=(sh.days||[])[di]; if(!d||!d.truckCount||!d.truckCount.counts)return null;
+  const d=(sh.days||[])[di]; if(!d||!d.truckCount||!d.truckCount.counts||d.truckCount.superseded)return null;
   const L=showLedger(sh); if(!L||!L[di])return null;
   const r={}; let any=false;
   SKUS.forEach(s=>{ r[s.key]=(parseInt(d.truckCount.counts[s.key])||0)-(L[di].truck[s.key]||0); if(r[s.key])any=true; });
@@ -2429,6 +2431,8 @@ function fixPackedFromTruckCount(shId,di){
   if(!sh.packedInventory)return {ok:false,reason:'Pack the show first.'};
   const tc=truckCountDiff(sh,di); if(!tc)return {ok:false,reason:'Count the truck first.'};
   if(!tc.any)return {ok:false,reason:'The truck already matches.'};
+  const bo=boothOverEnd(sh).filter(m=>m.di<=di);
+  if(bo.length)return {ok:false,reason:'First log the truck pulls: '+bo.map(m=>m.booth+' '+m.short+' +'+m.over).join(', ')+'. Fixing now would erase a sale.'};
   const d=sh.days[di], ch={};
   SKUS.forEach(s=>{ const v=tc.diff[s.key]||0; if(!v)return;
     const before=parseInt(sh.packedInventory[s.key])||0;
@@ -2437,6 +2441,8 @@ function fixPackedFromTruckCount(shId,di){
   const txt=SKUS.filter(s=>ch[s.key]).map(s=>s.short+' '+ch[s.key].before+'→'+ch[s.key].after+' ('+(ch[s.key].diff>0?'+':'')+ch[s.key].diff+')').join(', ');
   if(!Array.isArray(sh.packFixes))sh.packFixes=[];
   sh.packFixes.push({ts,di,date:d.date,changes:ch});
+  // earlier truck counts were taken against the old packed number; this count replaces them
+  (sh.days||[]).forEach((x,j)=>{ if(j<di&&x.truckCount)x.truckCount.superseded=ts; });
   invLogPush(sh,{ts,di,date:d.date,type:'🚚 packed count fixed from truck count',changes:[txt],by:'owner'});
   auditLogPush({ts,showId:sh.id,show:sh.name,type:'packFix',msg:'Packed count fixed from the truck count: '+txt});
   return {ok:true,changes:ch,txt};
@@ -2446,6 +2452,7 @@ function confirmFixPacked(shId,di){
   const tc=truckCountDiff(sh,di); if(!tc||!tc.any){ toast('The truck already matches.'); return; }
   mOpen(`<div class="mh"><div class="mt">✅ Fix the show to my truck count</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Use this when the boxes were counted wrong at packing. The show's packed total moves by the difference so the app's truck equals your count. The garage is not touched.</div>
+  ${SKUS.some(s=>tc.diff[s.key]>0&&(parseInt((S.inventory||{})[s.key])||0)>0)?`<div class="wb red" style="font-size:11px;margin-bottom:10px">🏠 The garage still shows stock for the sizes you have MORE of. If those extra bottles came out of the garage, the garage number is now too high. Recount the garage when you get home.</div>`:''}
   <div class="wb gold" style="font-size:11px;margin-bottom:10px">⚠️ First make sure every booth is counted for this day and anything carried from the truck to a booth is entered as 🚚 Restock. Otherwise this hides a sale.</div>
   ${SKUS.filter(s=>tc.diff[s.key]).map(s=>`<div class="sr"><span class="srl">${s.short}: app said ${tc.expected[s.key]}, you counted ${tc.counted[s.key]}</span><span class="srv" style="color:${tc.diff[s.key]>0?'var(--green)':'var(--red)'}">${tc.diff[s.key]>0?'+':''}${tc.diff[s.key]}</span></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="applyFixPacked('${shId}',${di})">Fix it</button>`);
@@ -2453,6 +2460,23 @@ function confirmFixPacked(shId,di){
 function applyFixPacked(shId,di){
   const r=fixPackedFromTruckCount(shId,di); if(!r.ok){ toast('⚠️ '+r.reason); return; }
   mClose(); saveS(); toast('🚚 Show fixed: '+r.txt,5000);
+}
+// v48: a booth that ends a day with more than it had. Only a restock off
+// the truck (or a move from another booth) can put product on a table, so
+// this is always an unlogged pull. Left alone it hides a real sale, and a
+// truck-count "fix" would then erase that sale for good.
+function boothOverEnd(sh){
+  const out=[];
+  (sh.days||[]).forEach((d,di)=>showBooths(sh).forEach(b=>{
+    const en=dayBoothRead(d,b.id); if(!en||!en.morningCount||!en.eveningCount)return;
+    const ti=boothTransferIn(d,b.id), to=boothTransferOut(d,b.id);
+    SKUS.forEach(s=>{
+      const had=(parseInt(en.morningCount[s.key])||0)+(parseInt((en.restock||{})[s.key])||0)+(ti[s.key]||0)-(to[s.key]||0)-(parseInt((en.lost||{})[s.key])||0);
+      const e=parseInt(en.eveningCount[s.key])||0;
+      if(e>had)out.push({di,boothId:b.id,booth:b.name,sku:s.key,short:s.short,had,eve:e,over:e-had});
+    });
+  }));
+  return out;
 }
 // ---- the audit ----------------------------------------------------------
 function auditSkip(sh){
@@ -2485,10 +2509,11 @@ function auditShow(sh){
     } else if(d.morningCount&&!d.eveningCount&&past)add('red',i,'noClose',dn(i)+': no close count. That day\'s sales are not counted, and closing the show would send them back to the garage.');
     if(!d.morningCount&&d.eveningCount)add('red',i,'noMorning',dn(i)+': close count but no morning count, so nothing sold that day is counted.');
     if(money&&!(d.morningCount&&d.eveningCount)&&past)add('red',i,'moneyNoCount',dn(i)+': '+fmt(calcPmt(d.payments))+' collected but the day was not counted.');
-    const tc=truckCountDiff(sh,i);
+    const tc=sh.status==='completed'?null:truckCountDiff(sh,i);
     if(tc&&tc.any)add('gold',i,'truckCount',dn(i)+': 🚚 truck count is off. '+SKUS.filter(s=>tc.diff[s.key]).map(s=>s.short+' '+(tc.diff[s.key]>0?'+':'')+tc.diff[s.key]).join(' · ')+' (counted vs expected).');
   });
   // 3. Impossible sales, and (single-table shows) openings that do not follow last night.
+  boothOverEnd(sh).forEach(m=>add('red',m.di,'boothOver',dn(m.di)+': '+m.booth+' ended with '+m.eve+' '+m.short+' but only had '+m.had+'. Log the '+m.over+' as 🚚 Restock from truck at '+m.booth+', or fix the count. Until then a sale is missing.'));
   invNegativeSold(sh).forEach(m=>add('red',m.di,'negSold',dn(m.di)+': '+m.short+' ended at '+m.eve+' but only had '+m.morn+'.'));
   if(!booths)invUnresolved(sh).forEach(m=>add('gold',m.di,'carry',dn(m.di)+': '+m.short+' opened at '+m.morn+', last night ended at '+m.expected+'. Explain or fix it in Reconciliation.'));
   // 4. A closed show whose counts changed after the stock went home.
@@ -2685,7 +2710,7 @@ function boothCashCheck(sh,di,boothId){
   const d=(sh.days||[])[di]; if(!d)return {state:'na'};
   const en=dayBoothRead(d,boothId); if(!en||!en.morningCount||!en.eveningCount)return {state:'na'};
   const collected=boothMoney(en); if(collected<=0)return {state:'na'};
-  const rev=calcRev(boothSold(d,boothId),sh.prices||null); if(rev<=0)return {state:'na'};
+  const rev=calcRev(boothSold(d,boothId),sh.prices||null); if(rev<=0)return {state:'over',rev:0,collected,amt:collected};
   const diff=collected-rev;
   if(Math.abs(diff)<=0.50)return {state:'ok',rev,collected};
   return diff<0?{state:'short',rev,collected,amt:rev-collected}:{state:'over',rev,collected,amt:collected-rev};
@@ -2768,6 +2793,7 @@ function calcShow(sh){
     if(d.expenses){exp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);dayGas+=parseFloat(d.expenses.gas)||0;}
   });
   // Gas: auto-include the commute estimate once the show has begun, unless gas was hand-logged on any day
+  dayGas+=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((t,e)=>t+(parseFloat(e.amount)||0),0); // a Fuel receipt IS the gas
   const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(showGas(sh)*100)/100):0;
   exp+=gasAuto;
   exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
@@ -2919,7 +2945,7 @@ function invLogPush(sh,entry){ if(!sh.invLog)sh.invLog=[]; sh.invLog.push(entry)
 function dayCashCheck(sh,di){
   const d=(sh.days||[])[di]; if(!d||!d.morningCount||!d.eveningCount)return {state:'na'};
   const collected=calcPmt(d.payments||{}); if(collected<=0)return {state:'na'};
-  const rev=calcRev(daySold(d),sh.prices||null); if(rev<=0)return {state:'na'};
+  const rev=calcRev(daySold(d),sh.prices||null); if(rev<=0)return {state:'over',rev:0,collected,amt:collected};
   const diff=collected-rev;
   if(Math.abs(diff)<=0.50)return {state:'ok',rev,collected};
   return diff<0?{state:'short',rev,collected,amt:rev-collected}:{state:'over',rev,collected,amt:collected-rev};
@@ -2986,7 +3012,8 @@ function calcYTD(){
   const totalRepPay=(S.shows||[]).reduce((t,sh)=>t+showRepPayTotal(sh),0);
   // (rep pay already included in expenses via calcShow/boothPaid paths above)
   const profit=gross-salesTaxSum-cogs-expenses;
-  const taxRes=taxResSum;
+  // v48: the reserve is on the YEAR's net profit, so a losing show offsets a winning one
+  const taxRes=Math.max(0,profit)*((S.settings&&S.settings.tax!=null)?S.settings.tax:0.28);
   const keep=Math.max(0,profit-taxRes);
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
   return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum};
@@ -3147,7 +3174,7 @@ function rHome(){
   const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
   const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0; // gross ÷ shows that actually had sales
   // Yearly overhead shown SEPARATELY (not mixed into show profit)
-  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed').reduce((t,sh)=>t+boothPaid(sh),0);
+  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active').reduce((t,sh)=>t+boothPaid(sh),0); // v48: a running show's booth is already in its own P&L
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
   const taxRes=completedTax;
   const cleanKeep=Math.max(0,completedNet-taxRes);
@@ -3331,7 +3358,7 @@ function homeCtx(){
   const avgShowProfit=done.length?completedNet/done.length:0;
   const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
   const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0;
-  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed').reduce((t,sh)=>t+boothPaid(sh),0);
+  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active').reduce((t,sh)=>t+boothPaid(sh),0); // v48: a running show's booth is already in its own P&L
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
   const taxRes=completedTax;
   const cleanKeep=Math.max(0,completedNet-taxRes);
@@ -3373,7 +3400,7 @@ function secCollected(){
 }
 function secUnits(C){
   return `<div class="card">
-    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units (completed)</span><span class="srv lg" style="color:var(--gold)">${fmtN(C.ytd.totalUnits)}</span></div>
+    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units Sold (completed + running shows)</span><span class="srv lg" style="color:var(--gold)">${fmtN(C.ytd.totalUnits)}</span></div>
     ${SKUS.map(s=>{const u=C.ytd.units[s.key]||0;const rev=u*getP(s.key);return`<div class="sr"><span class="srl">${s.emoji} ${s.name}</span><span class="srv">${u} units · <span style="color:var(--gold)">${fmt(rev)}</span></span></div>`;}).join('')}
   </div>`;
 }
@@ -3995,7 +4022,7 @@ function paperPerShow(){ return (S.settings&&S.settings.paperPerShow!=null&&S.se
 function showBagCount(sh){ const u=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; if(!u)return 0;
   return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0); } // C5 rides in the polish bag
 function showBagCost(sh){ return showBagCount(sh)*bagUnitCost(); }
-function showFlatOverhead(sh){ return (typeof isMissed==='function'&&isMissed(sh))?0:(candyPerShow()+paperPerShow()); } // candy + paper towels, flat per show (not on missed shows)
+function showFlatOverhead(sh){ return ((typeof isMissed==='function'&&isMissed(sh))||(typeof isPassed==='function'&&isPassed(sh)))?0:(candyPerShow()+paperPerShow()); } // candy + paper towels, flat per show (not on missed shows)
 function showSupplyCost(sh){
   let cost=0; const auto=showAutoSupplyUnits(sh);
   (S.supplies||[]).forEach(sup=>{ const q=auto[sup.name]||0; if(q>0)cost+=q*(parseFloat(sup.cost)||0); });
@@ -4163,7 +4190,7 @@ function calcBreakEven(sh){
   // Variable-cost ratio: this show's own COGS-to-collected when it has data, else 30% (2025 season average)
   let ratio=0.30,cardShare=0.5;
   const g=showActualRev(sh);
-  if(g>0){ let c=0;(sh.days||[]).forEach(d=>{if(d.morningCount&&d.eveningCount)c+=calcCOGS(dayCogsUnits(d));}); if(c>0)ratio=Math.min(0.6,c/g); cardShare=Math.min(1,showCardSales(sh)/g); }
+  if(g>0){ let c=0;(sh.days||[]).forEach((d,di)=>{if(d.morningCount&&d.eveningCount)c+=calcCOGSOn(dayCogsUnits(d),showDayKey(sh,di),sh);}); if(c>0)ratio=Math.min(0.6,c/g); cardShare=Math.min(1,showCardSales(sh)/g); }
   const denom=Math.max(0.2,1-ratio-((S.settings&&S.settings.sqFee)||0)*cardShare);
   const dollars=fixedCosts/denom;
   // Units: what does that mean at the table? Uses the show's own average sale per unit when known.
@@ -4421,18 +4448,20 @@ function rPnL(){
   const y=new Date().getFullYear();
   const ytd=calcYTD();
   const tax=S.settings.tax||0.28;
-  const taxAmt=ytd.taxRes; // card/Square sales × per-show tax rate (cash excluded)
+  const taxAmt=ytd.taxRes; // % of the year's net profit (losses offset wins)
   const keep=Math.max(0,ytd.profit-taxAmt);
   const qtr=taxAmt/4;
 
-  // Expense breakdown
-  let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0;
+  // Expense breakdown, v48: built from calcShow's own parts (+ future-show
+  // deposits + business purchases) so the lines add up to Total Expenses.
+  let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0,gasTotal=0,supplyTotal=0,repTotal=0,workerTotal=0,feeTotal=0;
   S.shows.forEach(sh=>{
-    if(sh.status==='completed'){
-      boothTotal+=sh.boothCost||0;
+    if(sh.status==='completed'||sh.status==='active'){
+      const t=calcShow(sh);
+      boothTotal+=t.booth; gasTotal+=t.gasAuto; supplyTotal+=t.supplyCost; repTotal+=t.repPay; workerTotal+=t.workerPay; feeTotal+=t.cardFees;
       showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
       lodgingTotal+=sh.lodging||0;
-      (sh.days||[]).forEach(d=>{if(d.expenses)dayExpTotal+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0);});
+      (sh.days||[]).forEach(d=>{if(d.expenses)Object.keys(d.expenses).forEach(k=>{ const v=parseFloat(d.expenses[k])||0; if(k==='gas')gasTotal+=v; else dayExpTotal+=v; });});
     } else {
       boothTotal+=boothPaid(sh);
       showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
@@ -4467,10 +4496,14 @@ function rPnL(){
     </div>
     <div class="sr"><span class="srl">Product COGS</span><span class="srv red">-${fmt(ytd.cogs)}</span></div>
     <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
-    <div class="sr"><span class="srl">Show Expenses (fuel, hotel, etc.)</span><span class="srv red">-${fmt(showExpTotal+lodgingTotal+dayExpTotal)}</span></div>
-    <div class="sr" style="border-bottom:none"><span class="srl">Supply Purchases</span><span class="srv red">-${fmt(globalSupply)}</span></div>
-    ${ytd.totalRepPay>0?`<div class="sr" style="border-top:1px solid var(--redbd);margin-top:4px;border-bottom:none"><span class="srl">Rep Pay (earned)</span><span class="srv red">-${fmt(ytd.totalRepPay)}</span></div>`:''}
-    ${ytd.cardFees>0?`<div class="sr" style="border-bottom:none"><span class="srl">Card Processing Fees</span><span class="srv red">-${fmt(ytd.cardFees)}</span></div>`:''}
+    <div class="sr"><span class="srl">Gas + Lodging</span><span class="srv red">-${fmt(gasTotal+lodgingTotal)}</span></div>
+    <div class="sr"><span class="srl">Show + Day Expenses (food, parking, etc.)</span><span class="srv red">-${fmt(showExpTotal+dayExpTotal)}</span></div>
+    <div class="sr"><span class="srl">Show Supplies (bags, candy, paper)</span><span class="srv red">-${fmt(supplyTotal)}</span></div>
+    <div class="sr"><span class="srl">Rep Pay</span><span class="srv red">-${fmt(repTotal)}</span></div>
+    ${workerTotal>0?`<div class="sr"><span class="srl">Worker Payouts</span><span class="srv red">-${fmt(workerTotal)}</span></div>`:''}
+    <div class="sr"><span class="srl">Card Processing Fees</span><span class="srv red">-${fmt(feeTotal)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl">Business Purchases (equipment, software, insurance)</span><span class="srv red">-${fmt(globalSupply)}</span></div>
+    ${Math.abs(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+repTotal+workerTotal+feeTotal+globalSupply-expenseTotal)>0.01?`<div class="wb red" style="font-size:11px;margin-top:6px">⚠️ These lines are ${fmt(expenseTotal-(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+repTotal+workerTotal+feeTotal+globalSupply))} off Total Expenses. Tell Claude.</div>`:''}
     ${ytd.salesTax>0?`<div class="sr" style="border-bottom:none"><span class="srl b">🧾 Sales Tax OWED TO STATE (card sales)</span><span class="srv red b">-${fmt(ytd.salesTax)}</span></div>`:''}
   </div>
   ${(()=>{
@@ -4489,7 +4522,7 @@ function rPnL(){
 
   // Tax reserve card
   h+=`<div class="card rb" style="margin-bottom:12px">
-    <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧾 TAX RESERVE (${Math.round(tax*100)}% of card/Square sales)</div>
+    <div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧾 TAX RESERVE (${Math.round(tax*100)}% of the year's net profit)</div>
     <div class="g2" style="gap:8px;margin-bottom:10px">
       <div class="sbox rb"><div class="sl">Set Aside Now</div><div class="sv r">${fmt(taxAmt)}</div></div>
       <div class="sbox grb"><div class="sl">Keep (${100-Math.round(tax*100)}%)</div><div class="sv g">${fmt(keep)}</div></div>
@@ -4931,15 +4964,16 @@ function showStockCardHTML(sh){
   if(!sh||!(sh.status==='active'||sh.status==='completed'))return '';
   const start=showPackedAtStart(sh), brought=showGarageIn(sh), sold=showUnitsSold(sh);
   const held=sh.status==='active'?showOnHand(sh):endShowReturns(sh);
+  const lost={}; SKUS.forEach(s=>lost[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const l=dayLostMap(d); SKUS.forEach(s=>lost[s.key]+=parseInt(l[s.key])||0); } });
   const T=o=>SKUS.reduce((t,s)=>t+(o[s.key]||0),0);
   const anyB=T(brought)>0;
   const cell=(v,c)=>`<td style="text-align:right;padding:3px 4px;${c||''}">${v}</td>`;
   return `<div class="card" style="margin-bottom:12px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">📦 Show stock — where every unit came from</div>
     <table style="width:100%;border-collapse:collapse;font-size:11px">
-      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Size</th><th style="text-align:right;padding:3px 4px">Packed</th><th style="text-align:right;padding:3px 4px;color:var(--gold)">🏠 Brought</th><th style="text-align:right;padding:3px 4px">Total</th><th style="text-align:right;padding:3px 4px">Sold</th><th style="text-align:right;padding:3px 4px">${sh.status==='active'?'On hand':'Returned'}</th></tr>
-      ${SKUS.map(s=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${s.short}</td>${cell(start[s.key]||0)}${cell((brought[s.key]||0)?'+'+brought[s.key]:'—','color:var(--gold);font-weight:800')}${cell((start[s.key]||0)+(brought[s.key]||0),'font-weight:800')}${cell(sold[s.key]||0)}${cell(held[s.key]||0,'font-weight:800;color:var(--gold)')}</tr>`).join('')}
-      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px">Total</td>${cell(T(start))}${cell(anyB?'+'+T(brought):'—','color:var(--gold)')}${cell(T(start)+T(brought))}${cell(T(sold))}${cell(T(held),'color:var(--gold)')}</tr>
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Size</th><th style="text-align:right;padding:3px 4px">Packed</th><th style="text-align:right;padding:3px 4px;color:var(--gold)">🏠 Brought</th><th style="text-align:right;padding:3px 4px">Total</th><th style="text-align:right;padding:3px 4px">Sold</th>${T(lost)?'<th style="text-align:right;padding:3px 4px;color:var(--red)">Lost</th>':''}<th style="text-align:right;padding:3px 4px">${sh.status==='active'?'On hand':'Returned'}</th></tr>
+      ${SKUS.map(s=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${s.short}</td>${cell(start[s.key]||0)}${cell((brought[s.key]||0)?'+'+brought[s.key]:'—','color:var(--gold);font-weight:800')}${cell((start[s.key]||0)+(brought[s.key]||0),'font-weight:800')}${cell(sold[s.key]||0)}${T(lost)?cell(lost[s.key]||0,'color:var(--red)'):''}${cell(held[s.key]||0,'font-weight:800;color:var(--gold)')}</tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px">Total</td>${cell(T(start))}${cell(anyB?'+'+T(brought):'—','color:var(--gold)')}${cell(T(start)+T(brought))}${cell(T(sold))}${T(lost)?cell(T(lost),'color:var(--red)'):''}${cell(T(held),'color:var(--gold)')}</tr>
     </table>
     ${anyB?`<div style="font-size:10px;color:var(--muted);margin-top:6px">${transferBatches(x=>x.fromShowId===GARAGE_ID&&x.toShowId===sh.id).map(b=>'🏠 '+(b.dayDate||'')+(b.boothName?' · '+_esc(b.boothName):'')+': '+transferBatchLabel(b)).join('<br>')}</div>`:''}
   </div>`;
@@ -5017,18 +5051,22 @@ function exportAccountantPkg(){
   dlFile('best-solution-accountant-package-'+_stamp()+'.csv',_csvRows(rows),'text/csv');
 }
 
+function seasonFutureSpend(){ return (S.shows||[]).filter(sh=>sh.status!=='completed'&&sh.status!=='active').reduce((t,sh)=>t+boothPaid(sh)+(sh.showExpenses||[]).reduce((a,e)=>a+(parseFloat(e.amount)||0),0)+(sh.lodging||0),0); }
 function exportSeasonCSV(){
   const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Rep Pay','Worker Payouts','Net Profit','Tax Reserve']];
-  (S.shows||[]).slice().sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
+  (S.shows||[]).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
     rows.push([sh.name,sh.status,(sh.dates||[]).join(' - '),sh.location||'',sh.numDays||1,showPotentialRev(sh).toFixed(2),showActualRev(sh).toFixed(2),showDiscountTotal(sh).toFixed(2),t.cogs.toFixed(2),t.expenses.toFixed(2),(t.repPay||0).toFixed(2),(t.workerPay||0).toFixed(2),t.profit.toFixed(2),(t.taxRes||0).toFixed(2)]); });
   const y=calcYTD(); const seasonWorkerPay=(S.shows||[]).reduce((tt,sh)=>tt+(calcShow(sh).workerPay||0),0);
+  // v48: the rows add up to the total. Future shows only carry what was already paid.
+  const fut=seasonFutureSpend(); rows.push(['Future shows: deposits paid + logged costs','planned','','','','','','','',fut.toFixed(2),'','',(-fut).toFixed(2),'']);
+  const oth=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0); rows.push(['Business purchases (Other Expenses)','','','','','','','','',oth.toFixed(2),'','',(-oth).toFixed(2),'']);
   rows.push([]); rows.push(['SEASON TOTAL','','','','','','','',y.cogs.toFixed(2),y.expenses.toFixed(2),(y.totalRepPay||0).toFixed(2),seasonWorkerPay.toFixed(2),y.profit.toFixed(2),(y.taxRes||0).toFixed(2)]);
   dlFile('best-solution-season-'+_stamp()+'.csv',_csvRows(rows));
 }
 function exportShowCSV(shId){
   const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const t=calcShow(sh);
   const rows=[['Day','Date','SKU','Units Sold','Unit Price','Line Revenue']];
-  (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) rows.push([i+1,d.date||'',s.short,q,getP(s.key).toFixed(2),(q*getP(s.key)).toFixed(2)]); }); } });
+  (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) rows.push([i+1,d.date||'',s.short,q,_psPrice(sh,s.key).toFixed(2),(q*_psPrice(sh,s.key)).toFixed(2)]); }); } });
   rows.push([]); rows.push(['Payments collected by method']); PMTS.forEach(p=>{ let tot=0; (sh.days||[]).forEach(d=>tot+=parseFloat((d.payments||{})[p.key])||0); if(tot>0)rows.push([p.label,'','','','',tot.toFixed(2)]); });
   if((sh.discounts||[]).length){ rows.push([]); rows.push(['Discounts / Freebies']); (sh.discounts||[]).forEach(x=>rows.push([x.date||'',x.note||'','','','',(parseFloat(x.amount)||0).toFixed(2)])); }
   // Rep pay — per-day amounts (legacy per-show payouts shown where no day pay was entered)
@@ -5115,21 +5153,23 @@ function _printHTML(title,body){
 }
 function printFullReport(){
   const y=calcYTD();
-  const showRows=(S.shows||[]).slice().sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).map(sh=>{const t=calcShow(sh);return '<tr><td>'+_esc(sh.name)+'</td><td>'+sh.status+'</td><td>'+_esc((sh.dates||[]).join(' - '))+'</td><td class="r">'+_money(showPotentialRev(sh))+'</td><td class="r">'+_money(showActualRev(sh))+'</td><td class="r">'+_money(t.cogs)+'</td><td class="r">'+_money(t.expenses)+'</td><td class="r">'+_money(t.profit)+'</td></tr>';}).join('');
+  const showRows=(S.shows||[]).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).map(sh=>{const t=calcShow(sh);return '<tr><td>'+_esc(sh.name)+'</td><td>'+sh.status+'</td><td>'+_esc((sh.dates||[]).join(' - '))+'</td><td class="r">'+_money(showPotentialRev(sh))+'</td><td class="r">'+_money(showActualRev(sh))+'</td><td class="r">'+_money(t.cogs)+'</td><td class="r">'+_money(t.expenses)+'</td><td class="r">'+_money(t.profit)+'</td></tr>';}).join('');
+  const _fut=seasonFutureSpend(), _oth=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const showRowsAll=showRows+'<tr><td>Future shows: deposits paid + logged costs</td><td>planned</td><td></td><td></td><td></td><td></td><td class="r">'+_money(_fut)+'</td><td class="r">'+_money(-_fut)+'</td></tr><tr><td>Business purchases (Other Expenses)</td><td></td><td></td><td></td><td></td><td></td><td class="r">'+_money(_oth)+'</td><td class="r">'+_money(-_oth)+'</td></tr><tr class="tot"><td>SEASON TOTAL</td><td></td><td></td><td></td><td class="r">'+_money(y.gross)+'</td><td class="r">'+_money(y.cogs)+'</td><td class="r">'+_money(y.expenses)+'</td><td class="r">'+_money(y.profit)+'</td></tr>';
   const repRows=(S.reps||[]).filter(r=>!r.isSelf).map(r=>{const e=repEarned(r.id),p=repPaid(r.id);return (e>0||p>0)?'<tr><td>'+_esc(r.name)+'</td><td class="r">'+_money(e)+'</td><td class="r">'+_money(p)+'</td><td class="r">'+_money(Math.max(0,e-p))+'</td></tr>':'';}).join('');
   const expRows=(S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(e=>'<tr><td>'+_esc(e.date||'')+'</td><td>'+_esc(e.category||'')+'</td><td class="r">'+_money(e.amount)+'</td><td>'+_esc(e.note||'')+'</td></tr>').join('');
   const expTot=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   _printHTML('Best Solution — Season Report',
     '<h1>Best Solution — 2026 Season Report</h1><div class="muted">Generated '+_stamp()+' · Dot Dynasty LLC</div>'+
     '<h2>Season Totals</h2><table><tr><th>Gross</th><th>COGS</th><th>Expenses</th><th>Net Profit</th><th>Tax Reserve</th><th>Units Sold</th></tr><tr class="tot"><td class="r">'+_money(y.gross)+'</td><td class="r">'+_money(y.cogs)+'</td><td class="r">'+_money(y.expenses)+'</td><td class="r">'+_money(y.profit)+'</td><td class="r">'+_money(y.taxRes)+'</td><td class="r">'+fmtN(y.totalUnits)+'</td></tr></table>'+
-    '<h2>All Shows</h2><table><tr><th>Show</th><th>Status</th><th>Dates</th><th>Potential</th><th>Collected</th><th>COGS</th><th>Expenses</th><th>Profit</th></tr>'+showRows+'</table>'+
+    '<h2>All Shows</h2><table><tr><th>Show</th><th>Status</th><th>Dates</th><th>Potential</th><th>Collected</th><th>COGS</th><th>Expenses</th><th>Profit</th></tr>'+showRowsAll+'</table>'+
     (repRows?'<h2>Rep Pay</h2><table><tr><th>Rep</th><th>Earned</th><th>Paid</th><th>Owed</th></tr>'+repRows+'</table>':'')+
     (expRows?'<h2>Other Expenses (write-offs)</h2><table><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th></tr>'+expRows+'<tr class="tot"><td>TOTAL</td><td></td><td class="r">'+_money(expTot)+'</td><td></td></tr></table>':''));
 }
 function printShowReport(shId){
   const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const t=calcShow(sh);
   let dayRows='';
-  (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) dayRows+='<tr><td>'+_esc(d.date||('Day '+(i+1)))+'</td><td>'+s.short+'</td><td class="r">'+q+'</td><td class="r">'+_money(getP(s.key))+'</td><td class="r">'+_money(q*getP(s.key))+'</td></tr>'; }); } });
+  (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>{ const q=sold[s.key]||0; if(q>0) dayRows+='<tr><td>'+_esc(d.date||('Day '+(i+1)))+'</td><td>'+s.short+'</td><td class="r">'+q+'</td><td class="r">'+_money(_psPrice(sh,s.key))+'</td><td class="r">'+_money(q*_psPrice(sh,s.key))+'</td></tr>'; }); } });
   let payRows=''; PMTS.forEach(p=>{ let tot=0; (sh.days||[]).forEach(d=>tot+=parseFloat((d.payments||{})[p.key])||0); if(tot>0)payRows+='<tr><td>'+p.label+'</td><td class="r">'+_money(tot)+'</td></tr>'; });
   _printHTML('Best Solution — '+sh.name,
     '<h1>'+_esc(sh.name)+'</h1><div class="muted">'+_esc(sh.location||'')+' · '+_esc((sh.dates||[]).join(' - '))+' · Generated '+_stamp()+'</div>'+
@@ -5608,10 +5648,20 @@ function dayBoothsHTML(sh,di){
    (sellerPayments). Pay is day.repPay. Read-only except the booth picker.
    --------------------------------------------------------------------- */
 function showTeams(sh){ const t=sh&&sh.teams; return Array.isArray(t)?t.filter(x=>x&&x.id):[]; }
+// v48: each booth goes to exactly one team per day, the team holding most of
+// that booth's crew. One person helping at another booth no longer credits
+// that booth to two teams or drops a drawer.
+function dayTeamBooths(sh,di){
+  const teams=showTeams(sh), booths=showBooths(sh), pairs=[];
+  teams.forEach(t=>booths.forEach(b=>{ const crew=dayBoothCrew(sh,di,b.id); const n=crew.filter(id=>(t.repIds||[]).indexOf(id)>=0).length; if(n)pairs.push({t:t.id,b:b.id,n}); }));
+  pairs.sort((a,b)=>b.n-a.n);
+  const out={}, taken={};
+  pairs.forEach(p=>{ if(out[p.t]||taken[p.b])return; out[p.t]=p.b; taken[p.b]=true; });
+  return out;
+}
 function teamBoothOnDay(sh,di,team){
-  const ids=team.repIds||[]; if(!ids.length)return null;
-  const b=showBooths(sh).find(b=>dayBoothCrew(sh,di,b.id).some(id=>ids.indexOf(id)>=0));
-  return b?b.id:null;
+  if(!(team.repIds||[]).length)return null;
+  return dayTeamBooths(sh,di)[team.id]||null;
 }
 function setTeamBooth(sh,di,teamId,boothId){
   const d=(sh.days||[])[di]; if(!d)return {ok:false,reason:'That day does not exist.'};
@@ -5636,7 +5686,8 @@ function teamDayMoney(sh,di,team){
     PMTS.forEach(x=>p[x.key]=parseFloat(pm[x.key])||0);
     return {p,total:calcPmt(p),src:'booth',boothId:bId};
   }
-  const drawers=hasBooths(sh)?showBooths(sh).map(b=>dayBoothRead(d,b.id)).filter(Boolean):[d];
+  const held=Object.values(dayTeamBooths(sh,di));
+  const drawers=hasBooths(sh)?showBooths(sh).filter(b=>held.indexOf(b.id)<0).map(b=>dayBoothRead(d,b.id)).filter(Boolean):[d];
   drawers.forEach(en=>{ const sp=(en&&en.sellerPayments)||{}; (team.repIds||[]).forEach(id=>{ const e=sp[id]||{}; PMTS.forEach(x=>p[x.key]+=parseFloat(e[x.key])||0); }); });
   const total=calcPmt(p);
   return {p,total,src:total>0?'people':'none'};
@@ -5695,6 +5746,7 @@ function teamScoreboardHTML(sh){
       <div style="text-align:right;font-size:11px;color:var(--muted)">All teams <b style="color:var(--green);font-size:14px">${fmt(all.total)}</b> · pay ${fmt(all.pay)}</div>
     </div>
     ${cards}
+    ${(()=>{ const g=showActualRev(sh), gap=g-all.total; return Math.abs(gap)>0.005?`<div class="wb gold" style="font-size:11px;margin-bottom:6px">💤 ${fmt(gap)} of the show's ${fmt(g)} is not on any team yet. Mark each team's booth for every day so every drawer is counted once.</div>`:''; })()}
     <div style="font-size:10px;color:var(--muted);margin-top:2px">Pick each team's booth every day (same as "Who's in which booth"). Money comes from that booth's money count, so count each booth's drawer at close. Tap a name to enter that day's pay.</div>
   </div>`;
 }
@@ -5955,7 +6007,7 @@ function rDay(sh,di){
   const haM=d.morningCount!==null,haE=d.eveningCount!==null,haP=calcPmt(d.payments)>0;
   const isA=sh.status==='active';
   let sold=null,rev=0,cogs=0;
-  if(haM&&haE){sold=daySold(d);rev=calcRev(sold,sh.prices||null);cogs=calcCOGS(dayCogsUnits(d));}
+  if(haM&&haE){sold=daySold(d);rev=calcRev(sold,sh.prices||null);cogs=calcCOGSOn(dayCogsUnits(d),showDayKey(sh,di),sh);}
   const pmtT=calcPmt(d.payments||{});
   const dayExp=Object.values(d.expenses||{}).reduce((a,b)=>a+(parseFloat(b)||0),0);
   const bpd=(sh.boothCost||0)/sh.numDays;
@@ -6021,7 +6073,7 @@ function rDay(sh,di){
     <div class="sr"><span class="srl">Day Expenses</span><span class="srv red">-${fmt(dayExp)}</span></div>
     <div class="sr"><span class="srl">Booth Share</span><span class="srv red">-${fmt(bpd)}</span></div>
     ${dayPay>0?`<div class="sr"><span class="srl">Rep Pay (this day)</span><span class="srv red">-${fmt(dayPay)}</span></div>`:''}
-    <div class="sr"><span class="srl b">Net Profit (cash)</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
+    <div class="sr"><span class="srl b">This Day's Net (before show-wide costs)</span><span class="srv lg ${profit>=0?'green':'red'}">${fmt(profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve (${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?' · show rate':''})</span><span class="srv red">-${fmt(taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,profit-taxRes))}</span></div>`:''}
     ${isA?`<div class="div"></div><div class="fg"><label class="fl">Notes / What Worked</label><textarea class="fi" placeholder="Best sellers? Weather? What to restock?" onchange="saveDayNote('${sh.id}',${di},this.value)">${d.notes||''}</textarea></div>`
@@ -6186,11 +6238,11 @@ function saveCount(shId,di,type,boothId){
   const before=(type==='morning'?tgt.morningCount:tgt.eveningCount)||null;
   const diffs=SKUS.filter(s=>(before?(before[s.key]||0):null)!==(c[s.key]||0)).map(s=>`${s.short}:${before?(before[s.key]||0):'—'}→${c[s.key]||0}`);
   const nextDay=sh.days[di+1]||null;
-  if(type==='morning')tgt.morningCount=c;
+  if(type==='morning'){ tgt.morningCount=c; delete tgt.morningSeeded; }
   else{
     tgt.eveningCount=c;
     // Tomorrow opens where tonight ended — per booth when the show has booths.
-    if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount){ const ng=boothId?boothGarageIn(nextDay,boothId):dayGarageIn(nextDay); ntgt.morningCount={}; SKUS.forEach(s=>ntgt.morningCount[s.key]=(parseInt(c[s.key])||0)+(ng[s.key]||0)); } }
+    if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount||ntgt.morningSeeded){ ntgt.morningSeeded=true; /* v48: an opening the app filled in follows last night's count until someone counts it */ const ng=boothId?boothGarageIn(nextDay,boothId):dayGarageIn(nextDay); ntgt.morningCount={}; SKUS.forEach(s=>ntgt.morningCount[s.key]=(parseInt(c[s.key])||0)+(ng[s.key]||0)); } }
   }
   const lbl=(boothId?boothName(sh,boothId)+' — ':'')+type+' count';
   invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,booth:boothId||null,type:lbl,changes:diffs.length?diffs:['(no change)'],by:'owner'});
@@ -6325,7 +6377,7 @@ function mmRender(){
   const d=sh.days[st.di]; if(!d)return;
   const boothId=st.boothId;
   const src=boothId?(dayBoothRead(d,boothId)||{}):d;
-  let exp=0; if(src.morningCount&&src.eveningCount){ exp=calcRev(daySold(src),sh.prices||null); }
+  let exp=0; if(src.morningCount&&src.eveningCount){ exp=calcRev(boothId?(boothSold(d,boothId)||{}):daySold(src),sh.prices||null); }
   const repTot=calcPmt(sumRepSalesForDay(d)); const hasRepSales=!boothId&&(d.repSales||[]).length>0&&repTot>0;
   const grand=st.on?mmSplitTotal(st):calcPmt(st.flat);
   const spare=(S.reps||[]).filter(r=>r.active&&st.ids.indexOf(r.id)<0);
@@ -6421,9 +6473,9 @@ function showSellerCardHTML(sh){
 function showExpModal(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const e=sh.days[di].expenses||{};
-  const aG=sh.miles?Math.round((sh.miles*2/S.settings.mpg)*S.settings.gasPrice*100)/100:0;
+  const aG=sh.miles?Math.round((sh.miles*2/(showMpg(sh)||17.5))*showGasPrice(sh)*100)/100:0; // one day's round trip, shown as a hint only
   mOpen(`<div class="mh"><div class="mt">💸 Day Expenses</div><button class="mx" onclick="mClose()">×</button></div>
-  <div class="fg"><label class="fl">Gas ${aG>0?'(est. '+fmt(aG)+')':''}</label><input class="fi" type="number" id="ex_g" value="${e.gas||aG}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Gas ${aG>0?'(est. '+fmt(aG)+')':''}</label><input class="fi" type="number" id="ex_g" value="${e.gas||''}" step="0.01" placeholder="${aG>0?'blank = the app estimates gas for the whole show':'0.00'}"></div>
   <div class="fg"><label class="fl">Food / Drinks</label><input class="fi" type="number" id="ex_f" value="${e.food||0}" step="0.01" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Parking / Tolls</label><input class="fi" type="number" id="ex_p" value="${e.parking||0}" step="0.01" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Hotel</label><input class="fi" type="number" id="ex_h" value="${e.hotel||0}" step="0.01" placeholder="0.00"></div>
@@ -8164,6 +8216,7 @@ function bxView(st){
       if(V.dayHasCounts(d)){ potential+=V.rev(V.daySold(d),sh.prices||null); cogs+=V.cogsOfOn(V.dayCogsUnits(d),V.dayKey(sh,di),sh); }
       if(d.expenses){ exp+=Object.values(d.expenses).reduce((a,b)=>a+N(b),0); dayGas+=N(d.expenses.gas); }
     });
+    dayGas+=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((t,e)=>t+N(e.amount),0);
     const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(V.gas(sh)*100)/100):0;
     exp+=gasAuto;
     exp+=(sh.showExpenses||[]).reduce((t,e)=>t+N(e.amount),0);
