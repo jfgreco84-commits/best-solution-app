@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v56';
+const APP_VERSION='v57';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1209,6 +1209,18 @@ function applyOneTimeUpdates(d){
       invLogPush(cran,{ts:new Date().toISOString(),type:'⛽ gas $4.30, Anthony from West Allis (v56)',changes:cars.map(c=>c.who+' '+trip(c.oneway)+' mi = $'+r2(trip(c.oneway)/c.mpg*gp).toFixed(2)),by:'owner'});
       d._applied['cranberry_gas_fix_v56']=true;
     }
+  }
+
+  // v57: Cranberry pay is the 35% commission, kept in sync on every save.
+  // Before this only Friday's pay was typed in (rounded), so Saturday's
+  // $1,513.59 was missing from profit. The sync itself runs after load.
+  if(!d._applied['cranberry_payout_v57']){
+    const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+    if(cran&&Array.isArray(cran.booths)&&cran.booths.length){
+      cran.payFromCommission=true;
+      invLogPush(cran,{ts:new Date().toISOString(),type:'💵 pay now follows the 35% commission (v57)',changes:['Friday pay corrected to the exact commission; Saturday pay added; Sunday fills in when counted'],by:'owner'});
+    }
+    d._applied['cranberry_payout_v57']=true;
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -2128,6 +2140,7 @@ function saveS(){
   // v41: a closed show whose counts were fixed afterwards pulls the garage along with it.
   let moved=[]; try{ moved=auditSyncReturns(); }catch(e){ console.warn('auditSync',e); }
   moved.forEach(m=>auditLogPush({ts:new Date().toISOString(),msg:m}));
+  try{ commissionSyncAll(); }catch(e){ console.warn('commissionSync',e); }
   S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();
   if(moved.length)setTimeout(()=>toast('🛡️ Audit: '+moved.join(' · '),5000),2300);
   cloudQueuePush();}
@@ -5422,13 +5435,16 @@ function rShow(){
   ${actBtn}
   </div>
   <div class="stab-pane" data-stab="teams" style="display:${showTabOf(sh)==='teams'?'block':'none'}">
+  ${_pd?'':payoutSheetHTML(sh)}
   ${_pd?'':teamScoreboardHTML(sh)}
   ${boothScoreboardHTML(sh)}
   ${_pd?'':showSellerCardHTML(sh)}
   ${(()=>{
     const allReps=(S.reps||[]).filter(r=>r.active);
     const assignedIds=sh.repIds||[];
-    const assigned=assignedIds.map(id=>allReps.find(r=>r.id===id)).filter(Boolean);
+    const _onCrew=id=>(sh.days||[]).some((d,di)=>showBooths(sh).some(b=>dayBoothCrew(sh,di,b.id).indexOf(id)>=0));
+    const assigned=assignedIds.map(id=>allReps.find(r=>r.id===id)).filter(Boolean)
+      .filter(r=>r.isSelf||!hasBooths(sh)||repShowPay(sh,r.id)>0||repShowSales(sh,r.id)>0||repPaid(r.id,sh.id)>0||_onCrew(r.id));
     const showPay=showRepPayTotal(sh);
     return`<div class="card" style="margin-top:10px;border-color:rgba(79,195,247,0.3)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -5457,13 +5473,14 @@ function rShow(){
           <div style="text-align:right;display:flex;align-items:flex-start;gap:8px">
             <div>
             ${r.isSelf?'<div style="color:var(--muted)">Owner — paid by profit</div>':`
-              ${actual>0?`<div style="color:var(--muted);font-size:10px">${hasLegacy?'Legacy per-show payout':daysPaid+' day'+(daysPaid!==1?'s':'')+' entered'}</div>
+              ${actual>0?`<div style="color:var(--muted);font-size:10px">${hasLegacy?'Legacy per-show payout':sh.payFromCommission?'commission, '+daysPaid+' day'+(daysPaid!==1?'s':''):daysPaid+' day'+(daysPaid!==1?'s':'')+' entered'}</div>
               <div style="color:var(--red);font-weight:700">Pay: ${fmt(actual)}</div>
               ${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid ${fmt(paid)}</div>`}`:'<div style="color:var(--muted)">No day pay yet</div>'}`}
             </div>
-            ${!r.isSelf?`<button class="btn btn-xs btn-ghost" title="Enter this rep's pay for each day of the show" onclick="openRepDayPay('${sh.id}','${r.id}')">💵 Day Pay</button>`:''}
+            ${!r.isSelf&&!sh.payFromCommission?`<button class="btn btn-xs btn-ghost" title="Enter this rep's pay for each day of the show" onclick="openRepDayPay('${sh.id}','${r.id}')">💵 Day Pay</button>`:''}
           </div>
         </div>`;}).join('')}
+      ${sh.payFromCommission?`<div style="font-size:10px;color:var(--muted);margin-top:6px">Pay here is the ${Math.round(showCommRate(sh)*100)}% commission and updates itself. Extras (like cooking) are below and are added in on the Payout Sheet.</div>`:''}
       ${showPay>0?`<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;font-weight:800">
         <span>Total Rep Pay</span><span style="color:var(--red)">-${fmt(showPay)}</span>
       </div>`:''}`}
@@ -5494,6 +5511,7 @@ function rShow(){
   })()}
   </div>
   <div class="stab-pane" data-stab="money" style="display:${showTabOf(sh)==='money'?'block':'none'}">
+  ${_pd?'':payoutSheetHTML(sh)}
   ${_pd?'':commissionCardHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
@@ -5946,10 +5964,11 @@ function commissionCardHTML(sh){
     <tr style="font-size:11px;color:#7EB8F7"><td style="padding:3px 4px">…running</td>${cumVol.map(v=>td(fmt(v))).join('')}${td('')}</tr>
   </table></div>${anyX?`<div style="font-size:10px;color:#7EB8F7;margin-top:4px">${Object.keys(extra).map(id=>'➕ '+_esc(sellerName(id))+' '+fmt(extra[id])+': '+_esc(extraNote[id])).join('<br>')}</div>`:''}`;
   return `<div class="card" id="commissionCard" style="margin-bottom:12px;border-color:var(--goldbd)">
-    <div style="font-size:15px;font-weight:900">💼 Commission (${pct}%)</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Every booth, every day: who worked it, what sold, what came in, what each person has coming. Your share of a booth you work is not paid out.</div>
+    <details><summary style="cursor:pointer;list-style:none"><div style="font-size:15px;font-weight:900">💼 Commission math, booth by booth ▾</div>
+    <div style="font-size:11px;color:var(--muted)">Tap to open. Every booth, every day: who worked it, what sold, what came in, and how the ${pct}% was split.</div></summary>
     ${dayHTML}
     <div style="border-top:2px solid var(--gold);padding-top:8px;margin-top:4px"><div style="font-size:11px;color:var(--gold);font-weight:900;text-transform:uppercase;margin-bottom:4px">📈 Running totals, each person, each day</div>${totRows}</div>
+    </details>
   </div>`;
 }
 function applyCommissionPay(shId,di){
@@ -5959,6 +5978,121 @@ function applyCommissionPay(shId,di){
   if(!Array.isArray(sh.repIds))sh.repIds=[]; Object.keys(x.pay).forEach(id=>{ if(sh.repIds.indexOf(id)<0)sh.repIds.push(id); });
   invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'💼 day pay set from commission',changes:[Object.keys(x.pay).map(id=>sellerName(id)+' '+fmt(x.pay[id])).join(' · ')],by:'owner'});
   saveS(); renderCur(); toast('💼 '+x.date+' day pay set');
+}
+/* ---------------------------------------------------------------------
+   v57 PAYOUT SHEET — one place to settle up at the end of a show.
+   A show with sh.payFromCommission keeps day.repPay equal to the
+   commission, every save, so the P&L, Reps & Workers and the payout
+   sheet can never disagree (before v57 only Friday was entered by hand
+   and Saturday's pay was missing from profit).
+   --------------------------------------------------------------------- */
+function commissionSyncPay(sh){
+  if(!sh||!sh.payFromCommission||!hasBooths(sh))return false;
+  let changed=false;
+  (sh.days||[]).forEach((d,di)=>{
+    const x=commissionDay(sh,di); if(!x)return;
+    const want={}; if(x.vol>0)Object.keys(x.pay).forEach(id=>{ if(x.pay[id]>0)want[id]=x.pay[id]; });
+    const have=d.repPay||{};
+    const same=Object.keys(want).length===Object.keys(have).length&&Object.keys(want).every(id=>Math.abs((parseFloat(have[id])||0)-want[id])<0.005);
+    if(!same){ d.repPay=want; changed=true; }
+  });
+  return changed;
+}
+function commissionSyncAll(){ let c=false; (S&&S.shows||[]).forEach(sh=>{ try{ if(commissionSyncPay(sh))c=true; }catch(e){ console.warn('commissionSync',e); } }); return c; }
+// "Day 1" + weekday for a show day, e.g. {n:'Day 1',wd:'Fri',date:'9/25'}
+function showDayLabel(sh,di){
+  const iso=(getShowDates(sh)||[])[di]; const d=(sh.days||[])[di]||{};
+  if(iso){ const t=new Date(iso+'T12:00:00'); return {n:'Day '+(di+1),wd:t.toLocaleDateString('en-US',{weekday:'short'}),date:(t.getMonth()+1)+'/'+t.getDate()}; }
+  return {n:'Day '+(di+1),wd:'',date:d.date||''};
+}
+// Extras on top of commission (a worker entry tied to a rep, e.g. Dave cooking)
+function showRepExtras(sh){
+  const out={}; (sh.workers||[]).forEach(w=>{ if(!w||!w.repId)return;
+    const o=out[w.repId]||(out[w.repId]={amt:0,paid:0,notes:[],ws:[]});
+    o.amt+=workerPayout(w); o.paid+=parseFloat(w.paid)||0; o.notes.push(w.role||w.payNote||'extra'); o.ws.push(w); });
+  return out;
+}
+// Everything the payout sheet shows, per person. Pure: reads state, writes nothing.
+function payoutSheetData(sh){
+  const days=(sh.days||[]).map((d,di)=>commissionDay(sh,di));
+  const extras=showRepExtras(sh), own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
+  const P={}; const get=id=>P[id]||(P[id]={id,name:sellerName(id),pay:[],sales:[],booth:[],comm:0,extra:0,extraPaid:0,notes:[]});
+  days.forEach((x,di)=>{ if(!x)return; x.rows.forEach(r=>{
+    r.people.forEach(p=>{ const o=get(p.id); o.pay[di]=(o.pay[di]||0)+p.amt; o.sales[di]=(o.sales[di]||0)+p.base; o.booth[di]=r.name; });
+    r.crew.forEach(id=>{ if(id===ownId)return; const o=get(id); if(!o.booth[di])o.booth[di]=r.name; });
+  }); });
+  Object.keys(extras).forEach(id=>{ const o=get(id); o.extra=extras[id].amt; o.extraPaid=extras[id].paid; o.notes=extras[id].notes; });
+  const r2=n=>Math.round(n*100)/100;
+  const people=Object.values(P).map(o=>{ o.comm=r2(o.pay.reduce((t,v)=>t+(v||0),0)); o.salesTot=r2(o.sales.reduce((t,v)=>t+(v||0),0));
+    o.total=r2(o.comm+o.extra); o.paid=r2(repPaid(o.id,sh.id)+o.extraPaid); o.owe=r2(Math.max(0,o.total-o.paid)); return o; })
+    .filter(o=>o.total>0||o.paid>0||o.booth.some(Boolean)).sort((a,b)=>b.total-a.total);
+  const dayInfo=days.map((x,di)=>({lbl:showDayLabel(sh,di),vol:x?x.vol:0,comm:x?x.out:0,closed:!!(x&&x.vol>0)}));
+  return {days:dayInfo,people,rate:showCommRate(sh),
+    vol:r2(dayInfo.reduce((t,d)=>t+d.vol,0)),comm:r2(people.reduce((t,o)=>t+o.comm,0)),extra:r2(people.reduce((t,o)=>t+o.extra,0)),
+    total:r2(people.reduce((t,o)=>t+o.total,0)),paid:r2(people.reduce((t,o)=>t+o.paid,0)),owe:r2(people.reduce((t,o)=>t+o.owe,0))};
+}
+function payoutSheetHTML(sh){
+  if(!sh||sh.status==='planned'||!hasBooths(sh))return '';
+  const X=payoutSheetData(sh); if(!X.people.length||X.vol<=0)return '';
+  const pct=Math.round(X.rate*100), nd=X.days.length;
+  const th=(t,al)=>`<th style="text-align:${al||'right'};padding:4px 3px;font-size:10px;color:var(--muted);font-weight:700;line-height:1.2;white-space:nowrap">${t}</th>`;
+  const td=(v,st)=>`<td style="text-align:right;padding:5px 3px;white-space:nowrap;${st||''}">${v}</td>`;
+  const money=v=>v>0?fmt(v).replace('.00',''):'<span style="color:var(--muted)">—</span>';
+  const cents=v=>fmt(v);
+  const dayHead=X.days.map(d=>th(`${d.lbl.n}<br><span style="color:var(--text);font-size:11px">${_esc(d.lbl.wd||d.lbl.date)}</span>`)).join('');
+  const status=X.days.map(d=>`<span style="white-space:nowrap">${d.closed?'✅':'⏳'} ${_esc(d.lbl.n)} ${_esc(d.lbl.wd)}${d.closed?'':' not in yet'}</span>`).join(' &nbsp; ');
+  const open=X.days.filter(d=>!d.closed).length;
+  // 1) Pay table
+  const payRows=X.people.map(o=>`<tr style="border-top:1px solid var(--border)">
+      <td style="padding:5px 3px;font-weight:800">${_esc(o.name)}${o.extra>0?`<div style="font-size:10px;color:#7EB8F7;font-weight:600">+ ${fmt(o.extra).replace('.00','')} ${_esc(o.notes.join('; '))}</div>`:''}</td>
+      ${X.days.map((d,di)=>td(o.pay[di]?cents(o.pay[di]):'<span style="color:var(--muted)">—</span>')).join('')}
+      ${td(cents(o.total),'font-weight:900;color:var(--gold);font-size:13px')}</tr>`).join('');
+  const payFoot=`<tr style="border-top:2px solid var(--gold);font-weight:900"><td style="padding:5px 3px">All reps</td>${X.days.map(d=>td(d.comm>0?cents(d.comm):'—')).join('')}${td(cents(X.total),'color:var(--gold)')}</tr>`;
+  // 2) Pay out now
+  const payList=X.people.filter(o=>o.total>0).map(o=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border)">
+      <div style="min-width:0"><div style="font-weight:800;font-size:13px">${_esc(o.name)}</div>
+        <div style="font-size:10px;color:var(--muted)">${o.paid>0?'paid '+fmt(o.paid)+' of '+fmt(o.total):'nothing paid yet'}</div></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        ${o.owe>0.004?`<div style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(o.owe)}</div><button class="btn btn-xs btn-gold" onclick="payoutMarkPaid('${sh.id}','${o.id}')">Paid ✓</button>`
+          :`<div style="font-size:13px;font-weight:900;color:var(--green)">✅ Paid up</div>`}
+      </div></div>`).join('');
+  // 3) Rep stats: sales credited and where they worked
+  const statRows=X.people.map(o=>`<tr style="border-top:1px solid var(--border)">
+      <td style="padding:5px 3px;font-weight:700">${_esc(o.name)}</td>
+      ${X.days.map((d,di)=>td(o.sales[di]?`${money(o.sales[di])}<div style="font-size:9px;color:var(--muted)">${_esc(String(o.booth[di]||'').replace('Booth ','B'))}</div>`:(o.booth[di]?`<span style="color:var(--muted)">—</span><div style="font-size:9px;color:var(--muted)">${_esc(String(o.booth[di]).replace('Booth ','B'))}</div>`:'<span style="color:var(--muted)">—</span>'))).join('')}
+      ${td(money(o.salesTot),'font-weight:900;color:var(--green)')}</tr>`).join('');
+  const statFoot=`<tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:5px 3px">All booths</td>${X.days.map(d=>td(money(d.vol))).join('')}${td(money(X.vol),'color:var(--green)')}</tr>`;
+  const tbl=(head,rows,foot)=>`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><tr>${th('Person','left')}${head}${th('Total')}</tr>${rows}${foot}</table></div>`;
+  return `<div class="card" id="payoutSheet" style="margin-bottom:12px;border:2px solid var(--gold)">
+    <div style="font-size:16px;font-weight:900">💵 Payout Sheet</div>
+    <div style="font-size:11px;color:var(--muted);margin:2px 0 6px">${pct}% of each booth's sales. Split crews share their booth's ${pct}% down the middle. Your share of your booth is not paid out.</div>
+    <div style="font-size:11px;margin-bottom:8px;line-height:1.7">${status}</div>
+    <div style="font-size:11px;color:var(--gold);font-weight:900;text-transform:uppercase;margin-bottom:2px">What each person has coming</div>
+    ${tbl(dayHead,payRows,payFoot)}
+    ${open?`<div style="font-size:11px;color:var(--gold);margin-top:6px">⏳ ${open===1?'One day is':open+' days are'} not in yet. Totals grow on their own as soon as that day's money is counted.</div>`:''}
+    <div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-top:10px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-size:11px;color:var(--gold);font-weight:900;text-transform:uppercase">Pay them out</div>
+        <div style="font-size:11px">Still owe <b style="color:var(--gold);font-size:14px">${fmt(X.owe)}</b>${X.paid>0?` · paid ${fmt(X.paid)}`:''}</div></div>
+      ${payList}
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Tap <b>Paid ✓</b> when the cash is in their hand. It logs the payment on their rep page and this show.</div>
+    </div>
+    <div style="font-size:11px;color:var(--green);font-weight:900;text-transform:uppercase;margin:12px 0 2px">Rep stats: sales credited · booth worked</div>
+    ${tbl(dayHead,statRows,statFoot)}
+    <div style="font-size:10px;color:var(--muted);margin-top:4px">Sales credited = what their ${pct}% is figured on. Split crews each get half their booth.</div>
+  </div>`;
+}
+function payoutMarkPaid(shId,repId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  const o=payoutSheetData(sh).people.find(p=>p.id===repId); if(!o||o.owe<=0.004)return;
+  if(typeof confirm==='function'&&!confirm('Log '+fmt(o.owe)+' paid to '+o.name+' for '+sh.name+'?'))return;
+  const rep=(S.reps||[]).find(r=>r.id===repId); if(!rep){ toast('Rep not found'); return; }
+  let left=o.owe;
+  // the extra (e.g. cooking) is tracked on its worker line; the rest is commission
+  (showRepExtras(sh)[repId]||{ws:[]}).ws.forEach(w=>{ const need=Math.max(0,workerPayout(w)-(parseFloat(w.paid)||0)); const put=Math.min(need,left); if(put>0){ w.paid=Math.round(((parseFloat(w.paid)||0)+put)*100)/100; left-=put; } });
+  left=Math.round(left*100)/100;
+  if(left>0){ if(!rep.payments)rep.payments=[]; rep.payments.push({id:'rp_'+Date.now(),date:_todayKey(),amount:left,note:'Commission payout · '+sh.name,method:'Cash',showId:sh.id}); }
+  invLogPush(sh,{ts:new Date().toISOString(),type:'💵 paid out',changes:[o.name+' '+fmt(o.owe)],by:'owner'});
+  saveS(); renderCur(); toast('💵 '+o.name+' paid '+fmt(o.owe));
 }
 function teamScoreboardHTML(sh){
   const teams=showTeams(sh); if(!teams.length)return '';
@@ -6338,7 +6472,7 @@ function rDay(sh,di){
     ${(()=>{
       // Per-rep sales tracking is GONE — the day's money is one total (Money column above).
       // The only per-person thing on a day is DAY PAY: the flat $ each rep gets for working it.
-      const payReps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+      const payReps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active&&(!sh.payFromCommission||repDayPay(d,r.id)>0));
       if(!payReps.length)return'';
       const dayPayT=calcDayPay(d);
       const repRows=payReps.map(rep=>{
@@ -6354,7 +6488,8 @@ function rDay(sh,di){
           ${dayPayT>0?`<div style="font-size:11px;color:var(--red);font-weight:700">${fmt(dayPayT)}</div>`:''}
         </div>
         ${repRows}
-        <button class="btn ${dayPayT>0?'btn-ghost':'btn-gold'} btn-full" style="margin-top:2px" onclick="openDayPay('${sh.id}',${di})">💵 ${dayPayT>0?'Edit':'Enter'} Day Pay</button>`;
+        ${sh.payFromCommission?`<div style="font-size:11px;color:var(--muted);margin-top:2px">Figured from the ${Math.round(showCommRate(sh)*100)}% commission on its own. Full breakdown: Teams tab → 💵 Payout Sheet.</div>`
+          :`<button class="btn ${dayPayT>0?'btn-ghost':'btn-gold'} btn-full" style="margin-top:2px" onclick="openDayPay('${sh.id}',${di})">💵 ${dayPayT>0?'Edit':'Enter'} Day Pay</button>`}`;
     })()}
   </div>`;
 }
@@ -6712,19 +6847,36 @@ function saveMoney(shId,di,boothId){
   mClose();saveS();
   toast((tgtBooth?boothName(sh,tgtBooth)+': ':'')+'Money count saved!'+(added.length?' '+added.join(', ')+' added to the crew.':''));
 }
-// Who rang it up — the whole-show card on the show screen.
+// Who rang it up — per day and whole show (v57). Cash/card split tucked below.
+function showSellerByDay(sh){
+  const acc={}; const nd=(sh.days||[]).length;
+  eachDrawer(sh,(src,d,di)=>{ drawerSellers(src).forEach(id=>{
+    const o=acc[id]||(acc[id]={repId:id,name:sellerName(id),isSelf:sellerIsOwner(id),day:Array(nd).fill(0),total:0});
+    const v=calcPmt(src.sellerPayments[id]||{}); o.day[di]+=v; o.total+=v; }); });
+  return Object.values(acc).sort((a,b)=>b.total-a.total);
+}
 function showSellerCardHTML(sh){
   const rows=showSellerTotals(sh); if(rows.length<1)return '';
+  const byDay=showSellerByDay(sh), nd=(sh.days||[]).length;
   const g=rows.reduce((t,r)=>t+r.total,0);
-  const cell=(v,st2)=>`<td style="text-align:right;padding:3px 4px;${st2||''}">${fmt(v)}</td>`;
+  const cell=(v,st2)=>`<td style="text-align:right;padding:4px 3px;white-space:nowrap;${st2||''}">${v>0?fmt(v):'<span style="color:var(--muted)">—</span>'}</td>`;
+  const hd=t=>`<th style="text-align:right;padding:3px;line-height:1.2">${t}</th>`;
+  const dayHd=(sh.days||[]).map((d,di)=>{ const l=showDayLabel(sh,di); return hd(l.n+'<br><span style="color:var(--text)">'+_esc(l.wd||l.date)+'</span>'); }).join('');
+  const dayTot=di=>byDay.reduce((t,r)=>t+r.day[di],0);
   return `<div class="card" style="margin-bottom:12px">
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">👥 Who rang it up</div>
-    <table style="width:100%;border-collapse:collapse;font-size:11px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">👥 Who rang it up</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Only booths where the money was counted by person. Booths counted as one total are not in here. This is part of the day totals, not a second set of books.</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px">Person</th>${dayHd}${hd('Total')}</tr>
+      ${byDay.map(r=>`<tr style="border-top:1px solid var(--border)"><td style="padding:4px 3px;font-weight:700">${_esc(r.name)}${r.isSelf?' 👑':''}</td>${r.day.map(v=>cell(v)).join('')}${cell(r.total,'font-weight:900;color:var(--gold)')}</tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px 3px">Total</td>${Array.from({length:nd},(x,di)=>cell(dayTot(di))).join('')}${cell(g,'color:var(--gold)')}</tr>
+    </table></div>
+    <details style="margin-top:6px"><summary style="font-size:11px;color:#7EB8F7;cursor:pointer">Cash / card / apps split ▾</summary>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
       <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Person</th><th style="text-align:right;padding:3px 4px">Cash</th><th style="text-align:right;padding:3px 4px">Card</th><th style="text-align:right;padding:3px 4px">Apps</th><th style="text-align:right;padding:3px 4px">Total</th></tr>
       ${rows.map(r=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px;font-weight:700">${_esc(r.name)}${r.isSelf?' 👑':''}</td>${cell(sellerCash(r.payments))}${cell(sellerCard(r.payments))}${cell(sellerApps(r.payments))}${cell(r.total,'font-weight:900;color:var(--gold)')}</tr>`).join('')}
-      <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:4px">Total</td>${cell(rows.reduce((t,r)=>t+sellerCash(r.payments),0))}${cell(rows.reduce((t,r)=>t+sellerCard(r.payments),0))}${cell(rows.reduce((t,r)=>t+sellerApps(r.payments),0))}${cell(g,'color:var(--gold)')}</tr>
     </table>
-    <div style="font-size:10px;color:var(--muted);margin-top:6px">Card = Square + Debit. Apps = Venmo, Zelle, Cash App, PayPal. These add into the day totals — they are not a second set of books.</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:4px">Card = Square + Debit. Apps = Venmo, Zelle, Cash App, PayPal.</div></details>
   </div>`;
 }
 function showExpModal(shId,di){
@@ -7788,7 +7940,7 @@ function saveEditRep(repId){
 // Two ways in, same data (day.repPay): per DAY for everyone (openDayPay, the daily workflow),
 // or per REP across all the show's days (openRepDayPay, from the show's rep list).
 function openDayPay(shId,di){
-  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
+  const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; if(sh.payFromCommission){toast('💵 Pay on this show is the commission. See Teams → Payout Sheet.');return;}
   const reps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active);
   if(!reps.length){toast('Assign reps to this show first');return;}
   mOpen(`<div class="mh"><div class="mt">💵 Day Pay — ${d.date||'Day '+(di+1)}</div><button class="mx" onclick="mClose()">×</button></div>
@@ -7805,7 +7957,7 @@ function saveDayPay(shId,di){
 // Per-rep view: one input per show day, plus pay method/note and an optional payment log.
 function openRepDayPay(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);const rep=(S.reps||[]).find(r=>r.id===repId);
-  if(!sh||!rep)return;
+  if(!sh||!rep)return; if(sh.payFromCommission){toast('💵 Pay on this show is the commission. See Teams → Payout Sheet.');return;}
   const meta=(sh.repPayMeta&&sh.repPayMeta[repId])||{};
   const paidThis=repPaid(repId,sh.id);
   const legacyOv=sh.repPayout&&sh.repPayout[repId];
@@ -8244,6 +8396,7 @@ function adoptCloud(cloud){
   mrgInheritSeedMarkers(cloud,typeof S!=='undefined'?S:null);
   localStorage.setItem('dd_bs_v7',JSON.stringify(cloud));
   S=loadS();
+  try{ if(commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
   renderCur();
   setSync('synced');
 }
@@ -11560,6 +11713,7 @@ function pkgSettingsCard(){
 // ===================================================
 try{
   S=loadS();
+  try{ if(commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
   go('home');
   cloudInit();
 }catch(e){
