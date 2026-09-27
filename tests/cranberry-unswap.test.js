@@ -31,6 +31,7 @@ function build(tweak){
   ctx.boothSetStock(sh,1,C,'morning',cnt([21,37,76,9,130,36]));
   if(tweak)tweak(ctx,sh);
   delete ctx.S._applied['cranberry_day1_unswap_v47'];
+  ctx.S._applied['cranberry_regular_prices_v52']=true; // keep this fixture's show prices
   const seed={}; seed[KEY]=JSON.stringify(ctx.S);
   const c=boot(seed).ctx; return {c,sh:c.S.shows.find(s=>s.id==='cran')};
 }
