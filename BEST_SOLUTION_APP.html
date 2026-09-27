@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v53';
+const APP_VERSION='v54';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -5857,12 +5857,14 @@ function commissionCardHTML(sh){
   if(!days.length)return '';
   const tot={}; days.forEach(x=>Object.keys(x.pay).forEach(id=>tot[id]=(tot[id]||0)+x.pay[id]));
   const pct=Math.round(showCommRate(sh)*100);
+  let runV=0, runC=0;
   const dayHTML=days.map(x=>{
-    const d=sh.days[x.di];
+    const d=sh.days[x.di]; runV+=x.vol; runC+=x.out;
     const same=Object.keys(x.pay).every(id=>Math.abs(repDayPay(d,id)-x.pay[id])<0.01);
     return `<div style="border-top:1px solid var(--border);padding:8px 0">
       <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-weight:900;font-size:13px">${_esc(x.date)}</div>
         <div style="font-size:11px;color:var(--muted)">volume <b style="color:var(--green)">${fmt(x.vol)}</b> · ${pct}% <b style="color:var(--gold)">${fmt(x.comm)}</b> · paying out <b style="color:var(--gold)">${fmt(x.out)}</b></div></div>
+      <div style="font-size:10px;color:#7EB8F7;margin-top:2px">📈 Running total so far: volume ${fmt(runV)} · commission ${fmt(runC)}</div>
       ${x.rows.map(r=>`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px;margin-top:6px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
           <div style="font-size:12px;font-weight:800">🏬 ${_esc(r.name)} <span style="color:#7EB8F7">${_esc(r.crew.map(sellerName).join(' + ')||'no crew marked')}</span></div>
@@ -5873,13 +5875,27 @@ function commissionCardHTML(sh){
       </div>`).join('')}
       ${same?`<div style="font-size:10px;color:var(--green);margin-top:5px">✓ Day pay matches</div>`:`<button class="btn btn-xs btn-gold btn-full" style="margin-top:6px" onclick="applyCommissionPay('${sh.id}',${x.di})">Use these as ${_esc(x.date)} day pay</button>`}
     </div>`; }).join('');
-  const totRows=Object.keys(tot).sort((a,b)=>tot[b]-tot[a]).map(id=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>${_esc(sellerName(id))}</span><b style="color:var(--gold)">${fmt(tot[id])}</b></div>`).join('');
+  // v54: running (accumulative) table, person x day, then the running total
+  const ids=Object.keys(tot).sort((a,b)=>tot[b]-tot[a]);
+  const th=t=>`<th style="text-align:right;padding:3px 4px;font-size:10px;color:var(--muted);text-transform:uppercase">${t}</th>`;
+  const td=(v,c)=>`<td style="text-align:right;padding:3px 4px;${c||''}">${v}</td>`;
+  const short=x=>_esc(String(x.date).replace(/^[A-Za-z]{3,}\s*/,m=>m.slice(0,3)+' '));
+  let cum={}; ids.forEach(id=>cum[id]=0);
+  const cumRows=days.map(x=>{ ids.forEach(id=>cum[id]=Math.round((cum[id]+(x.pay[id]||0))*100)/100); return {...cum}; });
+  let cv=0, cc=0; const cumVol=days.map(x=>cv+=x.vol), cumCom=days.map(x=>cc+=x.out);
+  const totRows=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr><th style="text-align:left;padding:3px 4px;font-size:10px;color:var(--muted);text-transform:uppercase">Person</th>${days.map(x=>th(short(x))).join('')}${th('Running total')}</tr>
+    ${ids.map(id=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${_esc(sellerName(id))}</td>${days.map(x=>td(x.pay[id]?fmt(x.pay[id]):'—')).join('')}${td(fmt(tot[id]),'font-weight:900;color:var(--gold)')}</tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:3px 4px">Commission</td>${days.map(x=>td(fmt(x.out))).join('')}${td(fmt(cc),'color:var(--gold)')}</tr>
+    <tr style="font-size:11px;color:#7EB8F7"><td style="padding:3px 4px">…running</td>${cumCom.map(v=>td(fmt(v))).join('')}${td('')}</tr>
+    <tr style="border-top:1px solid var(--border);font-weight:900"><td style="padding:3px 4px">Volume</td>${days.map(x=>td(fmt(x.vol))).join('')}${td(fmt(cv),'color:var(--green)')}</tr>
+    <tr style="font-size:11px;color:#7EB8F7"><td style="padding:3px 4px">…running</td>${cumVol.map(v=>td(fmt(v))).join('')}${td('')}</tr>
+  </table></div>`;
   return `<div class="card" id="commissionCard" style="margin-bottom:12px;border-color:var(--goldbd)">
     <div style="font-size:15px;font-weight:900">💼 Commission (${pct}%)</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Every booth, every day: who worked it, what sold, what came in, what each person has coming. Your share of a booth you work is not paid out.</div>
     ${dayHTML}
-    <div style="border-top:2px solid var(--gold);padding-top:8px;margin-top:4px"><div style="font-size:11px;color:var(--gold);font-weight:900;text-transform:uppercase;margin-bottom:4px">Whole show, each person</div>${totRows}
-      <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:900;border-top:1px solid var(--border);margin-top:4px;padding-top:4px"><span>Total commission</span><span style="color:var(--gold)">${fmt(Object.values(tot).reduce((a,b)=>a+b,0))}</span></div></div>
+    <div style="border-top:2px solid var(--gold);padding-top:8px;margin-top:4px"><div style="font-size:11px;color:var(--gold);font-weight:900;text-transform:uppercase;margin-bottom:4px">📈 Running totals, each person, each day</div>${totRows}</div>
   </div>`;
 }
 function applyCommissionPay(shId,di){
