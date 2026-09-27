@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v49';
+const APP_VERSION='v50';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1096,6 +1096,41 @@ function applyOneTimeUpdates(d){
         d._applied['cranberry_weekend_v49']=true;
       }
     }catch(e){ console.error('cranberry_weekend_v49',e); }
+  }
+
+  // v50: Cranberry Sunday morning, from Froggy's Sep 27 messages. Saturday
+  // fixes: Booth 1 close C5S 83→82 (miscount), Booth 3 close 8oz 61→60 and
+  // C5S 121→123 (miscount) with 1 8oz lost overnight. The C5L that left
+  // Booth 3 overnight is the one Booth 2 gained, so nothing else is lost.
+  // Sunday: crews (TJ + Dave B1, Les + Anthony B2, Froggy + Cutty B3) and
+  // all three openings. Runs only if Saturday is still exactly what v49
+  // entered and Sunday has no close or money yet.
+  if(!d._applied['cranberry_sunday_v50']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25')&&sh.status==='active');
+      const K=['32oz','16oz','8oz','2oz','c5s','c5l'];
+      const c=a=>{const r={};K.forEach((k,i)=>r[k]=a[i]);return r;};
+      const eq=(o,v)=>!!o&&K.every((k,i)=>(parseInt(o[k])||0)===v[i]);
+      const d1=cran&&cran.days&&cran.days[1], d2=cran&&cran.days&&cran.days[2];
+      const s=b=>(d1&&d1.boothCounts||{})[b]||{};
+      const OPEN={booth1:[13,28,35,30,82,33],booth2:[18,29,53,34,84,58],booth3:[11,35,60,82,123,57]};
+      const sunOk=d2&&!d2.locked&&['booth1','booth2','booth3'].every(b=>{ const e=(d2.boothCounts||{})[b]; return !e||(!e.eveningCount&&!(e.payments&&calcPmt(e.payments)>0)&&(!e.morningCount||e.morningSeeded||eq(e.morningCount,OPEN[b]))); });
+      const ok=cran&&d1&&d2&&!d1.locked&&sunOk&&d._applied['cranberry_weekend_v49']
+        &&eq(s('booth1').eveningCount,[13,28,35,30,83,33])&&eq(s('booth3').eveningCount,[11,35,61,46,121,58])&&eq(s('booth2').eveningCount,[18,29,53,70,84,57]);
+      if(ok){
+        const ts=new Date().toISOString();
+        boothSetStock(cran,1,'booth1','evening',c([13,28,35,30,82,33]));
+        boothSetStock(cran,1,'booth3','evening',c([11,35,60,46,123,58]));
+        const e3=dayBoothWrite(d1,'booth3'); e3.lost=Object.assign({},e3.lost||{}); e3.lost['8oz']=(parseInt(e3.lost['8oz'])||0)+1;
+        rollupDay(cran,1);
+        d2.boothCrew={booth1:['rep_tj','rep_dave'],booth2:['rep_les','rep_anthony'],booth3:['rep_justin','rep_cutty']};
+        Object.keys(OPEN).forEach(b=>boothSetStock(cran,2,b,'morning',c(OPEN[b])));
+        rollupDay(cran,2);
+        invLogPush(cran,{ts,di:2,date:d2.date,type:'🧾 Cranberry Sunday morning (v50)',changes:['Saturday: Booth 1 close C5-S 83→82 (miscount); Booth 3 close 8oz 61→60, C5-S 121→123 (miscount); Booth 3 lost 1 8oz overnight. The C5-L Booth 3 lost overnight is the one Booth 2 gained.','Sunday crews: Booth 1 TJ + Dave, Booth 2 Les + Anthony, Booth 3 Froggy + Cutty.','Sunday openings: B1 13/28/35/30/82/33, B2 18/29/53/34/84/58, B3 11/35/60/82/123/57.'],by:'owner'});
+        auditState(d).log.push({ts,showId:cran.id,show:cran.name,msg:'Cranberry Sunday (v50): Saturday miscounts fixed, 1 8oz lost, Sunday crews and openings entered.'});
+        d._applied['cranberry_sunday_v50']=true;
+      }
+    }catch(e){ console.error('cranberry_sunday_v50',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
