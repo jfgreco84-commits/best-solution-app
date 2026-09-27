@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v52';
+const APP_VERSION='v53';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -5442,6 +5442,7 @@ function rShow(){
   })()}
   </div>
   <div class="stab-pane" data-stab="money" style="display:${showTabOf(sh)==='money'?'block':'none'}">
+  ${_pd?'':commissionCardHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
     <div><div class="sl">Profit</div><div class="sv ${t.profit>=0?'g':'r'}">${fmt(t.profit)}</div></div>
@@ -5813,6 +5814,81 @@ function _pmtChips(p){
   const on=PMTS.filter(x=>(p[x.key]||0)>0);
   if(!on.length)return '<span style="color:var(--muted);font-size:11px">no money in yet</span>';
   return on.map(x=>`<span class="chip" style="font-size:10px;border-color:${x.color};color:${x.color}">${x.icon} ${x.label} ${fmt(p[x.key])}</span>`).join('');
+}
+/* ---------------------------------------------------------------------
+   COMMISSION TALLY (v53). Each booth-day pays 35% of what its drawer took
+   in. Who gets it:
+     - a booth the owner works: the other crew get an equal share of the 35%
+       (Cutty = half of 35% when it is Froggy + Cutty); the owner's share is
+       not paid out.
+     - a booth whose drawer is split by person: each person gets 35% of
+       their own sales (Les, Anthony).
+     - otherwise the crew split the booth's 35% evenly (TJ + Dave, halves).
+   Read-only; "Use as day pay" writes it to day.repPay on request.
+   --------------------------------------------------------------------- */
+function showCommRate(sh){ const r=parseFloat(sh&&sh.commissionRate); return isFinite(r)&&r>0?r:0.35; }
+function commissionDay(sh,di){
+  const d=(sh.days||[])[di]; if(!d)return null;
+  const rate=showCommRate(sh), own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
+  const round=n=>Math.round(n*100)/100;
+  const booths=hasBooths(sh)?showBooths(sh):[{id:null,name:'Table'}];
+  const pay={}, rows=[];
+  booths.forEach(b=>{
+    const en=b.id?(dayBoothRead(d,b.id)||{}):d;
+    const vol=calcPmt(en.payments||{}); const sold=b.id?boothSold(d,b.id):(d.morningCount&&d.eveningCount?daySold(d):null);
+    const units=sold?SKUS.reduce((t,s)=>t+(sold[s.key]||0),0):null;
+    const crew=b.id?dayBoothCrew(sh,di,b.id):showRepIds(sh);
+    const comm=round(vol*rate), people=[];
+    const sellers=drawerSellers(en).filter(id=>calcPmt(en.sellerPayments[id]||{})>0);
+    const ownerIn=ownId&&crew.indexOf(ownId)>=0;
+    let how='';
+    if(!ownerIn&&sellers.length){ how='each 35% of their own sales';
+      sellers.forEach(id=>{ const v=calcPmt(en.sellerPayments[id]||{}); people.push({id,base:v,amt:round(v*rate)}); }); }
+    else if(crew.length){ const n=crew.length; how=ownerIn?(n>1?'split '+n+' ways, owner share kept':'owner only'):(n>1?'split '+n+' ways':'');
+      crew.forEach(id=>{ if(id===ownId)return; people.push({id,base:round(vol/n),amt:round(comm/n)}); }); }
+    people.forEach(p=>{ pay[p.id]=round((pay[p.id]||0)+p.amt); });
+    rows.push({boothId:b.id,name:b.name,crew,vol,units,sold,comm,people,how,paid:people.reduce((t,p)=>t+p.amt,0)});
+  });
+  return {di,date:d.date||('Day '+(di+1)),rate,rows,pay,vol:rows.reduce((t,r)=>t+r.vol,0),comm:rows.reduce((t,r)=>t+r.comm,0),out:round(Object.values(pay).reduce((t,v)=>t+v,0))};
+}
+function commissionCardHTML(sh){
+  if(!sh||sh.status==='planned')return '';
+  const days=(sh.days||[]).map((d,i)=>commissionDay(sh,i)).filter(x=>x&&x.vol>0);
+  if(!days.length)return '';
+  const tot={}; days.forEach(x=>Object.keys(x.pay).forEach(id=>tot[id]=(tot[id]||0)+x.pay[id]));
+  const pct=Math.round(showCommRate(sh)*100);
+  const dayHTML=days.map(x=>{
+    const d=sh.days[x.di];
+    const same=Object.keys(x.pay).every(id=>Math.abs(repDayPay(d,id)-x.pay[id])<0.01);
+    return `<div style="border-top:1px solid var(--border);padding:8px 0">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-weight:900;font-size:13px">${_esc(x.date)}</div>
+        <div style="font-size:11px;color:var(--muted)">volume <b style="color:var(--green)">${fmt(x.vol)}</b> · ${pct}% <b style="color:var(--gold)">${fmt(x.comm)}</b> · paying out <b style="color:var(--gold)">${fmt(x.out)}</b></div></div>
+      ${x.rows.map(r=>`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px;margin-top:6px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+          <div style="font-size:12px;font-weight:800">🏬 ${_esc(r.name)} <span style="color:#7EB8F7">${_esc(r.crew.map(sellerName).join(' + ')||'no crew marked')}</span></div>
+          <div style="font-size:12px;font-weight:900;color:var(--green)">${fmt(r.vol)}</div></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${r.units!=null?r.units+' units sold · '+SKUS.filter(s=>(r.sold[s.key]||0)>0).map(s=>s.short+' '+r.sold[s.key]).join(' · '):'not counted yet'}</div>
+        <div style="font-size:11px;margin-top:4px">${pct}% = <b style="color:var(--gold)">${fmt(r.comm)}</b>${r.how?' · '+r.how:''}</div>
+        ${r.people.map(p=>{ const e=repDayPay(d,p.id); return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0 0 8px"><span>💵 ${_esc(sellerName(p.id))} <span style="color:var(--muted);font-size:10px">on ${fmt(p.base)}</span></span><span><b style="color:var(--gold)">${fmt(p.amt)}</b>${e>0&&Math.abs(e-p.amt)>=0.01?` <span style="color:var(--red);font-size:10px">(entered ${fmt(e)})</span>`:e>0?' <span style="color:var(--green);font-size:10px">✓</span>':''}</span></div>`; }).join('')}
+      </div>`).join('')}
+      ${same?`<div style="font-size:10px;color:var(--green);margin-top:5px">✓ Day pay matches</div>`:`<button class="btn btn-xs btn-gold btn-full" style="margin-top:6px" onclick="applyCommissionPay('${sh.id}',${x.di})">Use these as ${_esc(x.date)} day pay</button>`}
+    </div>`; }).join('');
+  const totRows=Object.keys(tot).sort((a,b)=>tot[b]-tot[a]).map(id=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>${_esc(sellerName(id))}</span><b style="color:var(--gold)">${fmt(tot[id])}</b></div>`).join('');
+  return `<div class="card" id="commissionCard" style="margin-bottom:12px;border-color:var(--goldbd)">
+    <div style="font-size:15px;font-weight:900">💼 Commission (${pct}%)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Every booth, every day: who worked it, what sold, what came in, what each person has coming. Your share of a booth you work is not paid out.</div>
+    ${dayHTML}
+    <div style="border-top:2px solid var(--gold);padding-top:8px;margin-top:4px"><div style="font-size:11px;color:var(--gold);font-weight:900;text-transform:uppercase;margin-bottom:4px">Whole show, each person</div>${totRows}
+      <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:900;border-top:1px solid var(--border);margin-top:4px;padding-top:4px"><span>Total commission</span><span style="color:var(--gold)">${fmt(Object.values(tot).reduce((a,b)=>a+b,0))}</span></div></div>
+  </div>`;
+}
+function applyCommissionPay(shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const x=commissionDay(sh,di); if(!x)return;
+  const d=sh.days[di]; d.repPay=Object.assign({},d.repPay||{});
+  Object.keys(x.pay).forEach(id=>{ d.repPay[id]=x.pay[id]; });
+  if(!Array.isArray(sh.repIds))sh.repIds=[]; Object.keys(x.pay).forEach(id=>{ if(sh.repIds.indexOf(id)<0)sh.repIds.push(id); });
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'💼 day pay set from commission',changes:[Object.keys(x.pay).map(id=>sellerName(id)+' '+fmt(x.pay[id])).join(' · ')],by:'owner'});
+  saveS(); renderCur(); toast('💼 '+x.date+' day pay set');
 }
 function teamScoreboardHTML(sh){
   const teams=showTeams(sh); if(!teams.length)return '';
