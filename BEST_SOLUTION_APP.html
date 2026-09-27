@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v54';
+const APP_VERSION='v55';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1156,6 +1156,38 @@ function applyOneTimeUpdates(d){
       cran.prices=Object.assign({},d.prices||{});
       invLogPush(cran,{ts:new Date().toISOString(),type:'💲 back to regular prices (v52)',changes:[SKUS.map(s=>s.short+' $'+(parseFloat((d.prices||{})[s.key])||s.defP)).join(' · ')],by:'owner'});
       d._applied['cranberry_regular_prices_v52']=true;
+    }
+  }
+
+  // v55: Cranberry travel + food (Froggy, Sep 27). Three vehicles:
+  //   Froggy Ram 1500 (17.5 mpg) from Waterford; TJ GMC Terrain (23) and
+  //   Anthony Impala (14) from Cudahy. Route: home -> Warrens -> Merrillan
+  //   (Airbnb), Merrillan <-> Warrens Fri + Sat, Merrillan -> Warrens Sun,
+  //   Warrens -> home. Legs: Waterford-Warrens 180, Cudahy-Warrens 185,
+  //   Warrens-Merrillan 35 (via Black River Falls: 23 + 12).
+  //   Ram 570 mi, Terrain 580, Impala 580, at the app gas price.
+  //   Food: steaks $145, groceries $172, groceries + lunches $40.
+  //   Dave +$200 for cooking and bringing food (worker line, noted).
+  if(!d._applied['cranberry_travel_food_v55']){
+    const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+    if(cran){
+      const gp=(cran.gasPrice!=null&&cran.gasPrice!=='')?(parseFloat(cran.gasPrice)||4):((d.settings&&parseFloat(d.settings.gasPrice))||4);
+      const r2=n=>Math.round(n*100)/100, trip=h=>2*h+35+4*35+35;
+      const cars=[{id:'se_cran26_gas_ram',who:'Froggy',car:'Ram 1500',mpg:17.5,from:'Waterford',oneway:180},
+                  {id:'se_cran26_gas_terrain',who:'TJ',car:'GMC Terrain',mpg:23,from:'Cudahy',oneway:185},
+                  {id:'se_cran26_gas_impala',who:'Anthony',car:'Chevy Impala',mpg:14,from:'Cudahy',oneway:185}];
+      cran.showExpenses=Array.isArray(cran.showExpenses)?cran.showExpenses:[];
+      const has=id=>cran.showExpenses.some(e=>e&&e.id===id);
+      cars.forEach(c=>{ const mi=trip(c.oneway), gal=mi/c.mpg; if(!has(c.id))cran.showExpenses.push({id:c.id,cat:'fuel',date:'2026-09-24',amount:r2(gal*gp),
+        desc:c.who+' · '+c.car+' ('+c.mpg+' mpg) from '+c.from+': '+c.oneway+' + '+c.oneway+' home, Warrens→Merrillan 35, Merrillan↔Warrens 4×35 Fri/Sat, Merrillan→Warrens 35 Sun = '+mi+' mi, '+gal.toFixed(1)+' gal @ $'+gp.toFixed(2)}); });
+      [{id:'se_cran26_food_steak',amount:145,desc:'Steaks for the crew'},{id:'se_cran26_food_groc',amount:172,desc:'Groceries'},{id:'se_cran26_food_lunch',amount:40,desc:'More groceries + lunches'}]
+        .forEach(f=>{ if(!has(f.id))cran.showExpenses.push({id:f.id,cat:'food',date:'2026-09-26',amount:f.amount,desc:f.desc}); });
+      cran.workers=Array.isArray(cran.workers)?cran.workers:[];
+      if(!cran.workers.some(w=>w&&w.id==='wk_cran26_dave_food'))cran.workers.push({id:'wk_cran26_dave_food',repId:'rep_dave',name:'Dave',role:'Cooking + brought food for the crew',type:'flat',amount:200,paid:0,payMethod:'Cash',payNote:'Extra $200 on top of commission: cooked all weekend and brought a bunch of food.'});
+      cran.miles=180; cran.totalMiles=trip(180); cran.mpg=17.5;
+      cran.notes=(cran.notes?cran.notes+' ':'')+'Travel (v55): Froggy Ram from Waterford 570 mi; TJ Terrain + Anthony Impala from Cudahy 580 mi each; Airbnb in Merrillan, 35 mi each way to the show via Black River Falls.';
+      invLogPush(cran,{ts:new Date().toISOString(),type:'⛽ travel + food + Dave extra (v55)',changes:cars.map(c=>c.who+' '+c.car+' '+trip(c.oneway)+' mi = $'+r2(trip(c.oneway)/c.mpg*gp).toFixed(2)).concat(['Food $145 + $172 + $40','Dave +$200 cooking / food (worker line)']),by:'owner'});
+      d._applied['cranberry_travel_food_v55']=true;
     }
   }
 
@@ -4112,7 +4144,7 @@ function showGas(sh){
   const mpg=showMpg(sh)||17.5, gp=showGasPrice(sh);
   return (sh.miles||0)*2*showRoundTrips(sh)/mpg*gp;
 }
-function showMiles(sh){ return (sh.miles||0)*2*showRoundTrips(sh); }
+function showMiles(sh){ const t=parseFloat(sh&&sh.totalMiles); if(isFinite(t)&&t>0)return t; return (sh.miles||0)*2*showRoundTrips(sh); } // v55: totalMiles = the owner's real route when it is not a simple back-and-forth
 function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax||0.28); }
 // Card/Square sales = taxable base. Counts only card-type payments (Square + Debit), NOT cash/Venmo/Zelle/etc.
 function showCardSales(sh){
@@ -5856,6 +5888,8 @@ function commissionCardHTML(sh){
   const days=(sh.days||[]).map((d,i)=>commissionDay(sh,i)).filter(x=>x&&x.vol>0);
   if(!days.length)return '';
   const tot={}; days.forEach(x=>Object.keys(x.pay).forEach(id=>tot[id]=(tot[id]||0)+x.pay[id]));
+  const extra={}, extraNote={}; (sh.workers||[]).forEach(w=>{ if(w&&w.repId){ extra[w.repId]=(extra[w.repId]||0)+workerPayout(w); extraNote[w.repId]=(extraNote[w.repId]?extraNote[w.repId]+'; ':'')+(w.role||w.payNote||'extra'); if(tot[w.repId]==null)tot[w.repId]=0; } });
+  const anyX=Object.keys(extra).length>0;
   const pct=Math.round(showCommRate(sh)*100);
   let runV=0, runC=0;
   const dayHTML=days.map(x=>{
@@ -5884,13 +5918,13 @@ function commissionCardHTML(sh){
   const cumRows=days.map(x=>{ ids.forEach(id=>cum[id]=Math.round((cum[id]+(x.pay[id]||0))*100)/100); return {...cum}; });
   let cv=0, cc=0; const cumVol=days.map(x=>cv+=x.vol), cumCom=days.map(x=>cc+=x.out);
   const totRows=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
-    <tr><th style="text-align:left;padding:3px 4px;font-size:10px;color:var(--muted);text-transform:uppercase">Person</th>${days.map(x=>th(short(x))).join('')}${th('Running total')}</tr>
-    ${ids.map(id=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${_esc(sellerName(id))}</td>${days.map(x=>td(x.pay[id]?fmt(x.pay[id]):'—')).join('')}${td(fmt(tot[id]),'font-weight:900;color:var(--gold)')}</tr>`).join('')}
-    <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:3px 4px">Commission</td>${days.map(x=>td(fmt(x.out))).join('')}${td(fmt(cc),'color:var(--gold)')}</tr>
+    <tr><th style="text-align:left;padding:3px 4px;font-size:10px;color:var(--muted);text-transform:uppercase">Person</th>${days.map(x=>th(short(x))).join('')}${th('Running total')}${anyX?th('Extra')+th('Total owed'):''}</tr>
+    ${ids.map(id=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${_esc(sellerName(id))}</td>${days.map(x=>td(x.pay[id]?fmt(x.pay[id]):'—')).join('')}${td(fmt(tot[id]),'font-weight:900;color:var(--gold)')}${anyX?td(extra[id]?fmt(extra[id]):'—','color:#7EB8F7')+td(fmt(tot[id]+(extra[id]||0)),'font-weight:900;color:var(--green)'):''}</tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:900"><td style="padding:3px 4px">Commission</td>${days.map(x=>td(fmt(x.out))).join('')}${td(fmt(cc),'color:var(--gold)')}${anyX?td(fmt(Object.values(extra).reduce((a,b)=>a+b,0)),'color:#7EB8F7')+td(fmt(cc+Object.values(extra).reduce((a,b)=>a+b,0)),'color:var(--green)'):''}</tr>
     <tr style="font-size:11px;color:#7EB8F7"><td style="padding:3px 4px">…running</td>${cumCom.map(v=>td(fmt(v))).join('')}${td('')}</tr>
     <tr style="border-top:1px solid var(--border);font-weight:900"><td style="padding:3px 4px">Volume</td>${days.map(x=>td(fmt(x.vol))).join('')}${td(fmt(cv),'color:var(--green)')}</tr>
     <tr style="font-size:11px;color:#7EB8F7"><td style="padding:3px 4px">…running</td>${cumVol.map(v=>td(fmt(v))).join('')}${td('')}</tr>
-  </table></div>`;
+  </table></div>${anyX?`<div style="font-size:10px;color:#7EB8F7;margin-top:4px">${Object.keys(extra).map(id=>'➕ '+_esc(sellerName(id))+' '+fmt(extra[id])+': '+_esc(extraNote[id])).join('<br>')}</div>`:''}`;
   return `<div class="card" id="commissionCard" style="margin-bottom:12px;border-color:var(--goldbd)">
     <div style="font-size:15px;font-weight:900">💼 Commission (${pct}%)</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Every booth, every day: who worked it, what sold, what came in, what each person has coming. Your share of a booth you work is not paid out.</div>
