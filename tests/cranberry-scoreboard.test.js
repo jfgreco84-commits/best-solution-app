@@ -37,11 +37,21 @@ function state(ctx,extra){
 }
 
 // ===========================================================================
+R.section('0. v52: Froggy asked for regular prices at Cranberry after all');
+// ===========================================================================
+{
+  const {ctx}=world(); const d=state(ctx); ctx.applyOneTimeUpdates(d);
+  const cran=d.shows.find(s=>s.id==='sh_cran');
+  chk('0a. Cranberry ends on the regular prices',SK.map(k=>cran.prices[k]),SK.map(k=>d.prices[k]));
+  chk('0b. marked done',d._applied['cranberry_regular_prices_v52'],true);
+  ctx.S=d; chk('0c. no show-prices card',ctx.showPricesLineHTML(cran),'');
+}
+// ===========================================================================
 R.section('1. Cranberry gets its own prices; nothing else moves');
 // ===========================================================================
 {
   const {ctx}=world();
-  const d=state(ctx);
+  const d=state(ctx); d._applied['cranberry_regular_prices_v52']=true; // v42 on its own; v52 is checked below
   ctx.applyOneTimeUpdates(d);
   const cran=d.shows.find(s=>s.id==='sh_cran'), other=d.shows.find(s=>s.id==='sh_other');
   chk('1a. Cranberry prices are the new ones',SK.map(k=>cran.prices[k]),SK.map(k=>NEW[k]));

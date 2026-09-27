@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v51';
+const APP_VERSION='v52';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1136,13 +1136,26 @@ function applyOneTimeUpdates(d){
   // v51: Froggy (Sep 27): "Use the earlier pricing on all of Cranberry
   // Fest." Puts the 2026 Cranberry show back on its show-only prices
   // (v42's CRANBERRY_PRICES_2026) for every day. Runs once.
-  if(!d._applied['cranberry_prices_back_v51']){
+  // RETIRED in v52: Froggy meant his regular prices, not Cranberry's.
+  if(false&&!d._applied['cranberry_prices_back_v51']){
     const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
     if(cran){
       const was=JSON.stringify(cran.prices||{});
       cran.prices=Object.assign({},cran.prices||{},CRANBERRY_PRICES_2026);
       if(was!==JSON.stringify(cran.prices))invLogPush(cran,{ts:new Date().toISOString(),type:'💲 show prices set back to Cranberry prices (v51)',changes:['32oz $30 · 16oz $25 · 8oz $20 · 2oz $12.50 · C5-S $12.50 · C5-L $25'],by:'owner'});
       d._applied['cranberry_prices_back_v51']=true;
+    }
+  }
+
+  // v52: Froggy (Sep 27): "Just go back to regular pricing in the app."
+  // The 2026 Cranberry show uses the regular app prices (S.prices) on every
+  // day; its show-only snapshot is removed. Runs once.
+  if(!d._applied['cranberry_regular_prices_v52']){
+    const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+    if(cran){
+      cran.prices=Object.assign({},d.prices||{});
+      invLogPush(cran,{ts:new Date().toISOString(),type:'💲 back to regular prices (v52)',changes:[SKUS.map(s=>s.short+' $'+(parseFloat((d.prices||{})[s.key])||s.defP)).join(' · ')],by:'owner'});
+      d._applied['cranberry_regular_prices_v52']=true;
     }
   }
 
