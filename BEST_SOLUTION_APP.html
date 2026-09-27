@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v48';
+const APP_VERSION='v49';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1046,6 +1046,56 @@ function applyOneTimeUpdates(d){
         d._applied['cranberry_day1_unswap_v47']=true;
       }
     }catch(e){ console.error('cranberry_day1_unswap_v47',e); }
+  }
+
+  // v49: Cranberry weekend, from Froggy's Sep 27 message. Reviewed with him
+  // before it shipped. (1) Friday: booth NUMBERS follow the table, not the
+  // crew. Friday Booth 2 was TJ + Dave, Booth 3 was Les + Anthony; the app had
+  // them the other way round, so each card (counts + money + crew together)
+  // moves to its real number. Friday sales and money do not change.
+  // (2) Saturday: every booth's opening, close, money and crew as he sent it.
+  // (3) Saturday truck count 8oz 48, C5S 140, C5L 42, rest 0, and the packed
+  // total fixed by exactly the gap: 2oz +80 (the box read as 8oz), C5L +42,
+  // C5S -6. Runs only if Friday is still exactly what v47 left and Saturday
+  // has no close or money yet. Sunday is not touched.
+  if(!d._applied['cranberry_weekend_v49']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25')&&sh.status==='active');
+      const K=['32oz','16oz','8oz','2oz','c5s','c5l'];
+      const c=a=>{const r={};K.forEach((k,i)=>r[k]=a[i]);return r;};
+      const eq=(o,v)=>!!o&&K.every((k,i)=>(parseInt(o[k])||0)===v[i]);
+      const P=o=>Object.assign({cash:0,square:0,debit:0,venmo:0,zelle:0,cashapp:0,paypal:0},o);
+      const d0=cran&&cran.days&&cran.days[0], d1=cran&&cran.days&&cran.days[1];
+      const f2=d0&&d0.boothCounts&&d0.boothCounts.booth2, f3=d0&&d0.boothCounts&&d0.boothCounts.booth3;
+      const satClean=d1&&!d1.locked&&['booth1','booth2','booth3'].every(b=>{ const e=(d1.boothCounts||{})[b]; return !e||(!e.eveningCount&&!(e.payments&&calcPmt(e.payments)>0)); });
+      const ok=cran&&d0&&d1&&satClean&&f2&&f3&&eq(f2.eveningCount,[16,36,49,90,148,16])&&eq(f3.eveningCount,[21,37,76,9,130,36])
+        &&Math.abs(boothMoney(f2)-1785)<0.01&&Math.abs(boothMoney(f3)-1497)<0.01;
+      if(ok){
+        const ts=new Date().toISOString();
+        d0.boothCounts.booth2=f3; d0.boothCounts.booth3=f2;
+        d0.boothCrew={booth1:['rep_justin','rep_cutty'],booth2:['rep_tj','rep_dave'],booth3:['rep_les','rep_anthony']};
+        rollupDay(cran,0);
+        d1.boothCrew={booth1:['rep_les','rep_anthony'],booth2:['rep_justin','rep_cutty'],booth3:['rep_tj','rep_dave']};
+        const OPEN={booth1:[22,35,59,72,132,57],booth2:[21,37,76,113,124,78],booth3:[16,36,73,66,148,64]};
+        const CLOSE={booth1:[13,28,35,30,83,33],booth2:[18,29,53,70,84,57],booth3:[11,35,61,46,121,58]};
+        Object.keys(OPEN).forEach(b=>{ boothSetStock(cran,1,b,'morning',c(OPEN[b])); boothSetStock(cran,1,b,'evening',c(CLOSE[b])); });
+        dayBoothWrite(d1,'booth1').sellerPayments={rep_les:P({cash:740,square:395}),rep_anthony:P({cash:745,square:425})};
+        dayBoothWrite(d1,'booth2').payments=P({cash:1429,square:540});
+        dayBoothWrite(d1,'booth3').payments=P({cash:645,square:390});
+        rollupDay(cran,1);
+        (cran.repIds=cran.repIds||[]); ['rep_justin','rep_cutty','rep_les','rep_anthony','rep_tj','rep_dave'].forEach(id=>{ if(cran.repIds.indexOf(id)<0)cran.repIds.push(id); });
+        d1.truckCount={counts:c([0,0,48,0,140,42]),ts};
+        const L=showLedger(cran), exp=L[1].truck, gap={};
+        K.forEach(k=>gap[k]=(d1.truckCount.counts[k]||0)-(exp[k]||0));
+        const fixed=eq(gap,[0,0,0,80,-6,42]);
+        if(fixed){ const pk=cran.packedInventory; pk['2oz']+=80; pk.c5s-=6; pk.c5l+=42;
+          if(!Array.isArray(cran.packFixes))cran.packFixes=[]; cran.packFixes.push({ts,di:1,date:d1.date,note:'v49 weekend: 2oz +80 (box read as 8oz), C5L +42, C5S -6'});
+          d0.truckCount&&(d0.truckCount.superseded=ts); }
+        invLogPush(cran,{ts,di:1,date:d1.date,type:'🧾 Cranberry weekend fixed (v49)',changes:['Friday Booth 2 ↔ Booth 3 relabelled to the real tables (TJ + Dave = Booth 2, Les + Anthony = Booth 3). Friday sales and money unchanged.','Saturday openings, closes, money and crews entered as sent.',fixed?'Saturday truck count 8oz 48, C5-S 140, C5-L 42. Packed fixed: 2oz +80, C5-S −6, C5-L +42.':'Saturday truck count saved; the gap was not the expected one, so packed was NOT changed. Check the truck card.'],by:'owner'});
+        auditState(d).log.push({ts,showId:cran.id,show:cran.name,type:'packFix',msg:'Cranberry weekend (v49): Friday booths relabelled to real tables; Saturday entered; '+(fixed?'packed fixed 2oz +80, C5-S −6, C5-L +42.':'packed NOT changed (gap differed).')});
+        d._applied['cranberry_weekend_v49']=true;
+      }
+    }catch(e){ console.error('cranberry_weekend_v49',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
