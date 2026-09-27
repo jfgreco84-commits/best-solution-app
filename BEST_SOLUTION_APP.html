@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v55';
+const APP_VERSION='v56';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1188,6 +1188,26 @@ function applyOneTimeUpdates(d){
       cran.notes=(cran.notes?cran.notes+' ':'')+'Travel (v55): Froggy Ram from Waterford 570 mi; TJ Terrain + Anthony Impala from Cudahy 580 mi each; Airbnb in Merrillan, 35 mi each way to the show via Black River Falls.';
       invLogPush(cran,{ts:new Date().toISOString(),type:'⛽ travel + food + Dave extra (v55)',changes:cars.map(c=>c.who+' '+c.car+' '+trip(c.oneway)+' mi = $'+r2(trip(c.oneway)/c.mpg*gp).toFixed(2)).concat(['Food $145 + $172 + $40','Dave +$200 cooking / food (worker line)']),by:'owner'});
       d._applied['cranberry_travel_food_v55']=true;
+    }
+  }
+
+  // v56: Cranberry gas at the real price, $4.30 (Froggy, Sep 27), and
+  // Anthony drove from West Allis (172 mi each way to Warrens), not Cudahy.
+  // Rewrites only the three v55 fuel lines, by id.
+  if(!d._applied['cranberry_gas_fix_v56']){
+    const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+    const ex=cran&&Array.isArray(cran.showExpenses)?cran.showExpenses:null;
+    if(ex&&d._applied['cranberry_travel_food_v55']){
+      const gp=4.30, r2=n=>Math.round(n*100)/100, trip=h=>2*h+35+4*35+35;
+      const cars=[{id:'se_cran26_gas_ram',who:'Froggy',car:'Ram 1500',mpg:17.5,from:'Waterford',oneway:180},
+                  {id:'se_cran26_gas_terrain',who:'TJ',car:'GMC Terrain',mpg:23,from:'Cudahy',oneway:185},
+                  {id:'se_cran26_gas_impala',who:'Anthony',car:'Chevy Impala',mpg:14,from:'West Allis',oneway:172}];
+      cars.forEach(c=>{ const e=ex.find(x=>x&&x.id===c.id); if(!e)return; const mi=trip(c.oneway), gal=mi/c.mpg;
+        e.amount=r2(gal*gp); e.desc=c.who+' · '+c.car+' ('+c.mpg+' mpg) from '+c.from+': '+c.oneway+' + '+c.oneway+' home, Warrens→Merrillan 35, Merrillan↔Warrens 4×35 Fri/Sat, Merrillan→Warrens 35 Sun = '+mi+' mi, '+gal.toFixed(1)+' gal @ $'+gp.toFixed(2); });
+      cran.gasPrice=gp;
+      cran.notes=String(cran.notes||'').replace('TJ Terrain + Anthony Impala from Cudahy 580 mi each','TJ Terrain from Cudahy 580 mi; Anthony Impala from West Allis 554 mi; gas $4.30');
+      invLogPush(cran,{ts:new Date().toISOString(),type:'⛽ gas $4.30, Anthony from West Allis (v56)',changes:cars.map(c=>c.who+' '+trip(c.oneway)+' mi = $'+r2(trip(c.oneway)/c.mpg*gp).toFixed(2)),by:'owner'});
+      d._applied['cranberry_gas_fix_v56']=true;
     }
   }
 
