@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v61';
+const APP_VERSION='v62';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1326,6 +1326,20 @@ function applyOneTimeUpdates(d){
         d._applied['cranberry_payouts_v61']=true;
       }
     }catch(e){ console.error('cranberry_payouts_v61',e); }
+  }
+
+  // v62: Froggy confirmed the Cranberry payouts are final: Les, Anthony and
+  // Dave rounded up, Cutty and TJ rounded down on purpose. Pay becomes what
+  // was paid; the commission stays visible. Only on top of v61's payments.
+  if(!d._applied['cranberry_pay_round_v62']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+      if(cran&&d._applied['cranberry_payouts_v61']){
+        cran.payRound={rep_les:6.5,rep_anthony:16.75,rep_dave:3.56,rep_cutty:-182.34,rep_tj:-16.44};
+        invLogPush(cran,{ts:new Date().toISOString(),type:'💵 payouts final, rounded on purpose (v62)',changes:['Les +$6.50 → $920 · Anthony +$16.75 → $750 · Dave +$3.56 → $720 · Cutty −$182.34 → $500 · TJ −$16.44 → $500'],by:'owner'});
+        d._applied['cranberry_pay_round_v62']=true;
+      }
+    }catch(e){ console.error('cranberry_pay_round_v62',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -6037,7 +6051,7 @@ function commissionCardHTML(sh){
   let runV=0, runC=0;
   const dayHTML=days.map(x=>{
     const d=sh.days[x.di]; runV+=x.vol; runC+=x.out;
-    const same=Object.keys(x.pay).every(id=>Math.abs(repDayPay(d,id)-x.pay[id])<0.01);
+    const same=!!sh.payFromCommission||Object.keys(x.pay).every(id=>Math.abs(repDayPay(d,id)-x.pay[id])<0.01);
     return `<div style="border-top:1px solid var(--border);padding:8px 0">
       <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-weight:900;font-size:13px">${_esc(x.date)}</div>
         <div style="font-size:11px;color:var(--muted)">volume <b style="color:var(--green)">${fmt(x.vol)}</b> · ${pct}% <b style="color:var(--gold)">${fmt(x.comm)}</b> · paying out <b style="color:var(--gold)">${fmt(x.out)}</b></div></div>
@@ -6048,7 +6062,7 @@ function commissionCardHTML(sh){
           <div style="font-size:12px;font-weight:900;color:var(--green)">${fmt(r.vol)}</div></div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">${r.units!=null?r.units+' units sold · '+SKUS.filter(s=>(r.sold[s.key]||0)>0).map(s=>s.short+' '+r.sold[s.key]).join(' · '):'not counted yet'}</div>
         <div style="font-size:11px;margin-top:4px">${pct}% = <b style="color:var(--gold)">${fmt(r.comm)}</b>${r.how?' · '+r.how:''}</div>
-        ${r.people.map(p=>{ const e=repDayPay(d,p.id); return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0 0 8px"><span>💵 ${_esc(sellerName(p.id))} <span style="color:var(--muted);font-size:10px">on ${fmt(p.base)}</span></span><span><b style="color:var(--gold)">${fmt(p.amt)}</b>${e>0&&Math.abs(e-p.amt)>=0.01?` <span style="color:var(--red);font-size:10px">(entered ${fmt(e)})</span>`:e>0?' <span style="color:var(--green);font-size:10px">✓</span>':''}</span></div>`; }).join('')}
+        ${r.people.map(p=>{ const e=sh.payFromCommission?0:repDayPay(d,p.id); return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0 0 8px"><span>💵 ${_esc(sellerName(p.id))} <span style="color:var(--muted);font-size:10px">on ${fmt(p.base)}</span></span><span><b style="color:var(--gold)">${fmt(p.amt)}</b>${e>0&&Math.abs(e-p.amt)>=0.01?` <span style="color:var(--red);font-size:10px">(entered ${fmt(e)})</span>`:e>0?' <span style="color:var(--green);font-size:10px">✓</span>':''}</span></div>`; }).join('')}
       </div>`).join('')}
       ${same?`<div style="font-size:10px;color:var(--green);margin-top:5px">✓ Day pay matches</div>`:`<button class="btn btn-xs btn-gold btn-full" style="margin-top:6px" onclick="applyCommissionPay('${sh.id}',${x.di})">Use these as ${_esc(x.date)} day pay</button>`}
     </div>`; }).join('');
@@ -6091,12 +6105,25 @@ function applyCommissionPay(shId,di){
    sheet can never disagree (before v57 only Friday was entered by hand
    and Saturday's pay was missing from profit).
    --------------------------------------------------------------------- */
+// v62: what the owner actually paid can differ from the commission by a
+// rounding he chose (sh.payRound = {repId: +/-$}). It rides on the last day
+// with sales, so rep pages, the P&L and the payout sheet all show real pay.
+function payRoundOf(sh,id){ const v=parseFloat(sh&&sh.payRound&&sh.payRound[id]); return isFinite(v)?v:0; }
 function commissionSyncPay(sh){
   if(!sh||!sh.payFromCommission||!hasBooths(sh))return false;
   let changed=false;
+  const xs=(sh.days||[]).map((d,di)=>commissionDay(sh,di));
+  let lastDi=-1; xs.forEach((x,di)=>{ if(x&&x.vol>0)lastDi=di; });
+  const r2=n=>Math.round(n*100)/100;
+  const wants=xs.map(x=>{ const w={}; if(x&&x.vol>0)Object.keys(x.pay).forEach(id=>{ if(x.pay[id]>0)w[id]=x.pay[id]; }); return w; });
+  // round up: on the last day with sales; round down: taken from the last day back
+  if(lastDi>=0&&sh.payRound)Object.keys(sh.payRound).forEach(id=>{ let left=payRoundOf(sh,id);
+    if(left>0){ wants[lastDi][id]=r2((wants[lastDi][id]||0)+left); return; }
+    for(let di=lastDi;di>=0&&left<-0.004;di--){ const have=wants[di][id]||0; if(!have)continue; const take=Math.min(have,-left);
+      const v=r2(have-take); if(v>0)wants[di][id]=v; else delete wants[di][id]; left=r2(left+take); } });
   (sh.days||[]).forEach((d,di)=>{
-    const x=commissionDay(sh,di); if(!x)return;
-    const want={}; if(x.vol>0)Object.keys(x.pay).forEach(id=>{ if(x.pay[id]>0)want[id]=x.pay[id]; });
+    const x=xs[di]; if(!x)return;
+    const want=wants[di];
     const have=d.repPay||{};
     const same=Object.keys(want).length===Object.keys(have).length&&Object.keys(want).every(id=>Math.abs((parseFloat(have[id])||0)-want[id])<0.005);
     if(!same){ d.repPay=want; changed=true; }
@@ -6129,7 +6156,7 @@ function payoutSheetData(sh){
   Object.keys(extras).forEach(id=>{ const o=get(id); o.extra=extras[id].amt; o.extraPaid=extras[id].paid; o.notes=extras[id].notes; });
   const r2=n=>Math.round(n*100)/100;
   const people=Object.values(P).map(o=>{ o.comm=r2(o.pay.reduce((t,v)=>t+(v||0),0)); o.salesTot=r2(o.sales.reduce((t,v)=>t+(v||0),0));
-    o.total=r2(o.comm+o.extra); o.paid=r2(repPaid(o.id,sh.id)+o.extraPaid); o.owe=r2(Math.max(0,o.total-o.paid)); return o; })
+    o.round=payRoundOf(sh,o.id); o.total=r2(o.comm+o.extra+o.round); o.paid=r2(repPaid(o.id,sh.id)+o.extraPaid); o.owe=r2(Math.max(0,o.total-o.paid)); return o; })
     .filter(o=>o.total>0||o.paid>0||o.booth.some(Boolean)).sort((a,b)=>b.total-a.total);
   const dayInfo=days.map((x,di)=>({lbl:showDayLabel(sh,di),vol:x?x.vol:0,comm:x?x.out:0,closed:!!(x&&x.vol>0)}));
   return {days:dayInfo,people,rate:showCommRate(sh),
@@ -6149,7 +6176,7 @@ function payoutSheetHTML(sh){
   const open=X.days.filter(d=>!d.closed).length;
   // 1) Pay table
   const payRows=X.people.map(o=>`<tr style="border-top:1px solid var(--border)">
-      <td style="padding:5px 3px;font-weight:800">${_esc(o.name)}${o.extra>0?`<div style="font-size:10px;color:#7EB8F7;font-weight:600">+ ${fmt(o.extra).replace('.00','')} ${_esc(o.notes.join('; '))}</div>`:''}</td>
+      <td style="padding:5px 3px;font-weight:800">${_esc(o.name)}${o.extra>0?`<div style="font-size:10px;color:#7EB8F7;font-weight:600">+ ${fmt(o.extra).replace('.00','')} ${_esc(o.notes.join('; '))}</div>`:''}${o.round?`<div style="font-size:10px;color:var(--muted);font-weight:600">${o.round>0?'rounded up +':'rounded down −'}${fmt(Math.abs(o.round))}</div>`:''}</td>
       ${X.days.map((d,di)=>td(o.pay[di]?cents(o.pay[di]):'<span style="color:var(--muted)">—</span>')).join('')}
       ${td(cents(o.total),'font-weight:900;color:var(--gold);font-size:13px')}</tr>`).join('');
   const payFoot=`<tr style="border-top:2px solid var(--gold);font-weight:900"><td style="padding:5px 3px">All reps</td>${X.days.map(d=>td(d.comm>0?cents(d.comm):'—')).join('')}${td(cents(X.total),'color:var(--gold)')}</tr>`;
