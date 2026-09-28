@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v59';
+const APP_VERSION='v60';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1281,6 +1281,23 @@ function applyOneTimeUpdates(d){
         d._applied['cranberry_b3_money_v59']=true;
       }
     }catch(err){ console.error('cranberry_b3_money_v59',err); }
+  }
+
+  // v60: $500 to Mark Martone on invoice 2 (Sep 28), bringing it to $3,000
+  // paid as the owner stated. Only adds it when invoice 2 stands at exactly
+  // $2,500 paid, so a payment already typed in on the device is not doubled.
+  if(!d._applied['mm_inv2_pay_500_v60']&&d._applied['mm_sequential_invoices_v1']){
+    try{
+      const inv=((d.productDebt||{}).invoices||[]).filter(i=>pdNum(i.number)===2)[0];
+      if(inv){
+        const paid=pdRound((inv.payments||[]).reduce((t,p)=>t+pdNum(p.amount),0));
+        if(paid===2500){
+          inv.payments.push({amount:500,date:'2026-09-28',method:'Zelle',note:'This puts me at 3000 towards invoice number two'});
+          pdSortPayments(inv); pdSyncStatus(inv);
+        }
+        d._applied['mm_inv2_pay_500_v60']=true;
+      }
+    }catch(e){ console.error('mm_inv2_pay_500_v60',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
