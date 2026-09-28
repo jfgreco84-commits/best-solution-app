@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v60';
+const APP_VERSION='v61';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1298,6 +1298,34 @@ function applyOneTimeUpdates(d){
         d._applied['mm_inv2_pay_500_v60']=true;
       }
     }catch(e){ console.error('mm_inv2_pay_500_v60',e); }
+  }
+
+  // v61: Cranberry crew payouts as Froggy reported them (cash, Sep 27):
+  // Dave $720 (of which $200 is his cooking/food extra), Anthony $750,
+  // Les $920, Cutty $500, TJ $500. Skips anyone who already has a
+  // Cranberry payment logged, so nothing is doubled.
+  if(!d._applied['cranberry_payouts_v61']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+      if(cran){
+        const PAID={rep_dave:720,rep_anthony:750,rep_les:920,rep_cutty:500,rep_tj:500};
+        const done=[];
+        Object.keys(PAID).forEach(id=>{
+          const rep=(d.reps||[]).find(r=>r.id===id); if(!rep)return;
+          if(!Array.isArray(rep.payments))rep.payments=[];
+          const wk=(cran.workers||[]).filter(w=>w&&w.repId===id);
+          const already=rep.payments.some(p=>p.showId===cran.id)||wk.some(w=>(parseFloat(w.paid)||0)>0);
+          if(already)return;
+          let left=PAID[id];
+          wk.forEach(w=>{ const need=Math.max(0,(parseFloat(w.amount)||0)-(parseFloat(w.paid)||0)); const put=Math.min(need,left); if(put>0){ w.paid=Math.round(((parseFloat(w.paid)||0)+put)*100)/100; left-=put; } });
+          left=Math.round(left*100)/100;
+          if(left>0)rep.payments.push({id:'rp_cran26_'+id,date:'2026-09-27',amount:left,note:'Cranberry Fest payout',method:'Cash',showId:cran.id});
+          done.push((rep.name||id)+' $'+PAID[id]);
+        });
+        if(done.length)invLogPush(cran,{ts:new Date().toISOString(),type:'💵 crew paid out (v61)',changes:[done.join(' · ')],by:'owner'});
+        d._applied['cranberry_payouts_v61']=true;
+      }
+    }catch(e){ console.error('cranberry_payouts_v61',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -6131,7 +6159,7 @@ function payoutSheetHTML(sh){
         <div style="font-size:10px;color:var(--muted)">${o.paid>0?'paid '+fmt(o.paid)+' of '+fmt(o.total):'nothing paid yet'}</div></div>
       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
         ${o.owe>0.004?`<div style="font-size:15px;font-weight:900;color:var(--gold)">${fmt(o.owe)}</div><button class="btn btn-xs btn-gold" onclick="payoutMarkPaid('${sh.id}','${o.id}')">Paid ✓</button>`
-          :`<div style="font-size:13px;font-weight:900;color:var(--green)">✅ Paid up</div>`}
+          :`<div style="font-size:13px;font-weight:900;color:var(--green)">✅ Paid up${o.paid-o.total>0.004?`<div style="font-size:10px;color:#7EB8F7;font-weight:700">${fmt(o.paid-o.total)} over</div>`:''}</div>`}
       </div></div>`).join('');
   // 3) Rep stats: sales credited and where they worked
   const statRows=X.people.map(o=>`<tr style="border-top:1px solid var(--border)">
