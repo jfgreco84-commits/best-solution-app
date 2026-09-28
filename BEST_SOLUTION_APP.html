@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v58';
+const APP_VERSION='v59';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1263,6 +1263,24 @@ function applyOneTimeUpdates(d){
         d._applied['cranberry_sunday_close_v58']=true;
       }
     }catch(e){ console.error('cranberry_sunday_close_v58',e); }
+  }
+
+  // v59: Cranberry Sunday Booth 3 (Froggy + Cutty) money. Froggy: book the
+  // full-price value of what sold ($235), of which $40 card and $30 Venmo,
+  // the rest cash. Runs only on top of v58 with Booth 3's money still blank.
+  if(!d._applied['cranberry_b3_money_v59']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25'));
+      const d2=cran&&cran.days&&cran.days[2], e=d2&&(d2.boothCounts||{}).booth3;
+      if(cran&&d2&&!d2.locked&&e&&e.eveningCount&&d._applied['cranberry_sunday_close_v58']&&!(e.payments&&calcPmt(e.payments)>0)){
+        const val=calcRev(boothSold(d2,'booth3'),cran.prices||null);
+        const cash=Math.max(0,Math.round((val-40-30)*100)/100);
+        e.payments={cash,square:40,venmo:30};
+        rollupDay(cran,2);
+        invLogPush(cran,{ts:new Date().toISOString(),di:2,date:d2.date,booth:'booth3',type:'💵 Booth 3 money (v59)',changes:['Full-price value of Sunday sales '+fmt(val)+': $'+cash+' cash, $40 Square, $30 Venmo (per Froggy)'],by:'owner'});
+        d._applied['cranberry_b3_money_v59']=true;
+      }
+    }catch(err){ console.error('cranberry_b3_money_v59',err); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
