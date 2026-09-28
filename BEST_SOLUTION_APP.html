@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v57';
+const APP_VERSION='v58';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1221,6 +1221,48 @@ function applyOneTimeUpdates(d){
       invLogPush(cran,{ts:new Date().toISOString(),type:'💵 pay now follows the 35% commission (v57)',changes:['Friday pay corrected to the exact commission; Saturday pay added; Sunday fills in when counted'],by:'owner'});
     }
     d._applied['cranberry_payout_v57']=true;
+  }
+
+  // v58: Cranberry Sunday close, from Froggy's Sep 27 pack-up sheets.
+  // Closes: B1 TJ + Dave 12/28/29/23/71/31, B2 Les + Anthony 15/28/44/23/68/52,
+  // B3 Froggy + Cutty 11/33/57/77/118/54 (5/20/24/0/0/24 went to the truck
+  // first, 6/13/33/77/118/30 was left on the table). Money: B1 $279 cash +
+  // $140 Square; B2 by person, Les $245/$90/$30 Venmo, Anthony $155/$95.
+  // B3 money not sent yet, left blank. Truck: the 42 C5-L of Saturday's
+  // count were never there (Sunday count 0, no booth has them), so the v49
+  // packed +42 comes back off. Sunday truck count before pack-up saved as
+  // 8oz 24, C5-S 140: 24 8oz short, still being looked for.
+  if(!d._applied['cranberry_sunday_close_v58']){
+    try{
+      const cran=(d.shows||[]).find(sh=>sh&&/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25')&&sh.status==='active');
+      const K=['32oz','16oz','8oz','2oz','c5s','c5l'];
+      const c=a=>{const r={};K.forEach((k,i)=>r[k]=a[i]);return r;};
+      const eq=(o,v)=>!!o&&K.every((k,i)=>(parseInt(o[k])||0)===v[i]);
+      const d1=cran&&cran.days&&cran.days[1], d2=cran&&cran.days&&cran.days[2];
+      const OPEN={booth1:[13,28,35,30,82,33],booth2:[18,29,53,34,84,58],booth3:[11,35,60,82,123,57]};
+      const CLOSE={booth1:[12,28,29,23,71,31],booth2:[15,28,44,23,68,52],booth3:[11,33,57,77,118,54]};
+      const ok=cran&&d1&&d2&&!d2.locked&&d._applied['cranberry_sunday_v50']&&Object.keys(OPEN).every(b=>{ const e=(d2.boothCounts||{})[b]; return e&&eq(e.morningCount,OPEN[b])&&!e.eveningCount&&!(e.payments&&calcPmt(e.payments)>0); });
+      if(ok){
+        const ts=new Date().toISOString();
+        Object.keys(CLOSE).forEach(b=>boothSetStock(cran,2,b,'evening',c(CLOSE[b])));
+        const e1=dayBoothWrite(d2,'booth1'); e1.payments={cash:279,square:140};
+        const e2=dayBoothWrite(d2,'booth2'); e2.sellerPayments={rep_les:{cash:245,square:90,venmo:30},rep_anthony:{cash:155,square:95}}; e2.payments={cash:400,square:185,venmo:30};
+        const pk=cran.packedInventory, v49=(cran.packFixes||[]).some(f=>/v49/.test(f.note||''));
+        let undid=false;
+        if(pk&&v49&&(parseInt(pk.c5l)||0)>=42){ pk.c5l=(parseInt(pk.c5l)||0)-42; undid=true;
+          cran.packFixes.push({ts,di:1,date:d1.date,note:'v58: C5L -42. Saturday truck count of 42 C5L was wrong; Sunday truck had 0 and no booth had extra.'});
+          if(d1.truckCount&&d1.truckCount.counts)d1.truckCount.counts.c5l=0; }
+        d2.truckCount={counts:c([0,0,24,0,140,0]),ts,note:'Sunday before pack-up. 24 8oz short of Saturday count; check the other cars and the Airbnb.'};
+        rollupDay(cran,2);
+        invLogPush(cran,{ts,di:2,date:d2.date,type:'🧾 Cranberry Sunday close (v58)',changes:[
+          'Closes: B1 TJ + Dave 12/28/29/23/71/31 · B2 Les + Anthony 15/28/44/23/68/52 · B3 Froggy + Cutty 11/33/57/77/118/54.',
+          'Money: B1 $279 cash + $140 Square = $419 · B2 Les $365 ($245 cash, $90 Square, $30 Venmo), Anthony $250 ($155 cash, $95 Square). B3 not entered yet.',
+          undid?'Packed C5-L −42: Saturday\'s truck count of 42 C5-L was wrong (Sunday truck had 0, no booth had extra). Nothing lost.':'Packed C5-L not changed.',
+          'Sunday truck count before pack-up: 8oz 24, C5-S 140. 24 8oz short, still being looked for.'],by:'owner'});
+        auditState(d).log.push({ts,showId:cran.id,show:cran.name,msg:'Cranberry Sunday close (v58): closes and B1/B2 money entered; packed C5-L −42 (bad Saturday truck count); truck 24 8oz short.'});
+        d._applied['cranberry_sunday_close_v58']=true;
+      }
+    }catch(e){ console.error('cranberry_sunday_close_v58',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
