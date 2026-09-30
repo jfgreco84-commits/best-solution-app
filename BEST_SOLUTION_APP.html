@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v68';
+const APP_VERSION='v69';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1373,6 +1373,24 @@ function applyOneTimeUpdates(d){
         d.inventory.c5s=(parseInt(d.inventory.c5s)||0)+q; d.inventory.c5l=(parseInt(d.inventory.c5l)||0)-q; x.sku='c5l'; }
       d._applied['online_az_c5l_v65']=true;
     }catch(e){ console.error('online_az_c5l_v65',e); }
+  }
+
+  // v69 (Sep 30): Wonderful World of Weddings 2nd booth payment $418.90
+  // (schedule on the show: $418.90 due 9/30, $418.90 due 10/31); next due
+  // moves to Oct 31. Mark Martone invoice 2 +$2,000, bringing it to $5,000.
+  // Each applies only if the ledger still stands where it was.
+  if(!d._applied['www_pay2_mm_2000_v69']){
+    try{
+      const www=(d.shows||[]).find(sh=>sh&&/wonderful world of weddings/i.test(sh.name||''));
+      if(www){ const paid=(www.boothPayments||[]).reduce((t,x)=>t+(parseFloat(x.amount)||0),0);
+        if(Math.abs(paid-250)<0.005){ www.boothPayments=www.boothPayments||[]; www.boothPayments.push({amount:418.90,date:'2026-09-30',note:'2nd payment (of 2 remaining). Last $418.90 due Oct 31.'}); www.depositDue='2026-10-31'; }
+      }
+      const inv=((d.productDebt||{}).invoices||[]).filter(i=>pdNum(i.number)===2)[0];
+      if(inv){ const pd2=pdRound((inv.payments||[]).reduce((t,x)=>t+pdNum(x.amount),0));
+        if(pd2===3000){ inv.payments.push({amount:2000,date:'2026-09-30',method:'',note:'This puts me at 5000 towards invoice number two'}); pdSortPayments(inv); pdSyncStatus(inv); }
+      }
+      if(www||inv)d._applied['www_pay2_mm_2000_v69']=true;
+    }catch(e){ console.error('www_pay2_mm_2000_v69',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
