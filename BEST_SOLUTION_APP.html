@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v65';
+const APP_VERSION='v66';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -3900,18 +3900,31 @@ function secBatman(){
    puts them back. Profit = money in − postage − cost of the bottles.
    --------------------------------------------------------------------- */
 const OL_METHODS=['','PayPal','Venmo','Zelle','Cash App','Square','Etsy','eBay','Facebook','Cash','Other'];
-function olSales(){ if(!S.settings)S.settings={}; if(!Array.isArray(S.settings.onlineSales))S.settings.onlineSales=[]; return S.settings.onlineSales; }
-function olSaleCost(x){ return (parseInt(x.qty)||0)*getCost(x.sku); }
+// v66: a sale holds several products: items [{sku,qty}]. Older single-product
+// sales ({sku,qty}) are converted in place the first time they are read.
+function olNormalize(x){
+  if(!x)return x;
+  if(!Array.isArray(x.items)){ x.items=x.sku?[{sku:x.sku,qty:Math.max(1,parseInt(x.qty)||1)}]:[]; }
+  delete x.sku; delete x.qty;
+  x.items=x.items.filter(i=>i&&i.sku&&(parseInt(i.qty)||0)>0).map(i=>({sku:i.sku,qty:parseInt(i.qty)||0}));
+  return x;
+}
+function olSales(){ if(!S.settings)S.settings={}; if(!Array.isArray(S.settings.onlineSales))S.settings.onlineSales=[]; S.settings.onlineSales.forEach(olNormalize); return S.settings.onlineSales; }
+function olUnits(x){ return (x.items||[]).reduce((t,i)=>t+(parseInt(i.qty)||0),0); }
+function olSaleCost(x){ return (x.items||[]).reduce((t,i)=>t+(parseInt(i.qty)||0)*getCost(i.sku),0); }
 function olSaleProfit(x){ return (parseFloat(x.amount)||0)-(parseFloat(x.postage)||0)-olSaleCost(x); }
+function olItemsText(x){ return (x.items||[]).map(i=>i.qty+' '+skuShort(i.sku)).join(', '); }
+function olMoveGarage(items,sign){ (items||[]).forEach(i=>{ S.inventory[i.sku]=(parseInt(S.inventory[i.sku])||0)+sign*(parseInt(i.qty)||0); }); }
 function olTotals(){
   const L=olSales(), t={orders:L.length,units:0,amount:0,postage:0,cost:0,profit:0,bySku:{}};
-  L.forEach(x=>{ const q=parseInt(x.qty)||0; t.units+=q; t.amount+=parseFloat(x.amount)||0; t.postage+=parseFloat(x.postage)||0; t.cost+=olSaleCost(x); t.bySku[x.sku]=(t.bySku[x.sku]||0)+q; });
+  L.forEach(x=>{ t.units+=olUnits(x); t.amount+=parseFloat(x.amount)||0; t.postage+=parseFloat(x.postage)||0; t.cost+=olSaleCost(x);
+    (x.items||[]).forEach(i=>t.bySku[i.sku]=(t.bySku[i.sku]||0)+(parseInt(i.qty)||0)); });
   t.profit=t.amount-t.postage-t.cost; return t;
 }
 function skuShort(k){ const s=SKUS.find(z=>z.key===k); return s?s.short:k; }
 function secOnline(){
   const T=olTotals(), L=olSales().slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
-  let h=`<div class="card" style="font-size:12px;color:var(--muted);line-height:1.5">📮 Every bottle you sell online and mail from the garage. Logging a sale <strong>takes it off the garage shelf</strong>. Deleting one puts it back.</div>
+  let h=`<div class="card" style="font-size:12px;color:var(--muted);line-height:1.5">📮 Every bottle you sell online and mail from the garage. Logging a sale <strong>takes it off the garage shelf</strong>. Tap ✏️ to change a sale, ✕ to delete it (bottles go back).</div>
   <div class="card gb"><div class="g3">
     <div style="text-align:center"><div style="font-size:24px;font-weight:900;color:var(--gold)">${T.orders}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Orders</div></div>
     <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--green)">${fmt(T.amount)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Money In</div></div>
@@ -3920,43 +3933,73 @@ function secOnline(){
   <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">${T.units} bottle${T.units!==1?'s':''} · postage ${fmt(T.postage)} · bottle cost ${fmt(T.cost)}${Object.keys(T.bySku).length?' · '+Object.keys(T.bySku).map(k=>skuShort(k)+' '+T.bySku[k]).join(', '):''}</div></div>
   <button class="btn btn-gold btn-full" style="margin-bottom:10px" onclick="openOnlineSale()">+ Log an Online Sale</button>`;
   if(!L.length)h+=`<div class="card" style="text-align:center;color:var(--muted)">No online sales yet.</div>`;
-  else h+=`<div class="card"><table class="inv-table"><tr><th>Date</th><th>Sold</th><th>To</th><th>In</th><th>Profit</th><th></th></tr>
-    ${L.map(x=>`<tr><td style="white-space:nowrap">${_esc(String(x.date||'').slice(5).replace('-','/'))}</td><td>${parseInt(x.qty)||0} ${_esc(skuShort(x.sku))}</td><td>${_esc(x.buyer||'')}${x.method?`<div style="font-size:10px;color:var(--muted)">${_esc(x.method)}</div>`:''}</td><td style="color:var(--green);font-weight:700">${fmt(parseFloat(x.amount)||0)}${parseFloat(x.postage)>0?`<div style="font-size:10px;color:var(--muted)">−${fmt(parseFloat(x.postage))} post</div>`:''}</td><td style="font-weight:700">${fmt(olSaleProfit(x))}</td><td><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delOnlineSale('${x.id}')">✕</span></td></tr>${x.note?`<tr><td colspan="6" style="font-size:10px;color:var(--muted);padding-top:0">${_esc(x.note)}</td></tr>`:''}`).join('')}
-    <tr style="border-top:2px solid var(--border);font-weight:900"><td>Total</td><td>${T.units}</td><td></td><td style="color:var(--green)">${fmt(T.amount)}</td><td>${fmt(T.profit)}</td><td></td></tr></table></div>`;
+  else h+=L.map(x=>`<div class="card" style="padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0"><div style="font-weight:800;font-size:13px">${_esc(olItemsText(x)||'no products')}</div>
+          <div style="font-size:11px;color:var(--muted)">${_esc(String(x.date||'').slice(5).replace('-','/'))}${x.buyer?' · '+_esc(x.buyer):''}${x.method?' · '+_esc(x.method):''}</div>
+          ${x.note?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${_esc(x.note)}</div>`:''}</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-shrink:0">
+          <span style="cursor:pointer;font-size:16px" title="Edit" onclick="openOnlineSale('${x.id}')">✏️</span>
+          <span style="cursor:pointer;color:var(--muted);font-weight:900;font-size:16px" title="Delete" onclick="delOnlineSale('${x.id}')">✕</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+        <span>In <b style="color:var(--green)">${fmt(parseFloat(x.amount)||0)}</b></span>
+        <span>Postage <b>${fmt(parseFloat(x.postage)||0)}</b></span>
+        <span>Bottles <b>${fmt(olSaleCost(x))}</b></span>
+        <span>Profit <b style="color:${olSaleProfit(x)>=0?'var(--green)':'var(--red)'}">${fmt(olSaleProfit(x))}</b></span>
+      </div></div>`).join('');
   return h;
 }
-function openOnlineSale(){
-  mOpen(`<div class="mh"><div class="mt">📮 Log an Online Sale</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Comes straight off the garage shelf.</div>
-  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="ol_date" value="${_todayKey()}"></div>
-  <div class="fg"><label class="fl">Product</label><select class="fi" id="ol_sku">${SKUS.map(s=>`<option value="${s.key}">${s.name} (garage: ${S.inventory[s.key]||0})</option>`).join('')}</select></div>
-  <div class="fg"><label class="fl">How many</label><input class="fi" type="number" id="ol_qty" value="1" min="1" inputmode="numeric"></div>
-  <div class="fg"><label class="fl">Total you got paid ($, shipping included)</label><input class="fi" type="number" id="ol_amt" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></div>
-  <div class="fg"><label class="fl">Postage you paid ($, optional)</label><input class="fi" type="number" id="ol_post" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></div>
-  <div class="fg"><label class="fl">Buyer / where it went</label><input class="fi" id="ol_buyer" placeholder="e.g. guy in AZ"></div>
-  <div class="fg"><label class="fl">Paid by</label><select class="fi" id="ol_meth">${OL_METHODS.map(m=>`<option value="${m}">${m||'— select —'}</option>`).join('')}</select></div>
-  <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="ol_note" placeholder="tracking #, etc."></div>
-  <button class="btn btn-gold btn-full" onclick="saveOnlineSale()">✅ Save Sale</button>`);
+function openOnlineSale(id){
+  const x=id?olSales().find(o=>o.id===id):null; if(id&&!x)return;
+  const q={}; if(x)(x.items||[]).forEach(i=>q[i.sku]=(q[i.sku]||0)+i.qty);
+  const v=n=>(n!=null&&n!=='')?n:'';
+  mOpen(`<div class="mh"><div class="mt">📮 ${x?'Edit Online Sale':'Log an Online Sale'}</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${x?'Change anything. The garage adjusts to match.':'Comes straight off the garage shelf.'}</div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="ol_date" value="${x?_esc(x.date||''):_todayKey()}"></div>
+  <div class="fl" style="margin-bottom:4px">What sold (type how many of each)</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">
+  ${SKUS.map(s=>`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:6px 8px">
+    <div style="font-size:11px;font-weight:700">${s.short} <span style="color:var(--muted);font-weight:400">garage ${(parseInt(S.inventory[s.key])||0)+(q[s.key]||0)}</span></div>
+    <input class="fi" style="margin:4px 0 0" type="number" id="ol_q_${s.key}" min="0" inputmode="numeric" placeholder="0" value="${q[s.key]||''}"></div>`).join('')}
+  </div>
+  <div class="fg"><label class="fl">Total you got paid ($, shipping included)</label><input class="fi" type="number" id="ol_amt" step="0.01" min="0" inputmode="decimal" placeholder="0.00" value="${x?v(x.amount):''}"></div>
+  <div class="fg"><label class="fl">Postage you paid ($)</label><input class="fi" type="number" id="ol_post" step="0.01" min="0" inputmode="decimal" placeholder="0.00" value="${x&&parseFloat(x.postage)>0?x.postage:''}"></div>
+  <div class="fg"><label class="fl">Buyer / where it went</label><input class="fi" id="ol_buyer" placeholder="e.g. guy in AZ" value="${x?_esc(x.buyer||'').replace(/"/g,'&quot;'):''}"></div>
+  <div class="fg"><label class="fl">Paid by</label><select class="fi" id="ol_meth">${OL_METHODS.map(m=>`<option value="${m}"${x&&x.method===m?' selected':''}>${m||'— select —'}</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="ol_note" placeholder="tracking #, etc." value="${x?_esc(x.note||'').replace(/"/g,'&quot;'):''}"></div>
+  <button class="btn btn-gold btn-full" onclick="saveOnlineSale(${x?`'${x.id}'`:''})">✅ ${x?'Save Changes':'Save Sale'}</button>`);
 }
 function addOnlineSale(x){
-  const sale={id:x.id||('ol_'+Date.now()),date:x.date||_todayKey(),sku:x.sku,qty:Math.max(1,parseInt(x.qty)||1),amount:Math.round((parseFloat(x.amount)||0)*100)/100,
-    postage:Math.round((parseFloat(x.postage)||0)*100)/100,buyer:x.buyer||'',method:x.method||'',note:x.note||''};
-  olSales().push(sale); S.inventory[sale.sku]=(parseInt(S.inventory[sale.sku])||0)-sale.qty;
+  const sale=olNormalize({id:x.id||('ol_'+Date.now()),date:x.date||_todayKey(),items:x.items||(x.sku?[{sku:x.sku,qty:x.qty||1}]:[]),
+    amount:Math.round((parseFloat(x.amount)||0)*100)/100,postage:Math.round((parseFloat(x.postage)||0)*100)/100,buyer:x.buyer||'',method:x.method||'',note:x.note||''});
+  olSales().push(sale); olMoveGarage(sale.items,-1);
   return sale;
 }
-function saveOnlineSale(){ if(_dupGuard())return;
-  const sku=$$('ol_sku').value, qty=Math.max(1,parseInt($$('ol_qty').value)||1), amt=parseFloat($$('ol_amt').value);
-  if(!(amt>=0)||$$('ol_amt').value===''){toast('Enter what you got paid');return;}
-  const have=parseInt(S.inventory[sku])||0;
-  if(qty>have&&typeof confirm==='function'&&!confirm('The garage only shows '+have+' '+skuShort(sku)+'. Log it anyway?'))return;
-  const s=addOnlineSale({date:$$('ol_date').value,sku,qty,amount:amt,postage:$$('ol_post').value,buyer:($$('ol_buyer').value||'').trim(),method:$$('ol_meth').value,note:($$('ol_note').value||'').trim()});
-  mClose(); saveS(); toast('📮 '+s.qty+' '+skuShort(s.sku)+' sold · '+fmt(s.amount)+' · garage now '+S.inventory[s.sku]);
+function saveOnlineSale(id){ if(_dupGuard())return;
+  const items=SKUS.map(s=>({sku:s.key,qty:Math.max(0,parseInt(($$('ol_q_'+s.key)||{}).value)||0)})).filter(i=>i.qty>0);
+  if(!items.length){toast('Type how many of at least one product');return;}
+  const amtEl=$$('ol_amt'), amt=parseFloat(amtEl.value);
+  if(amtEl.value===''||!(amt>=0)){toast('Enter what you got paid');return;}
+  const old=id?olSales().find(o=>o.id===id):null;
+  const short=items.filter(i=>i.qty>(parseInt(S.inventory[i.sku])||0)+((old&&old.items.find(o=>o.sku===i.sku))||{qty:0}).qty);
+  if(short.length&&typeof confirm==='function'&&!confirm('The garage does not show enough '+short.map(i=>skuShort(i.sku)).join(', ')+'. Save anyway?'))return;
+  const f={date:$$('ol_date').value||_todayKey(),items,amount:amt,postage:$$('ol_post').value,buyer:($$('ol_buyer').value||'').trim(),method:$$('ol_meth').value,note:($$('ol_note').value||'').trim()};
+  if(old){
+    olMoveGarage(old.items,+1);
+    Object.assign(old,{date:f.date,items,amount:Math.round(amt*100)/100,postage:Math.round((parseFloat(f.postage)||0)*100)/100,buyer:f.buyer,method:f.method,note:f.note});
+    olMoveGarage(old.items,-1);
+    mClose(); saveS(); toast('📮 Sale updated · '+olItemsText(old)+' · '+fmt(old.amount));
+  } else {
+    const s=addOnlineSale(f);
+    mClose(); saveS(); toast('📮 '+olItemsText(s)+' sold · '+fmt(s.amount));
+  }
 }
 function delOnlineSale(id){
   const L=olSales(), i=L.findIndex(x=>x.id===id); if(i<0)return; const x=L[i];
-  if(typeof confirm==='function'&&!confirm('Delete this sale and put '+x.qty+' '+skuShort(x.sku)+' back in the garage?'))return;
-  L.splice(i,1); S.inventory[x.sku]=(parseInt(S.inventory[x.sku])||0)+(parseInt(x.qty)||0);
-  saveS(); toast('Sale deleted · '+x.qty+' '+skuShort(x.sku)+' back in the garage');
+  if(typeof confirm==='function'&&!confirm('Delete this sale and put '+olItemsText(x)+' back in the garage?'))return;
+  L.splice(i,1); olMoveGarage(x.items,+1);
+  saveS(); toast('Sale deleted · '+olItemsText(x)+' back in the garage');
 }
 // Dashboard button grid — the only thing the data sections leave on Home.
 function dashSectionGrid(){
