@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v67';
+const APP_VERSION='v68';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -3537,6 +3537,11 @@ function rHome(){
 
   // ---- Inventory mismatch alert (any active/completed show whose counts don't reconcile) ----
   const invAlertShows=(S.shows||[]).filter(sh=>!isMissed(sh)&&sh.status!=='planned'&&invStatus(sh)==='red');
+  if(doneShows(S)===0&&S.shows.length){
+    html+=`<div class="card" style="border:2px solid var(--red);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="openRestoreCenter()">
+      <div style="font-weight:900;color:#ffb3b3;font-size:15px">⚠️ Your data looks wiped</div>
+      <div style="font-size:13px;margin-top:4px">No finished shows on this phone. <b>Tap here to restore it.</b></div></div>`;
+  }
   if(invAlertShows.length){
     html+=`<div class="card" style="border:1px solid var(--redbd);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="go('show','${invAlertShows[0].id}')">
       <div style="font-weight:800;color:#ffb3b3;font-size:13px">🔴 Inventory mismatch needs review</div>
@@ -8440,6 +8445,7 @@ function rSettings(){
     <button class="btn btn-gold btn-full" onclick="downloadBackup()">💾 Download Backup File</button>
     <button class="btn btn-ghost btn-full" onclick="restoreBackupFile()">📂 Restore from File</button>
     <button class="btn btn-ghost btn-full" style="grid-column:1/-1" onclick="openDeviceBackups()">🛟 Device Backups (automatic copies on this phone)</button>
+    <button class="btn btn-gold btn-full" style="grid-column:1/-1" onclick="openRestoreCenter()">🛟 Emergency Restore (password)</button>
   </div>
   </div>
   <div class="card" id="rep-section" style="border-color:rgba(79,195,247,0.3)">
@@ -8560,6 +8566,39 @@ function importData(){
   <textarea class="fi" id="importTxt" style="min-height:160px;font-size:11px;font-family:monospace" placeholder="Paste exported data here..."></textarea>
   <button class="btn btn-red btn-full" style="margin-top:10px" onclick="applyImport()">Import & Replace Data</button>
   <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
+}
+// v68: EMERGENCY RESTORE. packages/emergency-restore-20260930.json is the
+// owner's full data (Sep 26 backup + every update through v66), encrypted
+// with AES-GCM under a PBKDF2 key from a password only the owner holds.
+// Restoring stamps it as the newest copy and pushes it to the cloud.
+function openRestoreCenter(){
+  const n=deviceBackups().length;
+  mOpen(`<div class="mh"><div class="mt">🛟 Restore My Data</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">This phone has <b>${S.shows.length} shows, ${doneShows(S)} finished</b>. Your real data has 46 shows, 19 finished.</div>
+  <div class="fg"><label class="fl">Restore password (from Claude)</label><input class="fi" id="er_pass" autocomplete="off" autocapitalize="none" placeholder="word-word-word-1234"></div>
+  <button class="btn btn-gold btn-full" id="er_btn" onclick="emergencyRestore()">✅ Restore My Data</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="openDeviceBackups()">🛟 Or pick a copy saved on this phone (${n})</button>`);
+}
+async function emergencyRestore(){
+  const pass=(($$('er_pass')||{}).value||'').trim().toLowerCase();
+  if(!pass){toast('Type the restore password');return;}
+  const btn=$$('er_btn'); if(btn){btn.disabled=true;btn.textContent='Restoring…';}
+  try{
+    const r=await fetch('packages/emergency-restore-20260930.json?t='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw new Error('download failed');
+    const E=await r.json(), b=x=>Uint8Array.from(atob(x),ch=>ch.charCodeAt(0));
+    const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b(E.salt),iterations:E.iter,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+    let txt; try{ txt=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b(E.iv)},key,b(E.ct))); }catch(e){ throw new Error('wrong password'); }
+    const d=JSON.parse(txt); if(!d||!d.shows||!d.inventory)throw new Error('bad data');
+    backupLocal(); d._updatedAt=new Date().toISOString(); _applyStateObj(d);
+    if(_cloudUser){ await cloudPush(); }
+    mClose(); toast('✅ Restored: '+d.shows.length+' shows. Reloading…',4000);
+    setTimeout(()=>{ try{ location.reload(); }catch(e){} },1500);
+  }catch(e){
+    toast(e&&e.message==='wrong password'?'❌ Wrong password. Check it and try again.':'❌ Restore failed: '+(e&&e.message||e),5000);
+    if(btn){btn.disabled=false;btn.textContent='✅ Restore My Data';}
+  }
 }
 // v67: every automatic copy this device keeps (before a cloud load, before
 // big updates). Lets the owner put one back with a tap if the app ever
@@ -8719,6 +8758,11 @@ async function cloudHydrate(){
   if(localUsed&&!cloudUsed){await cloudPush();return;}
   if(cloudUsed&&!localUsed){adoptCloud(cloud);return;}
   const localT=S._updatedAt||'',cloudT=cloud._updatedAt||'';
+  if(cloudT>localT&&doneShows(cloud)<doneShows(S)){
+    if(typeof confirm!=='function'||confirm('⚠️ The cloud copy has only '+doneShows(cloud)+' finished shows; this device has '+doneShows(S)+'. Keep THIS device\'s data and fix the cloud? (Recommended)'))await cloudPush();
+    else { setSync('error'); toast('Sync paused. Nothing was changed.'); }
+    return;
+  }
   if(cloudT>localT){ if(!looksUsed(S)||(typeof confirm!=='function')||confirm('Cloud has a NEWER copy than this device. Load it and replace this device\'s local data? (A local backup is kept either way.)'))adoptCloud(cloud); else await cloudPush(); }
   else if(localT>cloudT){
     // SAFETY GUARD: never silently overwrite a richer cloud copy with a fresh/empty device.
