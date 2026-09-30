@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v63';
+const APP_VERSION='v64';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1353,6 +1353,15 @@ function applyOneTimeUpdates(d){
       }
       d._applied['online_first_sale_v63']=true;
     }catch(e){ console.error('online_first_sale_v63',e); }
+  }
+
+  // v64: postage on the AZ online sale was $13 (Froggy).
+  if(!d._applied['online_az_postage_v64']){
+    try{
+      const x=((d.settings||{}).onlineSales||[]).find(o=>o&&o.id==='ol_2026_09_30_az');
+      if(x&&!(parseFloat(x.postage)>0))x.postage=13;
+      d._applied['online_az_postage_v64']=true;
+    }catch(e){ console.error('online_az_postage_v64',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
