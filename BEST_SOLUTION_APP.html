@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v66';
+const APP_VERSION='v67';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -8439,6 +8439,7 @@ function rSettings(){
   <div class="g2" style="gap:8px">
     <button class="btn btn-gold btn-full" onclick="downloadBackup()">💾 Download Backup File</button>
     <button class="btn btn-ghost btn-full" onclick="restoreBackupFile()">📂 Restore from File</button>
+    <button class="btn btn-ghost btn-full" style="grid-column:1/-1" onclick="openDeviceBackups()">🛟 Device Backups (automatic copies on this phone)</button>
   </div>
   </div>
   <div class="card" id="rep-section" style="border-color:rgba(79,195,247,0.3)">
@@ -8560,6 +8561,35 @@ function importData(){
   <button class="btn btn-red btn-full" style="margin-top:10px" onclick="applyImport()">Import & Replace Data</button>
   <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Cancel</button>`);
 }
+// v67: every automatic copy this device keeps (before a cloud load, before
+// big updates). Lets the owner put one back with a tap if the app ever
+// comes up empty.
+function deviceBackups(){
+  const out=[];
+  try{ Object.keys(localStorage).forEach(k=>{
+    if(!/^dd_bs_(backup|pre|prechange)_/.test(k))return;
+    let d=null; try{ d=JSON.parse(localStorage.getItem(k)); }catch(e){}
+    if(!d||!d.shows||!d.inventory)return;
+    const ts=parseInt((k.match(/(\d{10,})/)||[])[1],10)||0;
+    out.push({key:k,ts,shows:d.shows.length,done:doneShows(d),saved:d._updatedAt||''});
+  }); }catch(e){}
+  return out.sort((a,b)=>b.ts-a.ts);
+}
+function openDeviceBackups(){
+  const L=deviceBackups();
+  mOpen(`<div class="mh"><div class="mt">🛟 Device Backups</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Copies this phone saved on its own. Right now: <b>${S.shows.length} shows, ${doneShows(S)} finished</b>. Pick the copy with the most finished shows.</div>
+  ${L.length?L.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--border)">
+    <div><div style="font-weight:800;font-size:13px">${b.ts?new Date(b.ts).toLocaleString():_esc(b.key)}</div><div style="font-size:11px;color:var(--muted)">${b.shows} shows · ${b.done} finished</div></div>
+    <button class="btn btn-xs btn-gold" onclick="restoreDeviceBackup('${b.key}')">Restore</button></div>`).join(''):'<div style="color:var(--muted);font-size:12px">No automatic copies on this device.</div>'}`);
+}
+function restoreDeviceBackup(key){
+  let d=null; try{ d=JSON.parse(localStorage.getItem(key)); }catch(e){}
+  if(!d||!d.shows){ toast('That copy could not be read'); return; }
+  if(typeof confirm==='function'&&!confirm('Put this copy back? ('+d.shows.length+' shows, '+doneShows(d)+' finished). What is on the screen now is saved as a copy first.'))return;
+  backupLocal(); _applyStateObj(d); mClose(); toast('✅ Restored. Reloading to apply updates…');
+  setTimeout(()=>{ try{ location.reload(); }catch(e){} },900);
+}
 function _applyStateObj(parsed){
   if(!parsed||!parsed.inventory||!parsed.shows)throw new Error('not a valid backup');
   parsed.v=INIT.v;
@@ -8615,6 +8645,10 @@ function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
 const SB_URL='https://ylotwhvkrlobrpdmngul.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3R3aHZrcmxvYnJwZG1uZ3VsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1MDY0NDAsImV4cCI6MjA5MzA4MjQ0MH0.k_94GPfSLJpbib4pt3bSV6xTYM1hATninPHWU6iCHjI';
 let sb=null,_cloudUser=null,_cloudTimer=null,_syncState='off';
+// v67: how many finished shows the cloud copy had when this device last read it.
+// A device holding fewer is a wiped or fresh copy and must never push over it.
+let _cloudDoneSeen=0;
+function doneShows(st){ return ((st&&st.shows)||[]).filter(x=>x&&x.status==='completed').length; }
 try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
 
 function syncLabel(st){return {off:'Not signed in',syncing:'Syncing…',synced:'Synced ✓',error:'Sync error — working offline'}[st]||'';}
@@ -8634,6 +8668,7 @@ async function cloudPull(){
 // exactly as before; nothing about the write itself changed.
 async function cloudPush(){
   if(!sb||!_cloudUser)return {ok:false,reason:'not signed in'};
+  if(_cloudDoneSeen>doneShows(S)){ setSync('error'); toast('⚠️ Not syncing: the cloud has '+_cloudDoneSeen+' finished shows, this device '+doneShows(S)+'. Your cloud copy is protected. Setup → Device Backups or sign out and back in.',6000); return {ok:false,reason:'cloud protected'}; }
   if(!S._updatedAt)S._updatedAt=new Date().toISOString();
   setSync('syncing');
   try{
@@ -8679,6 +8714,7 @@ async function cloudHydrate(){
   const cloud=await cloudPull();
   if(!cloud){await cloudPush();return;}
   if(!cloud.inventory||!cloud.shows){await cloudPush();return;}
+  _cloudDoneSeen=Math.max(_cloudDoneSeen,doneShows(cloud));
   const localUsed=looksUsed(S),cloudUsed=looksUsed(cloud);
   if(localUsed&&!cloudUsed){await cloudPush();return;}
   if(cloudUsed&&!localUsed){adoptCloud(cloud);return;}
