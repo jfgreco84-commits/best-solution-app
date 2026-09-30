@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>Best Solution Restore</title>
+<style>
+:root{--bg:#111;--card:#1c1c1c;--text:#f2f2f2;--muted:#9a9a9a;--gold:#FFD600;--green:#00D26A;--red:#ff5c5c}
+body{margin:0;background:var(--bg);color:var(--text);font:16px -apple-system,system-ui,sans-serif;padding:18px}
+h1{color:var(--gold);font-size:22px;margin:4px 0 6px}
+.card{background:var(--card);border:1px solid #333;border-radius:14px;padding:14px;margin:12px 0}
+input{width:100%;box-sizing:border-box;font-size:18px;padding:12px;border-radius:10px;border:1px solid #444;background:#0b0b0b;color:var(--text)}
+button,a.btn{display:block;width:100%;box-sizing:border-box;font-size:18px;font-weight:800;padding:14px;border-radius:12px;border:0;background:var(--gold);color:#000;margin-top:10px;text-align:center;text-decoration:none}
+a.btn{background:var(--green)}
+.s{font-size:14px;margin:6px 0}.ok{color:var(--green)}.bad{color:var(--red)}.m{color:var(--muted)}
+</style></head><body>
+<h1>⚡ Best Solution: Restore My Data</h1>
+<div class="m" style="font-size:14px">This page puts your full data back on this phone. It works in Safari. Then it opens the app.</div>
+<div class="card"><div class="s" id="now">Checking what is on this phone…</div></div>
+<div class="card">
+  <div class="s"><b>Restore password</b> (from Claude)</div>
+  <input id="pw" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="word-word-word-1234">
+  <button id="go" onclick="run()">✅ Restore My Data</button>
+  <div id="log" style="margin-top:10px"></div>
+  <a class="btn" id="open" href="BEST_SOLUTION_APP.html?v=69&restored=1" style="display:none">Open the app →</a>
+</div>
+<script>
+var KEY='dd_bs_v7';
+function done(d){return ((d&&d.shows)||[]).filter(function(x){return x&&x.status==='completed';}).length;}
+function line(t,c){var e=document.createElement('div');e.className='s '+(c||'');e.textContent=t;document.getElementById('log').appendChild(e);}
+(function(){try{var d=JSON.parse(localStorage.getItem(KEY)||'null');
+  document.getElementById('now').textContent=d?('On this phone now: '+(d.shows||[]).length+' shows, '+done(d)+' finished. (Your real data: 46 shows, 19 finished.)'):'On this phone now: nothing saved.';
+}catch(e){document.getElementById('now').textContent='Could not read this phone\'s data: '+e.message;}})();
+function b64(x){return Uint8Array.from(atob(x),function(ch){return ch.charCodeAt(0);});}
+async function run(){
+  var btn=document.getElementById('go'); document.getElementById('log').innerHTML='';
+  var pass=(document.getElementById('pw').value||'').trim().toLowerCase().replace(/\s+/g,'');
+  if(!pass){line('Type the password first.','bad');return;}
+  btn.disabled=true; btn.textContent='Working…';
+  try{
+    if(!window.crypto||!crypto.subtle)throw new Error('This browser cannot decrypt. Open this page in Safari.');
+    line('1. Downloading your restore copy…');
+    var r=await fetch('packages/emergency-restore-20260930.json?t='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw new Error('Download failed ('+r.status+'). Check your signal and try again.');
+    var E=await r.json(); line('   ✓ Downloaded','ok');
+    line('2. Checking the password…');
+    var base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+    var key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b64(E.salt),iterations:E.iter,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+    var txt; try{ txt=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(E.iv)},key,b64(E.ct))); }
+    catch(e){ throw new Error('Wrong password. It looks like word-word-word-1234 (3 words and 4 numbers, with dashes).'); }
+    var d=JSON.parse(txt); line('   ✓ Password OK: '+d.shows.length+' shows, '+done(d)+' finished','ok');
+    line('3. Saving to this phone…');
+    var cur=localStorage.getItem(KEY); if(cur)localStorage.setItem('dd_bs_backup_'+Date.now(),cur);
+    d._updatedAt=new Date().toISOString();
+    localStorage.setItem(KEY,JSON.stringify(d));
+    var chk=JSON.parse(localStorage.getItem(KEY)); line('   ✓ Saved: '+chk.shows.length+' shows, '+done(chk)+' finished','ok');
+    line('Done. Tap "Open the app". If it asks about the cloud, tap OK to keep THIS phone\'s data.','ok');
+    document.getElementById('open').style.display='block'; btn.textContent='✅ Restored';
+  }catch(e){ line('❌ '+(e&&e.message||e),'bad'); btn.disabled=false; btn.textContent='✅ Restore My Data'; }
+}
+</script>
+</body></html>
