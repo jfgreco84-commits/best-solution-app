@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v62';
+const APP_VERSION='v63';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1340,6 +1340,19 @@ function applyOneTimeUpdates(d){
         d._applied['cranberry_pay_round_v62']=true;
       }
     }catch(e){ console.error('cranberry_pay_round_v62',e); }
+  }
+
+  // v63: first online sale. Froggy mailed 1 C5 from the garage to a buyer
+  // in AZ for $30 total, shipping included (Sep 30).
+  if(!d._applied['online_first_sale_v63']){
+    try{
+      d.settings=d.settings||{}; if(!Array.isArray(d.settings.onlineSales))d.settings.onlineSales=[];
+      if(!d.settings.onlineSales.some(x=>x&&x.id==='ol_2026_09_30_az')){
+        d.settings.onlineSales.push({id:'ol_2026_09_30_az',date:'2026-09-30',sku:'c5s',qty:1,amount:30,postage:0,buyer:'Buyer in AZ',method:'',note:'$30 total, shipping included. Mailed from the garage.'});
+        d.inventory=d.inventory||{}; d.inventory.c5s=(parseInt(d.inventory.c5s)||0)-1;
+      }
+      d._applied['online_first_sale_v63']=true;
+    }catch(e){ console.error('online_first_sale_v63',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -3860,6 +3873,71 @@ function secBatman(){
   return h;
 }
 
+/* ---------------------------------------------------------------------
+   v63 ONLINE SALES — a running tally of orders mailed straight from the
+   garage shelf. Lives in S.settings.onlineSales (no new top-level state
+   key). Each sale takes its bottles out of the garage; deleting a sale
+   puts them back. Profit = money in − postage − cost of the bottles.
+   --------------------------------------------------------------------- */
+const OL_METHODS=['','PayPal','Venmo','Zelle','Cash App','Square','Etsy','eBay','Facebook','Cash','Other'];
+function olSales(){ if(!S.settings)S.settings={}; if(!Array.isArray(S.settings.onlineSales))S.settings.onlineSales=[]; return S.settings.onlineSales; }
+function olSaleCost(x){ return (parseInt(x.qty)||0)*getCost(x.sku); }
+function olSaleProfit(x){ return (parseFloat(x.amount)||0)-(parseFloat(x.postage)||0)-olSaleCost(x); }
+function olTotals(){
+  const L=olSales(), t={orders:L.length,units:0,amount:0,postage:0,cost:0,profit:0,bySku:{}};
+  L.forEach(x=>{ const q=parseInt(x.qty)||0; t.units+=q; t.amount+=parseFloat(x.amount)||0; t.postage+=parseFloat(x.postage)||0; t.cost+=olSaleCost(x); t.bySku[x.sku]=(t.bySku[x.sku]||0)+q; });
+  t.profit=t.amount-t.postage-t.cost; return t;
+}
+function skuShort(k){ const s=SKUS.find(z=>z.key===k); return s?s.short:k; }
+function secOnline(){
+  const T=olTotals(), L=olSales().slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  let h=`<div class="card" style="font-size:12px;color:var(--muted);line-height:1.5">📮 Every bottle you sell online and mail from the garage. Logging a sale <strong>takes it off the garage shelf</strong>. Deleting one puts it back.</div>
+  <div class="card gb"><div class="g3">
+    <div style="text-align:center"><div style="font-size:24px;font-weight:900;color:var(--gold)">${T.orders}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Orders</div></div>
+    <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--green)">${fmt(T.amount)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Money In</div></div>
+    <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:${T.profit>=0?'var(--green)':'var(--red)'}">${fmt(T.profit)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Profit</div></div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">${T.units} bottle${T.units!==1?'s':''} · postage ${fmt(T.postage)} · bottle cost ${fmt(T.cost)}${Object.keys(T.bySku).length?' · '+Object.keys(T.bySku).map(k=>skuShort(k)+' '+T.bySku[k]).join(', '):''}</div></div>
+  <button class="btn btn-gold btn-full" style="margin-bottom:10px" onclick="openOnlineSale()">+ Log an Online Sale</button>`;
+  if(!L.length)h+=`<div class="card" style="text-align:center;color:var(--muted)">No online sales yet.</div>`;
+  else h+=`<div class="card"><table class="inv-table"><tr><th>Date</th><th>Sold</th><th>To</th><th>In</th><th>Profit</th><th></th></tr>
+    ${L.map(x=>`<tr><td style="white-space:nowrap">${_esc(String(x.date||'').slice(5).replace('-','/'))}</td><td>${parseInt(x.qty)||0} ${_esc(skuShort(x.sku))}</td><td>${_esc(x.buyer||'')}${x.method?`<div style="font-size:10px;color:var(--muted)">${_esc(x.method)}</div>`:''}</td><td style="color:var(--green);font-weight:700">${fmt(parseFloat(x.amount)||0)}${parseFloat(x.postage)>0?`<div style="font-size:10px;color:var(--muted)">−${fmt(parseFloat(x.postage))} post</div>`:''}</td><td style="font-weight:700">${fmt(olSaleProfit(x))}</td><td><span style="cursor:pointer;color:var(--muted);font-weight:900" onclick="delOnlineSale('${x.id}')">✕</span></td></tr>${x.note?`<tr><td colspan="6" style="font-size:10px;color:var(--muted);padding-top:0">${_esc(x.note)}</td></tr>`:''}`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:900"><td>Total</td><td>${T.units}</td><td></td><td style="color:var(--green)">${fmt(T.amount)}</td><td>${fmt(T.profit)}</td><td></td></tr></table></div>`;
+  return h;
+}
+function openOnlineSale(){
+  mOpen(`<div class="mh"><div class="mt">📮 Log an Online Sale</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Comes straight off the garage shelf.</div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="ol_date" value="${_todayKey()}"></div>
+  <div class="fg"><label class="fl">Product</label><select class="fi" id="ol_sku">${SKUS.map(s=>`<option value="${s.key}">${s.name} (garage: ${S.inventory[s.key]||0})</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">How many</label><input class="fi" type="number" id="ol_qty" value="1" min="1" inputmode="numeric"></div>
+  <div class="fg"><label class="fl">Total you got paid ($, shipping included)</label><input class="fi" type="number" id="ol_amt" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Postage you paid ($, optional)</label><input class="fi" type="number" id="ol_post" step="0.01" min="0" inputmode="decimal" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Buyer / where it went</label><input class="fi" id="ol_buyer" placeholder="e.g. guy in AZ"></div>
+  <div class="fg"><label class="fl">Paid by</label><select class="fi" id="ol_meth">${OL_METHODS.map(m=>`<option value="${m}">${m||'— select —'}</option>`).join('')}</select></div>
+  <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="ol_note" placeholder="tracking #, etc."></div>
+  <button class="btn btn-gold btn-full" onclick="saveOnlineSale()">✅ Save Sale</button>`);
+}
+function addOnlineSale(x){
+  const sale={id:x.id||('ol_'+Date.now()),date:x.date||_todayKey(),sku:x.sku,qty:Math.max(1,parseInt(x.qty)||1),amount:Math.round((parseFloat(x.amount)||0)*100)/100,
+    postage:Math.round((parseFloat(x.postage)||0)*100)/100,buyer:x.buyer||'',method:x.method||'',note:x.note||''};
+  olSales().push(sale); S.inventory[sale.sku]=(parseInt(S.inventory[sale.sku])||0)-sale.qty;
+  return sale;
+}
+function saveOnlineSale(){ if(_dupGuard())return;
+  const sku=$$('ol_sku').value, qty=Math.max(1,parseInt($$('ol_qty').value)||1), amt=parseFloat($$('ol_amt').value);
+  if(!(amt>=0)||$$('ol_amt').value===''){toast('Enter what you got paid');return;}
+  const have=parseInt(S.inventory[sku])||0;
+  if(qty>have&&typeof confirm==='function'&&!confirm('The garage only shows '+have+' '+skuShort(sku)+'. Log it anyway?'))return;
+  const s=addOnlineSale({date:$$('ol_date').value,sku,qty,amount:amt,postage:$$('ol_post').value,buyer:($$('ol_buyer').value||'').trim(),method:$$('ol_meth').value,note:($$('ol_note').value||'').trim()});
+  mClose(); saveS(); toast('📮 '+s.qty+' '+skuShort(s.sku)+' sold · '+fmt(s.amount)+' · garage now '+S.inventory[s.sku]);
+}
+function delOnlineSale(id){
+  const L=olSales(), i=L.findIndex(x=>x.id===id); if(i<0)return; const x=L[i];
+  if(typeof confirm==='function'&&!confirm('Delete this sale and put '+x.qty+' '+skuShort(x.sku)+' back in the garage?'))return;
+  L.splice(i,1); S.inventory[x.sku]=(parseInt(S.inventory[x.sku])||0)+(parseInt(x.qty)||0);
+  saveS(); toast('Sale deleted · '+x.qty+' '+skuShort(x.sku)+' back in the garage');
+}
 // Dashboard button grid — the only thing the data sections leave on Home.
 function dashSectionGrid(){
   const C=homeCtx();
@@ -3880,7 +3958,8 @@ function dashSectionGrid(){
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
     {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
-    {k:'batman',icon:'🦇',label:'Borrowed from Batman',sub:bmBottles()+' bottles owed · '+fmt(bmRetail())}
+    {k:'batman',icon:'🦇',label:'Borrowed from Batman',sub:bmBottles()+' bottles owed · '+fmt(bmRetail())},
+    {k:'online',icon:'📮',label:'Online Sales',sub:(function(){ const T=olTotals(); return T.orders+' order'+(T.orders!==1?'s':'')+' · '+fmt(T.amount); })()}
   ];
   let h=`<div class="sec-lbl">DASHBOARD SECTIONS</div><div class="g2" style="margin-bottom:8px">`;
   h+=cards.map(c=>`<button class="btn btn-ghost" style="height:auto;padding:13px 11px;flex-direction:column;align-items:flex-start;text-align:left;white-space:normal;gap:0" onclick="openSection('${c.k}')"><span style="font-size:20px;line-height:1;margin-bottom:5px">${c.icon}</span><span style="font-size:13px;font-weight:800;line-height:1.2">${c.label}</span><span style="font-size:10px;color:var(--muted);margin-top:3px;font-weight:600">${c.sub}</span></button>`).join('');
@@ -3904,7 +3983,8 @@ function rSection(){
     split:{t:'Money Split — Completed Shows',f:secSplit},
     payments:{t:'Payment Breakdown (YTD)',f:secPayments},
     best:{t:'Best Shows This Season',f:secBest},
-    batman:{t:'Borrowed from Batman',f:secBatman}
+    batman:{t:'Borrowed from Batman',f:secBatman},
+    online:{t:'Online Sales',f:secOnline}
   };
   const m=map[curSection]||map.collected;
   const body=m.f(C);
