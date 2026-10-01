@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>Cloud Snapshot</title>
+<style>
+:root{--bg:#111;--card:#1c1c1c;--text:#f2f2f2;--muted:#9a9a9a;--gold:#FFD600;--green:#00D26A;--red:#ff5c5c}
+body{margin:0;background:var(--bg);color:var(--text);font:16px -apple-system,system-ui,sans-serif;padding:16px}
+h1{color:var(--gold);font-size:20px;margin:4px 0}
+.card{background:var(--card);border:1px solid #333;border-radius:12px;padding:12px;margin:10px 0}
+input{width:100%;box-sizing:border-box;font-size:17px;padding:11px;border-radius:10px;border:1px solid #444;background:#0b0b0b;color:var(--text);margin:4px 0}
+button{font-size:17px;font-weight:800;padding:13px;border-radius:10px;border:0;background:var(--gold);color:#000;width:100%;margin-top:8px}
+.m{color:var(--muted);font-size:13px}.ok{color:var(--green)}.bad{color:var(--red)}
+</style></head><body>
+<h1>Best Solution: Cloud Snapshot</h1>
+<div class="m">
+<b>What this page does:</b> signs in to Supabase for a moment (that creates a short-lived login session on the server), reads your saved app row ONE time, downloads it to this computer as a file, then signs that session out.
+<b>What it does not do:</b> it sends no save, update or delete to the cloud, and it does not read or change the app's data in this browser. The login is kept in memory only.
+<br><br><b>Use only when approved.</b> Use a separate browser profile (or a private window) on a computer, not the phone or browser where the app is open. The downloaded file holds private business data: keep it off GitHub.
+</div>
+<div class="card">
+  <input id="em" type="email" placeholder="email" autocomplete="username">
+  <input id="pw" type="password" placeholder="password" autocomplete="current-password">
+  <button id="go" onclick="run()">Download cloud snapshot</button>
+  <div id="log" style="margin-top:8px"></div>
+</div>
+<!-- Pinned, vendored copy of @supabase/supabase-js 2.117.2 (npm tarball integrity
+     sha512-eSG2VKnHR+Clp1PmidZ1/weJ8PJwoybjva3L2GgKqFG4YDS1Iqmc61psKGZP5xw6OMT2O7ZorPR42PY6q1BOXg==),
+     checked again by the browser against the hash below. -->
+<script src="vendor/supabase-js-2.117.2.umd.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script>
+var SB_URL='https://ylotwhvkrlobrpdmngul.supabase.co';
+var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3R3aHZrcmxvYnJwZG1uZ3VsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1MDY0NDAsImV4cCI6MjA5MzA4MjQ0MH0.k_94GPfSLJpbib4pt3bSV6xTYM1hATninPHWU6iCHjI';
+function line(t,c){var e=document.createElement('div');e.className=c||'';e.textContent=t;document.getElementById('log').appendChild(e);}
+async function sha(t){var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0');}).join('');}
+async function run(){
+  document.getElementById('log').innerHTML='';
+  var btn=document.getElementById('go'), pwEl=document.getElementById('pw'); btn.disabled=true;
+  var sb=null, signedIn=false, url=null;
+  try{
+    if(!window.supabase||!window.supabase.createClient)throw new Error('the Supabase library did not load (integrity check failed or file missing)');
+    // In-memory auth storage, no refresh, no URL session pickup: the login never
+    // lands in this browser's storage.
+    var mem={},store={getItem:function(k){return mem[k]||null;},setItem:function(k,v){mem[k]=v;},removeItem:function(k){delete mem[k];}};
+    sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storage:store}});
+    var em=document.getElementById('em').value.trim(),pw=pwEl.value;
+    pwEl.value='';
+    var si=await sb.auth.signInWithPassword({email:em,password:pw}); pw=null;
+    if(si.error)throw new Error('sign in: '+si.error.message);
+    signedIn=true;
+    var uid=si.data.user.id; line('Signed in (temporary session).','ok');
+    var res=await sb.from('app_data').select('*').eq('user_id',uid).eq('data_key','bs_state').maybeSingle();
+    if(res.error)throw new Error('read failed: '+(res.error.message||res.error.code));
+    if(!res.data){ line('The cloud has NO saved copy for this account. Nothing downloaded.','bad'); return; }
+    var d=res.data.data_value, shows=(d&&d.shows)||[], fin=shows.filter(function(s){return s&&s.status==='completed';}).length;
+    var file=JSON.stringify({kind:'best-solution cloud snapshot',takenAt:new Date().toISOString(),
+      updated_at:res.data.updated_at,revision:(res.data.revision==null?null:res.data.revision),data_value:d},null,2);
+    var h=await sha(file);
+    line('Read OK: '+shows.length+' shows, '+fin+' finished. Cloud last saved '+res.data.updated_at,'ok');
+    line('File SHA-256: '+h);
+    url=URL.createObjectURL(new Blob([file],{type:'application/json'}));
+    var a=document.createElement('a');a.href=url;
+    a.download='best-solution-CLOUD-SNAPSHOT-'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.json';
+    document.body.appendChild(a);a.click();a.remove();
+    line('Downloaded. Write down the SHA-256 above and keep the file private.','ok');
+  }catch(e){ line('❌ '+(e&&e.message||e),'bad'); }
+  finally{
+    pwEl.value='';
+    if(url){ var u=url; setTimeout(function(){ URL.revokeObjectURL(u); },4000); }
+    if(sb&&signedIn){
+      try{
+        var so=await sb.auth.signOut({scope:'local'});
+        if(so&&so.error)line('⚠️ Sign-out reported an error: '+(so.error.message||so.error)+'. Close this window; the session expires on its own.','bad');
+        else line('Signed out.','ok');
+      }catch(e){ line('⚠️ Sign-out failed: '+(e&&e.message||e)+'. Close this window; the session expires on its own.','bad'); }
+    }
+    btn.disabled=false;
+  }
+}
+</script>
+</body></html>

@@ -13,6 +13,9 @@ node tests/booth-splits-and-calendar.test.js
 node tests/garage-transfers.test.js
 node tests/money-by-person.test.js
 node tests/cranberry-scoreboard.test.js
+node tests/sync-safety.test.js
+node tests/compare-tools.test.js
+bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -152,3 +155,17 @@ controls, so no test can reach a real account.
 
 The three show identities in `P2B_MANIFEST` are read from the app rather than
 retyped, so the tests assert against the real manifest without duplicating it.
+
+`sync-safety.test.js` (v70) runs the real sync code against a fake Supabase
+table. The invariant: a device writes the cloud only after a successful read,
+only when its copy descends from the row it read (the sync base), only as a
+compare-and-swap, and never while a restored copy is quarantined. Divergence
+blocks until the owner resolves it. Section 6 boots the unmodified v69 app
+(from git) to show a stale tab overwrites without the server guard and is
+refused with it.
+
+`server-guard.test.sh` applies `tools/proposed-server-guard.sql` to a
+throwaway local Postgres and replays the SQL a v69 upsert and a v70
+compare-and-swap produce. It never touches Supabase.
+
+`harness.js` `boot(seed, appPath)` can boot another copy of the app.
