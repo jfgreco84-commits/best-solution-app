@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v69';
+const APP_VERSION='v70';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1382,12 +1382,17 @@ function applyOneTimeUpdates(d){
   if(!d._applied['www_pay2_mm_2000_v69']){
     try{
       const www=(d.shows||[]).find(sh=>sh&&/wonderful world of weddings/i.test(sh.name||''));
-      if(www){ const paid=(www.boothPayments||[]).reduce((t,x)=>t+(parseFloat(x.amount)||0),0);
-        if(Math.abs(paid-250)<0.005){ www.boothPayments=www.boothPayments||[]; www.boothPayments.push({amount:418.90,date:'2026-09-30',note:'2nd payment (of 2 remaining). Last $418.90 due Oct 31.'}); www.depositDue='2026-10-31'; }
+      // v70: each entry carries a stable id and is skipped if it (or the same
+      // amount on the same date) is already on the ledger, on top of the
+      // running-total guard. Re-running can never add it twice.
+      if(www){ const bp=www.boothPayments||[]; const paid=bp.reduce((t,x)=>t+(parseFloat(x.amount)||0),0);
+        const has=bp.some(x=>x&&(x.id==='bp_www_2026_09_30'||(Math.abs((parseFloat(x.amount)||0)-418.90)<0.005&&x.date==='2026-09-30')));
+        if(!has&&Math.abs(paid-250)<0.005){ www.boothPayments=bp; bp.push({id:'bp_www_2026_09_30',amount:418.90,date:'2026-09-30',note:'2nd payment (of 2 remaining). Last $418.90 due Oct 31.'}); www.depositDue='2026-10-31'; }
       }
       const inv=((d.productDebt||{}).invoices||[]).filter(i=>pdNum(i.number)===2)[0];
       if(inv){ const pd2=pdRound((inv.payments||[]).reduce((t,x)=>t+pdNum(x.amount),0));
-        if(pd2===3000){ inv.payments.push({amount:2000,date:'2026-09-30',method:'',note:'This puts me at 5000 towards invoice number two'}); pdSortPayments(inv); pdSyncStatus(inv); }
+        const has=(inv.payments||[]).some(x=>x&&(x.id==='pd_mm_inv2_2026_09_30'||(pdNum(x.amount)===2000&&x.date==='2026-09-30')));
+        if(!has&&pd2===3000){ inv.payments.push({id:'pd_mm_inv2_2026_09_30',amount:2000,date:'2026-09-30',method:'',note:'This puts me at 5000 towards invoice number two'}); pdSortPayments(inv); pdSyncStatus(inv); }
       }
       if(www||inv)d._applied['www_pay2_mm_2000_v69']=true;
     }catch(e){ console.error('www_pay2_mm_2000_v69',e); }
@@ -7436,8 +7441,10 @@ function pdNormalize(d){
     if(!Array.isArray(inv.payments))inv.payments=[];
     inv.items=inv.items.map(function(it){return {label:String(it&&it.label||''),cases:pdNum(it&&it.cases)};});
     inv.payments=inv.payments.map(function(p){
-      return {amount:pdNum(p&&p.amount), date:(p&&p.date)||'',
+      var o={amount:pdNum(p&&p.amount), date:(p&&p.date)||'',
               method:(p&&p.method)||'', note:(p&&p.note)||''};
+      if(p&&p.id)o.id=String(p.id); // v70: a payment's id survives normalising, so it can be de-duplicated
+      return o;
     });
     if(inv.createdDate===undefined)inv.createdDate=null;
     if(inv.shipping==null)inv.shipping='';
@@ -8609,8 +8616,10 @@ async function emergencyRestore(){
     const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b(E.salt),iterations:E.iter,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
     let txt; try{ txt=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b(E.iv)},key,b(E.ct))); }catch(e){ throw new Error('wrong password'); }
     const d=JSON.parse(txt); if(!d||!d.shows||!d.inventory)throw new Error('bad data');
-    backupLocal(); d._updatedAt=new Date().toISOString(); _applyStateObj(d);
-    if(_cloudUser){ await cloudPush(); }
+    // v70: this copy is the Sep 26 / v66 data (19 finished). It is put on this
+    // device only, never stamped newest and never pushed. The next cloud read
+    // decides, and the v67 guard refuses to push it over a richer cloud.
+    backupLocal(); _applyStateObj(d);
     mClose(); toast('✅ Restored: '+d.shows.length+' shows. Reloading…',4000);
     setTimeout(()=>{ try{ location.reload(); }catch(e){} },1500);
   }catch(e){
@@ -8624,7 +8633,7 @@ async function emergencyRestore(){
 function deviceBackups(){
   const out=[];
   try{ Object.keys(localStorage).forEach(k=>{
-    if(!/^dd_bs_(backup|pre|prechange)_/.test(k))return;
+    if(!/^dd_bs_(backup|pre|prechange|cloudsnap)_/.test(k))return;
     let d=null; try{ d=JSON.parse(localStorage.getItem(k)); }catch(e){}
     if(!d||!d.shows||!d.inventory)return;
     const ts=parseInt((k.match(/(\d{10,})/)||[])[1],10)||0;
@@ -8705,35 +8714,94 @@ let sb=null,_cloudUser=null,_cloudTimer=null,_syncState='off';
 // v67: how many finished shows the cloud copy had when this device last read it.
 // A device holding fewer is a wiped or fresh copy and must never push over it.
 let _cloudDoneSeen=0;
+// v70 SYNC SAFETY. A write may only follow a successful read of the same row.
+//   _cloudVerified  true only after cloudRead() came back 'ok' or 'none'.
+//                   Any read error, write conflict or sign-out clears it.
+//   _cloudToken     the row's server updated_at from that read. Every write is
+//                   a conditional UPDATE pinned to it (compare-and-swap), so a
+//                   copy that is behind the cloud can never land on top of it.
+//                   null + verified means "no row exists": first write is an
+//                   INSERT, which fails rather than overwrite if one appeared.
+//   SYNC_PROTOCOL   stamped on every doc we write. A cloud doc stamped higher
+//                   came from newer code and this device will not write over it.
+const SYNC_PROTOCOL=2;
+let _cloudVerified=false,_cloudToken=null,_cloudBlocked='';
 function doneShows(st){ return ((st&&st.shows)||[]).filter(x=>x&&x.status==='completed').length; }
 try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
 
 function syncLabel(st){return {off:'Not signed in',syncing:'Syncing…',synced:'Synced ✓',error:'Sync error — working offline'}[st]||'';}
-function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st);const d=$$('syncDot');if(d){d.style.background=st==='synced'?'#00D26A':st==='syncing'?'#FFD700':st==='error'?'#FF4D4D':'#666';d.title='Cloud sync: '+(syncLabel(st)||'not signed in')+' — tap for details';}}
-try{ if(typeof window.addEventListener==='function'){ window.addEventListener('offline',()=>setSync('error')); window.addEventListener('online',()=>{ if(_cloudUser)cloudQueuePush(); }); } }catch(e){}
+function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st)+(st==='error'&&_cloudBlocked?' · '+_cloudBlocked:'');const d=$$('syncDot');if(d){d.style.background=st==='synced'?'#00D26A':st==='syncing'?'#FFD700':st==='error'?'#FF4D4D':'#666';d.title='Cloud sync: '+(syncLabel(st)||'not signed in')+' — tap for details';}}
+try{ if(typeof window.addEventListener==='function'){ window.addEventListener('offline',()=>setSync('error')); window.addEventListener('online',()=>{ if(_cloudUser){ if(_cloudVerified)cloudQueuePush(); else cloudHydrate(); } }); } }catch(e){}
 
-async function cloudPull(){
-  if(!sb||!_cloudUser)return null;
+// Three honest outcomes, never conflated:
+//   ok    the row was read and holds app data  → {state, token}
+//   none  the server answered and there is NO row for this account
+//   error anything else: network, auth, server error, a row we cannot parse
+async function cloudRead(){
+  if(!sb||!_cloudUser)return {status:'error',message:'not signed in'};
+  let res;
   try{
-    const{data,error}=await sb.from('app_data').select('data_value').eq('data_key','bs_state').maybeSingle();
-    if(error||!data)return null;
-    return data.data_value;
-  }catch(e){console.warn('cloudPull',e);return null;}
+    res=await sb.from('app_data').select('data_value,updated_at')
+      .eq('user_id',_cloudUser.id).eq('data_key','bs_state').maybeSingle();
+  }catch(e){ return {status:'error',message:'cloud read failed: '+((e&&e.message)||e)}; }
+  if(!res)return {status:'error',message:'cloud read failed: no response'};
+  if(res.error)return {status:'error',message:'cloud read failed: '+(res.error.message||res.error.code||'unknown')};
+  if(res.data==null)return {status:'none'};
+  const v=res.data.data_value;
+  if(!v||typeof v!=='object'||!Array.isArray(v.shows)||!v.inventory)
+    return {status:'error',message:'the cloud row exists but could not be read as app data'};
+  if(!res.data.updated_at)return {status:'error',message:'the cloud row has no version stamp'};
+  return {status:'ok',state:v,token:res.data.updated_at};
+}
+// Kept for callers that only want the document (package verify). null = not ok.
+async function cloudPull(){ const r=await cloudRead(); return r.status==='ok'?r.state:null; }
+function cloudBlock(why){
+  _cloudVerified=false; _cloudBlocked=why; clearTimeout(_cloudTimer); setSync('error');
+}
+// Dated copy of the cloud document as read, kept on this device before this
+// device is allowed to write over it. Keeps the newest 3.
+function backupCloudSnap(doc){
+  try{
+    localStorage.setItem('dd_bs_cloudsnap_'+Date.now(),JSON.stringify(doc));
+    const keys=Object.keys(localStorage).filter(k=>k.indexOf('dd_bs_cloudsnap_')===0).sort();
+    while(keys.length>3)localStorage.removeItem(keys.shift());
+  }catch(e){console.warn('backupCloudSnap',e);}
 }
 // Returns {ok,reason?,error?} so a caller that must KNOW whether the write
-// landed can find out. Existing callers ignore the return value and behave
-// exactly as before; nothing about the write itself changed.
+// landed can find out.
 async function cloudPush(){
   if(!sb||!_cloudUser)return {ok:false,reason:'not signed in'};
+  if(!_cloudVerified){ setSync('error'); return {ok:false,reason:'no verified cloud read: '+(_cloudBlocked||'not read yet')}; }
   if(_cloudDoneSeen>doneShows(S)){ setSync('error'); toast('⚠️ Not syncing: the cloud has '+_cloudDoneSeen+' finished shows, this device '+doneShows(S)+'. Your cloud copy is protected. Setup → Device Backups or sign out and back in.',6000); return {ok:false,reason:'cloud protected'}; }
   if(!S._updatedAt)S._updatedAt=new Date().toISOString();
+  S._syncProtocol=SYNC_PROTOCOL;
   setSync('syncing');
   try{
-    const{error}=await sb.from('app_data').upsert({user_id:_cloudUser.id,data_key:'bs_state',data_value:S,updated_at:new Date().toISOString()},{onConflict:'user_id,data_key'});
-    setSync(error?'error':'synced');
-    if(error)console.warn('cloudPush',error);
-    return {ok:!error,error:error||null};
-  }catch(e){console.warn('cloudPush',e);setSync('error');return {ok:false,error:e};}
+    const now=new Date().toISOString();
+    let res;
+    if(_cloudToken){
+      res=await sb.from('app_data').update({data_value:S,updated_at:now})
+        .eq('user_id',_cloudUser.id).eq('data_key','bs_state').eq('updated_at',_cloudToken)
+        .select('updated_at');
+    } else {
+      res=await sb.from('app_data').insert({user_id:_cloudUser.id,data_key:'bs_state',data_value:S,updated_at:now})
+        .select('updated_at');
+    }
+    if(!res||res.error){
+      const e=(res&&res.error)||{message:'no response'};
+      cloudBlock(_cloudToken?'write failed':'the cloud row appeared on another device');
+      console.warn('cloudPush',e); return {ok:false,error:e};
+    }
+    const rows=res.data||[];
+    if(rows.length!==1){
+      cloudBlock('another device saved first');
+      toast('⚠️ Not saved to the cloud: another device saved first. Nothing was overwritten. Reload the app to pull the newer copy.',7000);
+      return {ok:false,reason:'conflict'};
+    }
+    _cloudToken=rows[0].updated_at||now; _cloudBlocked='';
+    setSync('synced');
+    return {ok:true};
+  }catch(e){ console.warn('cloudPush',e); cloudBlock('write failed'); return {ok:false,error:e}; }
 }
 function cloudQueuePush(){
   if(!sb||!_cloudUser)return;
@@ -8768,9 +8836,22 @@ function adoptCloud(cloud){
   setSync('synced');
 }
 async function cloudHydrate(){
-  const cloud=await cloudPull();
-  if(!cloud){await cloudPush();return;}
-  if(!cloud.inventory||!cloud.shows){await cloudPush();return;}
+  _cloudVerified=false; _cloudToken=null;
+  const rd=await cloudRead();
+  if(rd.status==='error'){
+    cloudBlock('cloud could not be read');
+    toast('⚠️ Could not read the cloud ('+rd.message+'). Nothing was uploaded. Working on this device only.',6000);
+    return;
+  }
+  if(rd.status==='none'){ _cloudVerified=true; _cloudBlocked=''; await cloudPush(); return; }
+  const cloud=rd.state;
+  if((parseInt(cloud._syncProtocol)||0)>SYNC_PROTOCOL){
+    cloudBlock('the cloud was saved by a newer app version');
+    toast('⚠️ The cloud copy was saved by a newer version of the app. Reload to update. Nothing was uploaded.',7000);
+    return;
+  }
+  backupCloudSnap(cloud);
+  _cloudToken=rd.token; _cloudVerified=true; _cloudBlocked='';
   _cloudDoneSeen=Math.max(_cloudDoneSeen,doneShows(cloud));
   const localUsed=looksUsed(S),cloudUsed=looksUsed(cloud);
   if(localUsed&&!cloudUsed){await cloudPush();return;}
@@ -8778,10 +8859,10 @@ async function cloudHydrate(){
   const localT=S._updatedAt||'',cloudT=cloud._updatedAt||'';
   if(cloudT>localT&&doneShows(cloud)<doneShows(S)){
     if(typeof confirm!=='function'||confirm('⚠️ The cloud copy has only '+doneShows(cloud)+' finished shows; this device has '+doneShows(S)+'. Keep THIS device\'s data and fix the cloud? (Recommended)'))await cloudPush();
-    else { setSync('error'); toast('Sync paused. Nothing was changed.'); }
+    else { cloudBlock('sync paused by you'); toast('Sync paused. Nothing was changed.'); }
     return;
   }
-  if(cloudT>localT){ if(!looksUsed(S)||(typeof confirm!=='function')||confirm('Cloud has a NEWER copy than this device. Load it and replace this device\'s local data? (A local backup is kept either way.)'))adoptCloud(cloud); else await cloudPush(); }
+  if(cloudT>localT){ if(!looksUsed(S)||(typeof confirm!=='function')||confirm('Cloud has a NEWER copy than this device. Load it and replace this device\'s local data? (A local backup is kept either way.)'))adoptCloud(cloud); else { cloudBlock('this device is behind the cloud'); toast('Sync paused. This device is behind the cloud, so it will not upload. Nothing was changed.',6000); } }
   else if(localT>cloudT){
     // SAFETY GUARD: never silently overwrite a richer cloud copy with a fresh/empty device.
     const cloudDone=(cloud.shows||[]).filter(x=>x&&x.status==='completed').length;
@@ -8789,7 +8870,7 @@ async function cloudHydrate(){
     if(cloudDone>localDone){
       if(typeof confirm!=='function'||confirm('⚠️ SAFETY CHECK: the cloud copy has '+cloudDone+' completed shows; this device has only '+localDone+'. This device looks like a fresh copy. Tap OK to LOAD THE CLOUD COPY (recommended). Cancel keeps this device as-is WITHOUT overwriting the cloud.')){
         adoptCloud(cloud);
-      } else { setSync('error'); toast('⚠️ Sync paused — cloud copy protected. Sign out or reload to resolve.'); }
+      } else { cloudBlock('cloud copy protected'); toast('⚠️ Sync paused — cloud copy protected. Sign out or reload to resolve.'); }
     } else await cloudPush();
   }
   else setSync('synced');
@@ -8837,12 +8918,14 @@ async function cloudSignUp(){
 }
 async function cloudSignOut(){
   try{if(sb)await sb.auth.signOut();}catch(e){}
-  _cloudUser=null;setSync('off');rSettings();
+  _cloudUser=null;_cloudVerified=false;_cloudToken=null;setSync('off');rSettings();
   toast('Signed out - app still works offline');
 }
 async function cloudSyncNow(){
   if(!_cloudUser){toast('Sign in first');return;}
-  setSync('syncing');await cloudPush();rSettings();
+  setSync('syncing');
+  if(!_cloudVerified)await cloudHydrate(); else await cloudPush();
+  rSettings();
 }
 function cloudCardHTML(){
   if(_cloudUser){
@@ -10724,6 +10807,7 @@ async function p2bWriteOnce(doc,versionToken){
     'The conditional update matched zero rows. Start again from a fresh preview.');
   if(rows.length!==1)throw new Error('the conditional update matched '+rows.length+
     ' rows, expected exactly 1. Nothing further was attempted.');
+  if(rows[0].updated_at)_cloudToken=rows[0].updated_at;
   return {rowsUpdated:rows.length,newToken:rows[0].updated_at||null};
 }
 

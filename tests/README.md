@@ -13,6 +13,8 @@ node tests/booth-splits-and-calendar.test.js
 node tests/garage-transfers.test.js
 node tests/money-by-person.test.js
 node tests/cranberry-scoreboard.test.js
+node tests/sync-safety.test.js
+node tests/compare-tools.test.js
 ```
 
 `harness.js` extracts the inline `<script>` blocks from `BEST_SOLUTION_APP.html`,
@@ -152,3 +154,9 @@ controls, so no test can reach a real account.
 
 The three show identities in `P2B_MANIFEST` are read from the app rather than
 retyped, so the tests assert against the real manifest without duplicating it.
+
+`sync-safety.test.js` (v70) runs the real sync code against a fake Supabase
+table. The invariant: a cloud write only ever follows a successful read of the
+same row and only lands if the row is unchanged since (compare-and-swap). It
+forces failed reads, a missing row, a conflicting write and a newer protocol,
+and re-runs the v69 migration to prove no payment is added twice.
