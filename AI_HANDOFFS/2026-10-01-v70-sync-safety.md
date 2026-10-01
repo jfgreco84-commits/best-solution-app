@@ -5,7 +5,7 @@
 | **Date** | 2026-10-01 |
 | **Branch** | `claude/best-solution-recovery-m4nr4q` (PR #67, **draft**) |
 | **App version** | v69 → **v70** |
-| **Review state** | Round 2: the four verified review findings and the tool notes are addressed below. **Not deployed.** |
+| **Review state** | Round 3. Code head **`062ac96`** (this handoff is the docs-only commit on top). Rounds 2 and 3 review findings addressed below. **Not deployed.** |
 | **Live data changed** | **No.** No Supabase read or write, no server change, no live snapshot. |
 | **Approved by this round** | Nothing live. Merge, deploy, server SQL, live capture and any recovery write each need separate approval. |
 
@@ -24,9 +24,12 @@ nothing the cloud has:
 1. **A successful read this session.** `cloudRead()` returns ok / none / error,
    never conflated. Read errors block every write path (boot, saves, Sync Now,
    reconnect).
-2. **This device descends from what the cloud holds.** `dd_bs_syncbase`
-   records the row version this device last matched and the `_updatedAt` it
-   had then. On each read:
+2. **This device descends from what the cloud holds.** `S._syncBase`,
+   stored **inside the document**, records the row version that copy last
+   matched and the `_updatedAt` it had then. Because it travels with the
+   document, a tab only ever uses the base of the copy it actually holds;
+   another tab sharing localStorage cannot lend it a newer one (round 3 #1).
+   It is stripped before upload and never reaches the cloud. On each read:
    - cloud unchanged since the base: push this device's edits, if any;
    - cloud moved, no local edits since the base (or identical data): take the
      cloud copy (device copy backed up first);
@@ -41,12 +44,17 @@ nothing the cloud has:
    exists). Zero rows = conflict: blocked and marked diverged. First write
    with no row is an INSERT at revision 1 (retried without the column until
    the guard adds it); an INSERT over a row that appeared fails.
-4. **Restores are quarantined.** Every restore/import (`_applyStateObj`:
-   emergency restore, Device Backups, backup file, paste import) and
-   `restore.html` cancels the pending autosave and sets
-   `dd_bs_sync_quarantine`, which survives reloads. Nothing syncs until the
-   owner resolves it the same way as a divergence.
-5. **Phase 2B no longer hands its token to ordinary sync.** After its write
+4. **Restores are quarantined, fail closed.** Every restore/import
+   (`_applyStateObj`: emergency restore, Device Backups, backup file, paste
+   import) and `restore.html` cancels the pending autosave and writes
+   `dd_bs_sync_quarantine` **and reads it back before replacing anything**.
+   If the hold cannot be stored, nothing is replaced and the owner is told
+   why (round 3 #2). `restore.html` now writes the hold before the data. An
+   in-memory hold also blocks sync for the session even if the stored marker
+   disappears. Nothing syncs until the owner resolves it.
+5. **Newer-protocol documents are never adopted or rewritten** on any path:
+   hydrate, both resolve choices, and `adoptCloud()` itself (round 3 #3).
+6. **Phase 2B no longer hands its token to ordinary sync.** After its write
    the ordinary sync is blocked and marked diverged; the next read either
    takes the Phase 2B result (no local edits) or asks the owner.
 
@@ -76,18 +84,22 @@ revision matches zero rows; skipped revision, delete and key change refused;
 first insert needs revision 1; other `data_key`s untouched; history written
 through the guard for the signed-in role and not forgeable under RLS.
 
-**Not verified, check before applying:** the real column types (read-only
-query in the SQL header), that the function owner in Supabase bypasses RLS
-for the history insert, and the project's auth/session settings.
+**Not verified, check before applying:** the real column types, the unique
+constraint on `(user_id, data_key)`, how `revision` defaults/nullability
+interact with existing rows, the existing RLS policies and grants on
+`app_data`, that the trigger owner in Supabase can write the history table
+past RLS, and the project's auth/session settings. The 22/22 run is local
+Postgres 16 only; the reviewer could not rerun it (no PostgreSQL there).
 
 ## Test evidence (final head)
 
 | Suite | Result |
 |---|---|
-| `sync-safety.test.js` | **76/76**. The same file on the previous head (207520c): **30 of 75 fail**, reproducing all four findings (conflict + Sync Now 300→100; emergency restore with a queued autosave 300→100; reload of a restored copy INSERTs or writes; Phase 2B result replaced by an ordinary save) |
-| `compare-tools.test.js` | **33/33** (on the previous tool files the 7 snapshot checks fail and the exhaustive diff is missing) |
+| `sync-safety.test.js` | **122/122** on `062ac96`. Round 2 checks fail 30 of 75 on 207520c. Round 3 checks fail **32** on bef5acb, reproducing all three app cases: two tabs sharing storage, conflict then Sync Now, 300→100 with and without the server guard; a selectively failing hold write lets every restore path (and `restore.html`) replace the data and reach the cloud; resolve adopts a `_syncProtocol: 99` document and the next save rewrites it |
+| `compare-tools.test.js` | **43/43**. On bef5acb's `bs-compare.js` the null-vs-missing checks report 0 differences |
 | `server-guard.test.sh` | **22/22** on real Postgres 16 |
 | 14 other suites | all pass, counts unchanged |
+| Real Chromium | app boots with no errors, the resolve screen renders |
 | `passed-not-doing` | 5 of 430 fail, **identical on unmodified v69**. Controlled-date run (Date injected into the test sandbox): **430/430 at 2026-08-26** on both v69 and v70, 3 fail mid-September, 5 today. Date-dependent fixture. |
 | `product-debt-invoices` | 3 of 109 fail, **identical on unmodified v69**, at every pinned date. **Not date-related:** passes through v41, fails from v42 (`fc5a53c`), whose new one-time updates add markers the test's "only marker it adds is its own" check does not expect. Stale test, not this PR. |
 
@@ -101,6 +113,8 @@ the row between the read and the write) instead of stopping at the read gate.
 ## Tools
 
 **`tools/cloud-snapshot.html`.** One filtered SELECT, in-memory login.
+`.gitattributes` now keeps `tools/vendor/*` byte-exact (`-text`), so a
+Windows `core.autocrlf=true` checkout no longer breaks the integrity hash.
 Changes from round 1: pinned, vendored `@supabase/supabase-js` 2.117.2
 (npm tarball integrity `sha512-eSG2VKnH…BOXg==` matched the registry; the page
 pins the file with a sha384 SRI), sign-out moved into `finally` (no-row and
@@ -111,7 +125,10 @@ behaviour of the real project is unverified**; if live capture is approved,
 use a separate browser profile on a computer, with Justin typing his own
 credentials.
 
-**`tools/compare.html` + `bs-compare.js`.** The .txt is a capped summary
+**`tools/compare.html` + `bs-compare.js`.** Field existence is now
+compared separately from value, so `x: null` versus no `x` is a difference
+(both directions, nested, array slots), recorded as `inA`/`inB` in the
+exhaustive diff and shown as `<missing>` in the summary. The .txt is a capped summary
 (400 raw diffs, 80-char values, 200 settings) and now says so. New
 **exhaustive .json diff**: every difference, full values, both files' full
 SHA-256, for exact repairs. Full hashes in the summary too. Results are
@@ -138,5 +155,17 @@ separate approval for the live capture.
    $5,000 paid / $985 left to be confirmed against both copies first so the
    $2,000 and $418.90 are not added twice.
 
-Follow-up outside this PR: the main app still loads
-`@supabase/supabase-js@2` unpinned from a CDN.
+## Remaining limits
+
+- Two tabs on one device still share one local copy: the last tab to save
+  owns `dd_bs_v7` (as before v70). The cloud is protected (the other tab is
+  held as diverged), and on reload the device compares again.
+- A stored hold that is later removed is only covered by the in-memory hold
+  until that tab reloads.
+- Every device's first v70 load is treated as diverged (no base yet) and
+  asks once.
+- Old v69 tabs can still overwrite until the server guard is applied.
+- Snapshot page: the real project's single-session behaviour and live
+  capture are unverified.
+- Follow-up outside this PR: the main app still loads
+  `@supabase/supabase-js@2` unpinned from a CDN.
