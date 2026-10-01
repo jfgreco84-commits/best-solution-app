@@ -12,34 +12,42 @@ pre{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.45}
 .m{color:var(--muted);font-size:13px}
 </style></head><body>
 <h1>Best Solution: Compare Two Copies</h1>
-<div class="m">READ ONLY. Works offline. This page never saves anything, never touches the app's data on this device, and never talks to the cloud.</div>
+<div class="m">Works offline. It reads the two files you pick, never talks to the cloud and never touches the app's data in this browser. It only creates the report files you choose to download. Reports hold private business data: keep them off GitHub.</div>
 <div class="card"><b>A</b> (e.g. the Sep 30 Desktop backup)<br><input type="file" id="fa" accept=".json,application/json"><div class="m" id="ha"></div></div>
 <div class="card"><b>B</b> (e.g. the cloud snapshot)<br><input type="file" id="fb" accept=".json,application/json"><div class="m" id="hb"></div></div>
 <button onclick="go()">Compare</button>
-<button onclick="save()" style="background:#333;color:#fff">Download report (.txt)</button>
+<button onclick="save()" style="background:#333;color:#fff">Download summary (.txt)</button>
+<button onclick="saveFull()" style="background:#333;color:#fff">Download exhaustive diff (.json, for exact repairs)</button>
 <div class="card"><pre id="out">Pick both files, then tap Compare.</pre></div>
 <script src="bs-compare.js"></script>
 <script>
-var TXT='';
-function readFile(inp){return new Promise(function(ok,bad){var f=inp.files&&inp.files[0];if(!f)return bad(new Error('pick a file for '+inp.id));
+var TXT='',FULL=null;
+function reset(msg){ TXT=''; FULL=null; document.getElementById('out').textContent=msg||'Pick both files, then tap Compare.'; }
+['fa','fb'].forEach(function(id){ document.getElementById(id).addEventListener('change',function(){ document.getElementById(id==='fa'?'ha':'hb').textContent=''; reset(); }); });
+function readFile(inp){return new Promise(function(ok,bad){var f=inp.files&&inp.files[0];if(!f)return bad(new Error('pick a file for '+(inp.id==='fa'?'A':'B')));
   var r=new FileReader();r.onload=function(){ok({name:f.name,size:f.size,text:r.result});};r.onerror=function(){bad(r.error);};r.readAsText(f);});}
 async function sha(t){var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0');}).join('');}
 function unwrap(o){ // accept a raw app backup, or a cloud snapshot file {data_value,...}
   if(o&&o.data_value&&o.data_value.shows)return o.data_value; return o; }
 async function go(){
-  var out=document.getElementById('out');
+  var out=document.getElementById('out'); reset('Comparing…');
   try{
     var a=await readFile(document.getElementById('fa')),b=await readFile(document.getElementById('fb'));
     var A=unwrap(JSON.parse(a.text)),B=unwrap(JSON.parse(b.text));
     var hA=await sha(a.text),hB=await sha(b.text);
     document.getElementById('ha').textContent=a.name+' · '+a.size+' bytes · SHA-256 '+hA;
     document.getElementById('hb').textContent=b.name+' · '+b.size+' bytes · SHA-256 '+hB;
-    var rep=bsCompare.compare(A,B,{labelA:a.name+' ('+a.size+' bytes, sha256 '+hA.slice(0,16)+'…)',labelB:b.name+' ('+b.size+' bytes, sha256 '+hB.slice(0,16)+'…)'});
-    TXT=bsCompare.toText(rep); out.textContent=TXT;
-  }catch(e){ out.textContent='Could not compare: '+(e&&e.message||e); }
+    var labA=a.name+' ('+a.size+' bytes, sha256 '+hA+')', labB=b.name+' ('+b.size+' bytes, sha256 '+hB+')';
+    var rep=bsCompare.compare(A,B,{labelA:labA,labelB:labB});
+    var full=bsCompare.exhaustive(A,B,{a:{file:a.name,bytes:a.size,sha256:hA},b:{file:b.name,bytes:b.size,sha256:hB},madeAt:new Date().toISOString()});
+    TXT=bsCompare.toText(rep); FULL=full; out.textContent=TXT;
+  }catch(e){ reset('Could not compare: '+(e&&e.message||e)+'. Nothing to download.'); }
 }
-function save(){ if(!TXT){alert('Compare first');return;}
-  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([TXT],{type:'text/plain'}));
-  a.download='best-solution-compare-'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.txt';document.body.appendChild(a);a.click();a.remove(); }
+function dl(name,text,type){ var u=URL.createObjectURL(new Blob([text],{type:type}));
+  var a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(u);},4000); }
+var stamp=function(){return new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');};
+function save(){ if(!TXT){alert('Compare first');return;} dl('best-solution-compare-'+stamp()+'.txt',TXT,'text/plain'); }
+function saveFull(){ if(!FULL){alert('Compare first');return;} dl('best-solution-diff-FULL-'+stamp()+'.json',JSON.stringify(FULL,null,1),'application/json'); }
 </script>
 </body></html>

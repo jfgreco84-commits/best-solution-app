@@ -3,111 +3,140 @@
 | | |
 |---|---|
 | **Date** | 2026-10-01 |
-| **Branch** | `claude/best-solution-recovery-m4nr4q` |
+| **Branch** | `claude/best-solution-recovery-m4nr4q` (PR #67, **draft**) |
 | **App version** | v69 → **v70** |
-| **Review state** | **Draft. Not deployed. Needs Justin's approval before merge.** |
-| **Live data changed** | **No.** No Supabase read or write was made from this round. |
+| **Review state** | Round 2: the four verified review findings and the tool notes are addressed below. **Not deployed.** |
+| **Live data changed** | **No.** No Supabase read or write, no server change, no live snapshot. |
+| **Approved by this round** | Nothing live. Merge, deploy, server SQL, live capture and any recovery write each need separate approval. |
 
-## Diagnosis
+## Diagnosis (unchanged, confirmed by review)
 
-`cloudPull()` returned `null` for **both** "no row in the cloud" and "the read
-failed" (network, expired login, server error, unparseable row).
-`cloudHydrate()` answered `null` with `cloudPush()`, an **unconditional upsert
-of the whole device copy**. On a wiped or fresh phone that copy is not empty:
-the app seeds **33 shows, 16 other expenses and a Martone ledger, 0 finished**,
-and `looksUsed()` calls that "used" data. One failed read on sign-in or boot
-was enough to replace the real cloud document with the defaults.
+`cloudPull()` returned `null` for both "no row" and "read failed", and
+`cloudHydrate()` answered `null` with an unconditional upsert of the device
+copy. A wiped phone is not empty: it seeds **33 shows, 16 other expenses and a
+Martone ledger, 0 finished**. One failed read could replace the cloud.
 
-The v67 guard (`_cloudDoneSeen`) did not cover this: it is only set by a
-**successful** read, so after a failed one it is 0 and every push passes.
-Three more paths wrote without a fresh read: Sync Now, the `online` event, and
-any `saveS()` after a failed hydrate. Emergency restore stamped the Sep 26/v66
-copy as the newest and pushed it straight to the cloud.
+## The sync rules in v70
 
-## The fix (v70)
+A device writes the cloud document only when it can show the write drops
+nothing the cloud has:
 
-- `cloudRead()` returns exactly one of **ok** (with the row's `updated_at`
-  token), **none** (server answered, no row), **error** (everything else,
-  including a row that is not app data or has no version stamp).
-- **Read errors abort all writes.** `_cloudVerified` is true only after an ok
-  or none read. `cloudPush()` refuses without it. Sync Now and reconnect
-  re-read first instead of pushing.
-- **Compare-and-swap.** Every write is `UPDATE … WHERE updated_at = <token
-  from the read>`. Zero rows matched = another device saved first: nothing is
-  written, sync stops until a fresh read. When no row exists the first write
-  is an `INSERT`, which fails instead of overwriting if a row appeared.
-- **Protocol stamp.** Every write carries `_syncProtocol: 2`. A cloud doc
-  stamped higher is never written over (newer code wrote it).
-- **Behind the cloud + Cancel = pause, not overwrite.** Declining "load the
-  newer cloud copy" used to push this device's older copy over it.
-- **Dated cloud snapshot before any write.** `dd_bs_cloudsnap_<ts>` (newest 3)
-  is kept on the device after every successful read, and listed in
-  Setup → Device Backups.
-- **Emergency restore is local only** and no longer stamps the old copy as
-  newest. `restore.html` carries a STOP banner (Sep 26, 19 finished).
-- **v69 cannot double.** The Martone $2,000 and WWW $418.90 carry stable ids,
-  are skipped if the same amount on the same date is already on the ledger,
-  and still require the running total to be exactly 3000 / 250. The invoice
-  normaliser now keeps a payment's `id`.
+1. **A successful read this session.** `cloudRead()` returns ok / none / error,
+   never conflated. Read errors block every write path (boot, saves, Sync Now,
+   reconnect).
+2. **This device descends from what the cloud holds.** `dd_bs_syncbase`
+   records the row version this device last matched and the `_updatedAt` it
+   had then. On each read:
+   - cloud unchanged since the base: push this device's edits, if any;
+   - cloud moved, no local edits since the base (or identical data): take the
+     cloud copy (device copy backed up first);
+   - **cloud moved AND local edits: diverged. Nothing is written** until the
+     owner chooses in **⚠️ Sync needs you**: *Load the cloud copy*, or
+     *Overwrite the cloud* (typed `OVERWRITE CLOUD`, a fresh read showing the
+     cloud has not moved since the comparison, and never with fewer finished
+     shows than the cloud). A device with no base yet (every device on its
+     first v70 load) is treated as diverged unless its data is identical.
+3. **Compare-and-swap.** Each write is `UPDATE … WHERE updated_at = <read>`
+   (plus `AND revision = <read>` with `revision+1` once the server guard
+   exists). Zero rows = conflict: blocked and marked diverged. First write
+   with no row is an INSERT at revision 1 (retried without the column until
+   the guard adds it); an INSERT over a row that appeared fails.
+4. **Restores are quarantined.** Every restore/import (`_applyStateObj`:
+   emergency restore, Device Backups, backup file, paste import) and
+   `restore.html` cancels the pending autosave and sets
+   `dd_bs_sync_quarantine`, which survives reloads. Nothing syncs until the
+   owner resolves it the same way as a divergence.
+5. **Phase 2B no longer hands its token to ordinary sync.** After its write
+   the ordinary sync is blocked and marked diverged; the next read either
+   takes the Phase 2B result (no local edits) or asks the owner.
 
-Not done here, proposed as a later phase: replacing whole-document sync with
-an append-only payment/event log. That is an architecture change to a frozen
-app and should be its own approved round.
+`_syncProtocol` is still stamped, as a forward-compatibility marker only. **It
+is not protection against old clients** (finding 3: v69 keeps whatever stamp a
+document already has).
 
-## Test evidence
+Also in this PR: dated cloud snapshots on the device after each read (listed
+in Device Backups); v69 Martone $2,000 / WWW $418.90 carry ids and are skipped
+when already on the ledger; the invoice normaliser keeps payment ids.
 
-`node tests/sync-safety.test.js` → **43/43**. Before the fix, against v69:
-a failed read (auth error, network throw, garbage row) on a fresh device made
-2 writes and the fake cloud went from **20 finished shows to 0**.
+## Old v69 tabs: only the server can stop them
 
-| Scenario | Result |
+`tools/proposed-server-guard.sql` (**proposal, not applied**): adds
+`app_data.revision`; a `bs_state` insert must carry revision 1 (Postgres fires
+BEFORE INSERT for every proposed row of `INSERT … ON CONFLICT`, which is what a
+v69 upsert is, so every v69 save is refused whether or not the row exists); an
+update must set exactly revision+1 and keep user/key; deletes refused; every
+replaced or deleted version copied to `app_data_history` (owner can read, not
+write, via RLS). Phase 2B sends no revision, so it is refused too.
+
+Verified on a throwaway local Postgres 16 shaped like the app table
+(`bash tests/server-guard.test.sh`, **22/22**): v69-style upsert with a stale
+`_syncProtocol: 2` copy refused and the stored value kept; plain update
+refused; v70 CAS lands and bumps revision; a second device on the old
+revision matches zero rows; skipped revision, delete and key change refused;
+first insert needs revision 1; other `data_key`s untouched; history written
+through the guard for the signed-in role and not forgeable under RLS.
+
+**Not verified, check before applying:** the real column types (read-only
+query in the SQL header), that the function owner in Supabase bypasses RLS
+for the history insert, and the project's auth/session settings.
+
+## Test evidence (final head)
+
+| Suite | Result |
 |---|---|
-| Forced failed read ×3 kinds, then save, then Sync Now | 0 writes, cloud keeps 20 finished |
-| No row → first upload | one INSERT; INSERT over a row that appeared is refused |
-| Good read, adopt cloud, save | conditional UPDATE pinned to the read token |
-| Conflicting version (other device wrote after our read) | 0 rows matched, other write survives, no further writes until re-read |
-| Cloud doc from a newer protocol | 0 writes |
-| Device behind cloud, owner taps Cancel | 0 writes |
-| v69 migration run twice / with hand-entered $2,000 | invoice #2 stays $5,000 paid / $985 left, one 9/30 entry |
+| `sync-safety.test.js` | **76/76**. The same file on the previous head (207520c): **30 of 75 fail**, reproducing all four findings (conflict + Sync Now 300→100; emergency restore with a queued autosave 300→100; reload of a restored copy INSERTs or writes; Phase 2B result replaced by an ordinary save) |
+| `compare-tools.test.js` | **33/33** (on the previous tool files the 7 snapshot checks fail and the exhaustive diff is missing) |
+| `server-guard.test.sh` | **22/22** on real Postgres 16 |
+| 14 other suites | all pass, counts unchanged |
+| `passed-not-doing` | 5 of 430 fail, **identical on unmodified v69**. Controlled-date run (Date injected into the test sandbox): **430/430 at 2026-08-26** on both v69 and v70, 3 fail mid-September, 5 today. Date-dependent fixture. |
+| `product-debt-invoices` | 3 of 109 fail, **identical on unmodified v69**, at every pinned date. **Not date-related:** passes through v41, fails from v42 (`fc5a53c`), whose new one-time updates add markers the test's "only marker it adds is its own" check does not expect. Stale test, not this PR. |
 
-`node tests/compare-tools.test.js` → **18/18** (tools are read-only by source
-inspection; report flags a duplicated v69 payment and a lost show).
+Real Chromium: the app boots with no errors and the resolve screen renders;
+the snapshot page loads its pinned library over HTTP and a tampered copy is
+blocked by the integrity check.
 
-Every other suite unchanged: 16 suites green; `passed-not-doing` (5 of 430)
-and `product-debt-invoices` (3 of 109) fail **identically on unmodified v69**
-(date-sensitive fixtures).
+The INSERT-race test now really reaches the INSERT (the fake table creates
+the row between the read and the write) instead of stopping at the read gate.
+
+## Tools
+
+**`tools/cloud-snapshot.html`.** One filtered SELECT, in-memory login.
+Changes from round 1: pinned, vendored `@supabase/supabase-js` 2.117.2
+(npm tarball integrity `sha512-eSG2VKnH…BOXg==` matched the registry; the page
+pins the file with a sha384 SRI), sign-out moved into `finally` (no-row and
+error paths included) with its error reported, password field cleared, blob
+URL revoked, and the wording corrected: it creates a temporary server login
+session and downloads a file; it sends no save/update/delete. **Single-session
+behaviour of the real project is unverified**; if live capture is approved,
+use a separate browser profile on a computer, with Justin typing his own
+credentials.
+
+**`tools/compare.html` + `bs-compare.js`.** The .txt is a capped summary
+(400 raw diffs, 80-char values, 200 settings) and now says so. New
+**exhaustive .json diff**: every difference, full values, both files' full
+SHA-256, for exact repairs. Full hashes in the summary too. Results are
+cleared when a comparison starts or either input changes, so a failed second
+comparison leaves nothing downloadable. Keep inputs and reports out of this
+public repo.
 
 ## Difference report: status
 
-**Not run yet. The two inputs are not in this container.** The Sep 30
-backups are on Justin's OneDrive Desktop and the cloud has not been read.
+**Not run.** Needs the Sep 30 backup and a cloud snapshot, which needs
+separate approval for the live capture.
 
-1. On a **computer** (not the phone with the app open), open
-   `tools/cloud-snapshot.html` (served from the branch or a local copy), sign
-   in, download the snapshot. One SELECT, no writes, sign-in not remembered.
-2. Open `tools/compare.html`, pick A = one of the Sep 30 backups, B = the
-   snapshot. It prints SHA-256s, invoice-by-invoice balances, the v69 status
-   on each side (marker, number of 9/30 $2,000 and $418.90 entries), WWW,
-   Cranberry close-out, shows only on one side, inventory, reps, markers,
-   settings, and the raw field diff. Download the .txt.
-3. Send the report (or both files) to Claude. The data stays out of this
-   public repo.
+## Proposed live change list (none done; each needs approval)
 
-## Proposed live change list (nothing below has been done)
+1. **Merge PR #67** (deploys v70). Every device's first v70 load asks once
+   (Load the cloud copy is the normal answer). Until then do not edit in any
+   open v69 tab.
+2. **Apply `tools/proposed-server-guard.sql`** after the read-only column
+   check. This is what actually stops old tabs. Roll-back statements are in
+   its header.
+3. **Live snapshot capture** with the snapshot page, then the comparison.
+4. **Recovery write**: only the exact records the exhaustive diff shows
+   missing, rehearsed on a copy, one compare-and-swap write. Invoice #2 target
+   $5,000 paid / $985 left to be confirmed against both copies first so the
+   $2,000 and $418.90 are not added twice.
 
-1. **Merge v70** (deploys the app code to GitHub Pages). Before merging: do
-   not edit anything in the tab that is open now, it still runs v69 and its
-   saves are unconditional.
-2. **Server-side guard (Supabase SQL, optional but recommended).** Stops any
-   still-cached v69 tab, keeps a server copy of every replaced version:
-   a `before update` trigger on `app_data` for `data_key='bs_state'` that
-   rejects writes without `_syncProtocol >= 2` or with fewer finished shows
-   than the stored row, and inserts the old row into `app_data_history`.
-   Exact SQL to be shown before it runs. Side effect: Phase 2B writes would be
-   refused (its documents are not stamped); Phase 2B is a finished one-time tool.
-3. **Recovery write**: only after the difference report, and only the exact
-   records it shows are missing, applied to a copy first, then one
-   compare-and-swap write. Invoice #2 target **$5,000 paid / $985 left** is to
-   be confirmed against the backup's ledger ($3,000 on Sep 30 backup + the
-   $2,000) and against the cloud's v69 status, so the $2,000 and the $418.90
-   are not added twice.
+Follow-up outside this PR: the main app still loads
+`@supabase/supabase-js@2` unpinned from a CDN.

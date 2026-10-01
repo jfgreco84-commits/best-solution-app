@@ -80,8 +80,8 @@
     rep.otherExpenses={a:{count:(A.otherExpenses||[]).length,total:r2(sum(A.otherExpenses,x=>x&&x.amount))},b:{count:(B.otherExpenses||[]).length,total:r2(sum(B.otherExpenses,x=>x&&x.amount))}};
     const oa=((A.settings||{}).onlineSales)||[],ob=((B.settings||{}).onlineSales)||[];
     rep.onlineSales={a:{count:oa.length,total:r2(sum(oa,x=>x&&x.amount))},b:{count:ob.length,total:r2(sum(ob,x=>x&&x.amount))}};
-    deepDiff(A.settings||{},B.settings||{},'settings',rep.settings,200);
-    const all=[]; deepDiff(A,B,'',all,1e6); rep.allDiffCount=all.length; rep.allDiffs=all.slice(0,400);
+    deepDiff(A.settings||{},B.settings||{},'settings',rep.settings,200); rep.settingsCapped=rep.settings.length>=200;
+    const all=[]; deepDiff(A,B,'',all,Infinity); rep.allDiffCount=all.length; rep.allDiffs=all.slice(0,400);
     return rep;
   }
   function toText(rep){
@@ -126,10 +126,18 @@
     p('ONE-TIME UPDATE MARKERS only in A: '+(rep.markers.onlyA.join(', ')||'none'));
     p('ONE-TIME UPDATE MARKERS only in B: '+(rep.markers.onlyB.join(', ')||'none'));
     p(''); p('SETTINGS'); if(!rep.settings.length)p('  same'); rep.settings.forEach(x=>p('  '+x.field+': A '+J(x.a)+'  B '+J(x.b)));
-    p(''); p('FIRST '+rep.allDiffs.length+' RAW DIFFERENCES (of '+rep.allDiffCount+')');
+    p(''); p('FIRST '+rep.allDiffs.length+' RAW DIFFERENCES (of '+rep.allDiffCount+'), values cut at 80 characters.');
+    p('THIS TEXT IS A SUMMARY, NOT A REPAIR LEDGER. Use the exhaustive .json diff and the original files for exact repairs.');
     rep.allDiffs.forEach(x=>p('  '+x.field+': A '+J(x.a).slice(0,80)+'  B '+J(x.b).slice(0,80)));
     return L.join('\n');
   }
-  const api={compare,toText,v69Status};
+  // Every difference, untruncated, with full values: the input for an exact
+  // repair. compare()/toText() are a readable summary and are capped.
+  function exhaustive(A,B,meta){
+    const all=[]; deepDiff(A,B,'',all,Infinity);
+    return {kind:'best-solution exhaustive diff',meta:meta||{},count:all.length,
+      differences:all.map(d=>({path:d.field,inA:d.a!==undefined,inB:d.b!==undefined,a:d.a===undefined?null:d.a,b:d.b===undefined?null:d.b}))};
+  }
+  const api={compare,toText,v69Status,exhaustive};
   if(typeof module!=='undefined'&&module.exports)module.exports=api; else root.bsCompare=api;
 })(typeof window!=='undefined'?window:this);

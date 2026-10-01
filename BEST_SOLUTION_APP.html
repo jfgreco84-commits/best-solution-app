@@ -8617,8 +8617,8 @@ async function emergencyRestore(){
     let txt; try{ txt=new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:b(E.iv)},key,b(E.ct))); }catch(e){ throw new Error('wrong password'); }
     const d=JSON.parse(txt); if(!d||!d.shows||!d.inventory)throw new Error('bad data');
     // v70: this copy is the Sep 26 / v66 data (19 finished). It is put on this
-    // device only, never stamped newest and never pushed. The next cloud read
-    // decides, and the v67 guard refuses to push it over a richer cloud.
+    // device only and never stamped newest. _applyStateObj quarantines it: no
+    // sync, across reloads, until the owner resolves it explicitly.
     backupLocal(); _applyStateObj(d);
     mClose(); toast('✅ Restored: '+d.shows.length+' shows. Reloading…',4000);
     setTimeout(()=>{ try{ location.reload(); }catch(e){} },1500);
@@ -8663,6 +8663,9 @@ function _applyStateObj(parsed){
   // here (and nowhere else in this path) upgrades the debt shape without
   // re-running any of the show-seeding migrations, which this path must not do.
   pdNormalize(parsed);
+  // v70: every restore or import is held on this device: pending saves are
+  // cancelled and nothing syncs, across reloads, until the owner resolves it.
+  syncQuarantineSet('restored',parsed);
   S=parsed;
   localStorage.setItem('dd_bs_v7',JSON.stringify(S));
   renderCur();
@@ -8714,18 +8717,23 @@ let sb=null,_cloudUser=null,_cloudTimer=null,_syncState='off';
 // v67: how many finished shows the cloud copy had when this device last read it.
 // A device holding fewer is a wiped or fresh copy and must never push over it.
 let _cloudDoneSeen=0;
-// v70 SYNC SAFETY. A write may only follow a successful read of the same row.
-//   _cloudVerified  true only after cloudRead() came back 'ok' or 'none'.
-//                   Any read error, write conflict or sign-out clears it.
-//   _cloudToken     the row's server updated_at from that read. Every write is
-//                   a conditional UPDATE pinned to it (compare-and-swap), so a
-//                   copy that is behind the cloud can never land on top of it.
-//                   null + verified means "no row exists": first write is an
-//                   INSERT, which fails rather than overwrite if one appeared.
-//   SYNC_PROTOCOL   stamped on every doc we write. A cloud doc stamped higher
-//                   came from newer code and this device will not write over it.
-const SYNC_PROTOCOL=2;
-let _cloudVerified=false,_cloudToken=null,_cloudBlocked='';
+const SYNC_PROTOCOL=2; // forward-compat marker only; NOT a defence against old clients (see SYNC SAFETY)
+// v70 SYNC SAFETY. The cloud is one document. A device may write it only when
+// it can PROVE the write does not drop anything the cloud has:
+//   1. a successful read of the row this session (_cloudVerified);
+//   2. the device's copy descends from the row it read: the saved sync base
+//      (dd_bs_syncbase: the row version this device last matched, and the
+//      _updatedAt it had then) still equals the cloud's version. If the cloud
+//      moved AND this device has edits since its base, the copies have
+//      diverged: nothing is written until the owner resolves it explicitly;
+//   3. the write is a compare-and-swap on that version (updated_at, plus the
+//      server revision once the proposed server guard is installed);
+//   4. no restored copy is waiting (dd_bs_sync_quarantine). Every restore puts
+//      the device in quarantine, across reloads, until the owner resolves it.
+// Old v69 tabs still write unconditionally; only a server-side guard can stop
+// them (tools/proposed-server-guard.sql, NOT applied).
+let _cloudVerified=false,_cloudRow=null,_cloudBlocked='',_cloudDivergent=null;
+const SYNC_BASE_KEY='dd_bs_syncbase', SYNC_QUAR_KEY='dd_bs_sync_quarantine';
 function doneShows(st){ return ((st&&st.shows)||[]).filter(x=>x&&x.status==='completed').length; }
 try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
 
@@ -8733,15 +8741,33 @@ function syncLabel(st){return {off:'Not signed in',syncing:'Syncing…',synced:'
 function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st)+(st==='error'&&_cloudBlocked?' · '+_cloudBlocked:'');const d=$$('syncDot');if(d){d.style.background=st==='synced'?'#00D26A':st==='syncing'?'#FFD700':st==='error'?'#FF4D4D':'#666';d.title='Cloud sync: '+(syncLabel(st)||'not signed in')+' — tap for details';}}
 try{ if(typeof window.addEventListener==='function'){ window.addEventListener('offline',()=>setSync('error')); window.addEventListener('online',()=>{ if(_cloudUser){ if(_cloudVerified)cloudQueuePush(); else cloudHydrate(); } }); } }catch(e){}
 
+function syncBaseGet(){
+  try{ const b=JSON.parse(localStorage.getItem(SYNC_BASE_KEY)||'null');
+    if(b&&_cloudUser&&b.user===_cloudUser.id&&b.token)return b; }catch(e){}
+  return null;
+}
+function syncBaseSet(row,at){
+  try{ localStorage.setItem(SYNC_BASE_KEY,JSON.stringify({user:_cloudUser.id,token:row.token,rev:(row.rev==null?null:row.rev),at:at||''})); }
+  catch(e){ console.warn('syncBaseSet',e); }
+}
+function syncQuarantine(){ try{ return JSON.parse(localStorage.getItem(SYNC_QUAR_KEY)||'null'); }catch(e){ return {reason:'unreadable quarantine marker'}; } }
+function syncQuarantineSet(reason,st){
+  try{ localStorage.setItem(SYNC_QUAR_KEY,JSON.stringify({reason,at:new Date().toISOString(),shows:((st&&st.shows)||[]).length,done:doneShows(st)})); }catch(e){}
+  try{ clearTimeout(_cloudTimer); }catch(e){}
+  _cloudVerified=false; _cloudBlocked='restored copy held on this device';
+  if(_cloudUser)setSync('error');
+}
+
 // Three honest outcomes, never conflated:
-//   ok    the row was read and holds app data  → {state, token}
+//   ok    the row was read and holds app data  → {state, row:{token,rev}}
 //   none  the server answered and there is NO row for this account
 //   error anything else: network, auth, server error, a row we cannot parse
 async function cloudRead(){
   if(!sb||!_cloudUser)return {status:'error',message:'not signed in'};
   let res;
   try{
-    res=await sb.from('app_data').select('data_value,updated_at')
+    // '*' so the optional server `revision` column is picked up once it exists.
+    res=await sb.from('app_data').select('*')
       .eq('user_id',_cloudUser.id).eq('data_key','bs_state').maybeSingle();
   }catch(e){ return {status:'error',message:'cloud read failed: '+((e&&e.message)||e)}; }
   if(!res)return {status:'error',message:'cloud read failed: no response'};
@@ -8751,7 +8777,8 @@ async function cloudRead(){
   if(!v||typeof v!=='object'||!Array.isArray(v.shows)||!v.inventory)
     return {status:'error',message:'the cloud row exists but could not be read as app data'};
   if(!res.data.updated_at)return {status:'error',message:'the cloud row has no version stamp'};
-  return {status:'ok',state:v,token:res.data.updated_at};
+  const rev=(res.data.revision==null)?null:parseInt(res.data.revision,10);
+  return {status:'ok',state:v,row:{token:res.data.updated_at,rev:isFinite(rev)?rev:null},token:res.data.updated_at};
 }
 // Kept for callers that only want the document (package verify). null = not ok.
 async function cloudPull(){ const r=await cloudRead(); return r.status==='ok'?r.state:null; }
@@ -8767,38 +8794,54 @@ function backupCloudSnap(doc){
     while(keys.length>3)localStorage.removeItem(keys.shift());
   }catch(e){console.warn('backupCloudSnap',e);}
 }
+const _syncStrip=d=>{ const c=Object.assign({},d); delete c._updatedAt; delete c._syncProtocol; return JSON.stringify(c); };
+function sameDoc(a,b){ try{ return _syncStrip(a)===_syncStrip(b); }catch(e){ return false; } }
+
 // Returns {ok,reason?,error?} so a caller that must KNOW whether the write
 // landed can find out.
 async function cloudPush(){
   if(!sb||!_cloudUser)return {ok:false,reason:'not signed in'};
+  if(syncQuarantine()){ cloudBlock('restored copy held on this device'); return {ok:false,reason:'quarantined'}; }
+  if(_cloudDivergent){ setSync('error'); return {ok:false,reason:'diverged: resolve first'}; }
   if(!_cloudVerified){ setSync('error'); return {ok:false,reason:'no verified cloud read: '+(_cloudBlocked||'not read yet')}; }
   if(_cloudDoneSeen>doneShows(S)){ setSync('error'); toast('⚠️ Not syncing: the cloud has '+_cloudDoneSeen+' finished shows, this device '+doneShows(S)+'. Your cloud copy is protected. Setup → Device Backups or sign out and back in.',6000); return {ok:false,reason:'cloud protected'}; }
   if(!S._updatedAt)S._updatedAt=new Date().toISOString();
   S._syncProtocol=SYNC_PROTOCOL;
+  const atSent=S._updatedAt, doc=JSON.parse(JSON.stringify(S));
   setSync('syncing');
   try{
-    const now=new Date().toISOString();
+    const now=new Date().toISOString(), row=_cloudRow;
     let res;
-    if(_cloudToken){
-      res=await sb.from('app_data').update({data_value:S,updated_at:now})
-        .eq('user_id',_cloudUser.id).eq('data_key','bs_state').eq('updated_at',_cloudToken)
-        .select('updated_at');
+    if(row){
+      const patch={data_value:doc,updated_at:now};
+      if(row.rev!=null)patch.revision=row.rev+1;
+      let q=sb.from('app_data').update(patch).eq('user_id',_cloudUser.id).eq('data_key','bs_state').eq('updated_at',row.token);
+      if(row.rev!=null)q=q.eq('revision',row.rev);
+      res=await q.select('*');
     } else {
-      res=await sb.from('app_data').insert({user_id:_cloudUser.id,data_key:'bs_state',data_value:S,updated_at:now})
-        .select('updated_at');
+      const ins={user_id:_cloudUser.id,data_key:'bs_state',data_value:doc,updated_at:now,revision:1};
+      res=await sb.from('app_data').insert(ins).select('*');
+      // Before the server guard exists there is no revision column: retry the
+      // same INSERT without it. Any other error stands.
+      if(res&&res.error&&/revision/i.test(String(res.error.message||''))&&/column|schema/i.test(String(res.error.message||''))){
+        delete ins.revision; res=await sb.from('app_data').insert(ins).select('*');
+      }
     }
     if(!res||res.error){
       const e=(res&&res.error)||{message:'no response'};
-      cloudBlock(_cloudToken?'write failed':'the cloud row appeared on another device');
+      cloudBlock(row?'write refused or failed':'the cloud row appeared on another device');
+      if(!row)_cloudDivergent={kind:'conflict'};
       console.warn('cloudPush',e); return {ok:false,error:e};
     }
     const rows=res.data||[];
     if(rows.length!==1){
-      cloudBlock('another device saved first');
-      toast('⚠️ Not saved to the cloud: another device saved first. Nothing was overwritten. Reload the app to pull the newer copy.',7000);
+      cloudBlock('another device saved first'); _cloudDivergent={kind:'conflict'};
+      toast('⚠️ Not saved to the cloud: another device saved first. Nothing was overwritten. Tap Sync Now to compare.',7000);
       return {ok:false,reason:'conflict'};
     }
-    _cloudToken=rows[0].updated_at||now; _cloudBlocked='';
+    const r0=rows[0], rev=(r0.revision==null)?null:parseInt(r0.revision,10);
+    _cloudRow={token:r0.updated_at||now,rev:isFinite(rev)?rev:null};
+    syncBaseSet(_cloudRow,atSent); _cloudBlocked='';
     setSync('synced');
     return {ok:true};
   }catch(e){ console.warn('cloudPush',e); cloudBlock('write failed'); return {ok:false,error:e}; }
@@ -8806,6 +8849,7 @@ async function cloudPush(){
 function cloudQueuePush(){
   if(!sb||!_cloudUser)return;
   clearTimeout(_cloudTimer);
+  if(!_cloudVerified||_cloudDivergent||syncQuarantine()){ setSync('error'); return; }
   setSync('syncing');
   _cloudTimer=setTimeout(cloudPush,800);
 }
@@ -8822,7 +8866,9 @@ function looksUsed(st){
   if((st.otherExpenses||[]).length)return true;
   return st.shows.some(sh=>sh.status==='completed'||(sh.days||[]).some(d=>d.morningCount!=null||d.eveningCount!=null));
 }
-function adoptCloud(cloud){
+// Replace this device's copy with the cloud's (a backup of the device copy is
+// kept first) and record the cloud row as this device's sync base.
+function adoptCloud(cloud,row){
   backupLocal();
   cloud.v=INIT.v;
   // The incoming document may predate migrations this device has already run.
@@ -8832,48 +8878,96 @@ function adoptCloud(cloud){
   localStorage.setItem('dd_bs_v7',JSON.stringify(cloud));
   S=loadS();
   try{ if(commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
+  if(row){
+    _cloudRow=row; _cloudVerified=true; _cloudDivergent=null; _cloudBlocked='';
+    // Base = the cloud's own _updatedAt: anything the one-time updates changed
+    // on load reaches the cloud with the next ordinary save.
+    syncBaseSet(row,cloud._updatedAt||S._updatedAt||'');
+  }
   renderCur();
   setSync('synced');
 }
+function cloudDiverge(kind,cloud,row){
+  _cloudVerified=false;
+  _cloudDivergent={kind,row,cloudShows:(cloud.shows||[]).length,cloudDone:doneShows(cloud),cloudUpdatedAt:cloud._updatedAt||''};
+  cloudBlock(kind==='restored'?'restored copy held on this device':'this device and the cloud both changed');
+  try{ if(typeof mOpen==='function')openSyncResolve(); }catch(e){}
+}
 async function cloudHydrate(){
-  _cloudVerified=false; _cloudToken=null;
+  _cloudVerified=false; _cloudRow=null; _cloudDivergent=null;
   const rd=await cloudRead();
   if(rd.status==='error'){
     cloudBlock('cloud could not be read');
     toast('⚠️ Could not read the cloud ('+rd.message+'). Nothing was uploaded. Working on this device only.',6000);
     return;
   }
-  if(rd.status==='none'){ _cloudVerified=true; _cloudBlocked=''; await cloudPush(); return; }
-  const cloud=rd.state;
+  const quar=syncQuarantine();
+  if(rd.status==='none'){
+    if(quar){ _cloudDivergent={kind:'restored',row:null,cloudShows:0,cloudDone:0}; cloudBlock('restored copy held on this device'); return; }
+    _cloudVerified=true; _cloudBlocked=''; await cloudPush(); return;
+  }
+  const cloud=rd.state, row=rd.row;
   if((parseInt(cloud._syncProtocol)||0)>SYNC_PROTOCOL){
     cloudBlock('the cloud was saved by a newer app version');
     toast('⚠️ The cloud copy was saved by a newer version of the app. Reload to update. Nothing was uploaded.',7000);
     return;
   }
   backupCloudSnap(cloud);
-  _cloudToken=rd.token; _cloudVerified=true; _cloudBlocked='';
   _cloudDoneSeen=Math.max(_cloudDoneSeen,doneShows(cloud));
-  const localUsed=looksUsed(S),cloudUsed=looksUsed(cloud);
-  if(localUsed&&!cloudUsed){await cloudPush();return;}
-  if(cloudUsed&&!localUsed){adoptCloud(cloud);return;}
-  const localT=S._updatedAt||'',cloudT=cloud._updatedAt||'';
-  if(cloudT>localT&&doneShows(cloud)<doneShows(S)){
-    if(typeof confirm!=='function'||confirm('⚠️ The cloud copy has only '+doneShows(cloud)+' finished shows; this device has '+doneShows(S)+'. Keep THIS device\'s data and fix the cloud? (Recommended)'))await cloudPush();
-    else { cloudBlock('sync paused by you'); toast('Sync paused. Nothing was changed.'); }
+  if(quar){ cloudDiverge('restored',cloud,row); return; }
+  const base=syncBaseGet();
+  const cloudMoved=!base||base.token!==row.token||(row.rev!=null&&base.rev!=null&&base.rev!==row.rev);
+  const localDirty=!base||(S._updatedAt||'')!==base.at;
+  if(!cloudMoved){
+    _cloudRow=row; _cloudVerified=true; _cloudBlocked='';
+    if(localDirty)await cloudPush(); else setSync('synced');
     return;
   }
-  if(cloudT>localT){ if(!looksUsed(S)||(typeof confirm!=='function')||confirm('Cloud has a NEWER copy than this device. Load it and replace this device\'s local data? (A local backup is kept either way.)'))adoptCloud(cloud); else { cloudBlock('this device is behind the cloud'); toast('Sync paused. This device is behind the cloud, so it will not upload. Nothing was changed.',6000); } }
-  else if(localT>cloudT){
-    // SAFETY GUARD: never silently overwrite a richer cloud copy with a fresh/empty device.
-    const cloudDone=(cloud.shows||[]).filter(x=>x&&x.status==='completed').length;
-    const localDone=(S.shows||[]).filter(x=>x&&x.status==='completed').length;
-    if(cloudDone>localDone){
-      if(typeof confirm!=='function'||confirm('⚠️ SAFETY CHECK: the cloud copy has '+cloudDone+' completed shows; this device has only '+localDone+'. This device looks like a fresh copy. Tap OK to LOAD THE CLOUD COPY (recommended). Cancel keeps this device as-is WITHOUT overwriting the cloud.')){
-        adoptCloud(cloud);
-      } else { cloudBlock('cloud copy protected'); toast('⚠️ Sync paused — cloud copy protected. Sign out or reload to resolve.'); }
-    } else await cloudPush();
+  // Cloud moved. Safe to take it when this device has nothing of its own
+  // since its base, or already holds exactly the same data.
+  if(!localDirty||sameDoc(S,cloud)){ adoptCloud(cloud,row); return; }
+  cloudDiverge('both',cloud,row);
+}
+// The owner's explicit decision on a divergence or a held restore.
+//   'cloud'  : replace this device's copy with the cloud's (device copy backed up)
+//   'device' : overwrite the cloud with this device's copy. Needs the typed
+//              phrase, a fresh read showing the cloud has not moved again, and
+//              never with fewer finished shows than the cloud.
+const SYNC_OVERWRITE_PHRASE='OVERWRITE CLOUD';
+async function cloudResolve(choice,phrase){
+  if(!_cloudUser)return {ok:false,reason:'not signed in'};
+  const rd=await cloudRead();
+  if(rd.status==='error'){ cloudBlock('cloud could not be read'); return {ok:false,reason:rd.message}; }
+  if(choice==='cloud'){
+    if(rd.status!=='ok')return {ok:false,reason:'there is no cloud copy to load'};
+    try{ localStorage.removeItem(SYNC_QUAR_KEY); }catch(e){}
+    adoptCloud(rd.state,rd.row); return {ok:true};
   }
-  else setSync('synced');
+  if(choice!=='device')return {ok:false,reason:'unknown choice'};
+  if(String(phrase||'').trim().toUpperCase()!==SYNC_OVERWRITE_PHRASE)return {ok:false,reason:'type '+SYNC_OVERWRITE_PHRASE+' to confirm'};
+  const seen=_cloudDivergent&&_cloudDivergent.row;
+  if(rd.status==='ok'){
+    if(!seen||seen.token!==rd.row.token||seen.rev!==rd.row.rev){ cloudDiverge(syncQuarantine()?'restored':'both',rd.state,rd.row); return {ok:false,reason:'the cloud changed again; compare again'}; }
+    if(doneShows(rd.state)>doneShows(S))return {ok:false,reason:'the cloud has more finished shows ('+doneShows(rd.state)+') than this device ('+doneShows(S)+')'};
+    backupCloudSnap(rd.state);
+    _cloudRow=rd.row;
+  } else { if(seen)return {ok:false,reason:'the cloud row disappeared; compare again'}; _cloudRow=null; }
+  try{ localStorage.removeItem(SYNC_QUAR_KEY); }catch(e){}
+  _cloudDivergent=null; _cloudVerified=true;
+  return await cloudPush();
+}
+function openSyncResolve(){
+  const dv=_cloudDivergent||{}, q=syncQuarantine();
+  const head=q?'This phone holds a RESTORED copy. It is not sent to the cloud until you choose.'
+             :'This device and the cloud were both changed. Nothing has been overwritten.';
+  mOpen(`<div class="mh"><div class="mt">⚠️ Sync needs you</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;margin-bottom:10px">${head}</div>
+  <div class="sr"><span class="srl">This device</span><span class="srv">${(S.shows||[]).length} shows · ${doneShows(S)} finished</span></div>
+  <div class="sr"><span class="srl">Cloud</span><span class="srv">${dv.cloudShows==null?'?':dv.cloudShows} shows · ${dv.cloudDone==null?'?':dv.cloudDone} finished</span></div>
+  <button class="btn btn-gold btn-full" style="margin-top:10px" onclick="cloudResolve('cloud').then(r=>{toast(r.ok?'✅ Loaded the cloud copy':'❌ '+r.reason,5000);if(r.ok)mClose();})">Load the cloud copy (this device's copy is saved as a backup)</button>
+  <div class="fg" style="margin-top:14px"><label class="fl">To overwrite the cloud with THIS device, type ${SYNC_OVERWRITE_PHRASE}</label><input class="fi" id="sr_phrase" autocomplete="off"></div>
+  <button class="btn btn-ghost btn-full" style="border-color:var(--red);color:var(--red)" onclick="cloudResolve('device',($$('sr_phrase')||{}).value).then(r=>{toast(r.ok?'✅ Cloud replaced with this device':'❌ '+(r.reason||'not saved'),6000);if(r.ok)mClose();})">Overwrite the cloud</button>
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Not now (nothing syncs)</button>`);
 }
 async function cloudInit(){
   if(!sb)return;
@@ -8918,7 +9012,7 @@ async function cloudSignUp(){
 }
 async function cloudSignOut(){
   try{if(sb)await sb.auth.signOut();}catch(e){}
-  _cloudUser=null;_cloudVerified=false;_cloudToken=null;setSync('off');rSettings();
+  _cloudUser=null;_cloudVerified=false;_cloudRow=null;_cloudDivergent=null;setSync('off');rSettings();
   toast('Signed out - app still works offline');
 }
 async function cloudSyncNow(){
@@ -8926,11 +9020,12 @@ async function cloudSyncNow(){
   setSync('syncing');
   if(!_cloudVerified)await cloudHydrate(); else await cloudPush();
   rSettings();
+  if(_cloudDivergent)openSyncResolve();
 }
 function cloudCardHTML(){
   if(_cloudUser){
     const email=_cloudUser.email||'signed in';
-    return `<div class="card grb"><div style="font-size:10px;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:13px;margin-bottom:4px">Signed in as <strong>${email}</strong></div><div id="cl_status" style="font-size:12px;color:var(--muted);margin-bottom:10px">${syncLabel(_syncState)||'Synced ✓'}</div><div class="g2" style="gap:8px"><button class="btn btn-ghost btn-full" onclick="cloudSyncNow()">🔄 Sync Now</button><button class="btn btn-ghost btn-full" onclick="cloudSignOut()">Sign Out</button></div></div>`;
+    return `<div class="card grb"><div style="font-size:10px;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:13px;margin-bottom:4px">Signed in as <strong>${email}</strong></div><div id="cl_status" style="font-size:12px;color:var(--muted);margin-bottom:10px">${syncLabel(_syncState)||'Synced ✓'}</div><div class="g2" style="gap:8px"><button class="btn btn-ghost btn-full" onclick="cloudSyncNow()">🔄 Sync Now</button><button class="btn btn-ghost btn-full" onclick="cloudSignOut()">Sign Out</button></div>${(_cloudDivergent||syncQuarantine())?'<button class="btn btn-gold btn-full" style="margin-top:8px" onclick="openSyncResolve()">⚠️ Sync needs you</button>':''}</div>`;
   }
   return `<div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:8px">☁️ CLOUD SYNC</div><div style="font-size:12px;color:var(--muted);margin-bottom:10px">Sign in to back up your data and sync across all your devices. The app still works offline either way.</div><div class="fg"><label class="fl">EMAIL</label><input class="fi" id="cl_email" type="email" placeholder="you@email.com" autocomplete="username"></div><div class="fg"><label class="fl">PASSWORD</label><input class="fi" id="cl_pass" type="password" placeholder="••••••••" autocomplete="current-password"></div><button class="btn btn-gold btn-full" id="cl_btn" onclick="cloudSignIn()">SIGN IN</button><button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="cloudSignUp()">✨ Create Account</button><div style="font-size:11px;color:var(--muted);margin-top:8px">First time? <strong>Create Account on the device that HAS your data</strong> (it uploads automatically), then Sign In on your other devices to pull it down.</div><div id="cl_status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px"></div></div>`;
 }
@@ -10807,7 +10902,8 @@ async function p2bWriteOnce(doc,versionToken){
     'The conditional update matched zero rows. Start again from a fresh preview.');
   if(rows.length!==1)throw new Error('the conditional update matched '+rows.length+
     ' rows, expected exactly 1. Nothing further was attempted.');
-  if(rows[0].updated_at)_cloudToken=rows[0].updated_at;
+  // v70: the ordinary sync must re-read before it writes again; S does not hold this result.
+  cloudBlock('cloud changed by Cloud Reconciliation'); _cloudDivergent={kind:'conflict'};
   return {rowsUpdated:rows.length,newToken:rows[0].updated_at||null};
 }
 

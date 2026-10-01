@@ -18,10 +18,11 @@ function el(){return{innerHTML:'',textContent:'',style:{},value:'',checked:false
   insertAdjacentHTML(){},setAttribute(){},getAttribute:()=>null,addEventListener(){},
   focus(){},click(){},scrollIntoView(){}};}
 
-// `seed` pre-populates localStorage before the app's scripts run, so a test can
+// `appPath` boots a different copy of the app (e.g. the v69 base, to model an
+// old tab still running). `seed` pre-populates localStorage before the app's scripts run, so a test can
 // simulate a page refresh that finds a value already on the device.
-function boot(seed){
-  const html=fs.readFileSync(APP,'utf8');
+function boot(seed,appPath){
+  const html=fs.readFileSync(appPath||APP,'utf8');
   let js=''; const re=/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi; let m;
   while((m=re.exec(html)))js+=m[1]+'\n';
   js=js.replace(/^let /gm,'var ').replace(/^const /gm,'var ');

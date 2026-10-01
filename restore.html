@@ -52,8 +52,10 @@ async function run(){
     line('3. Saving to this phone…');
     var cur=localStorage.getItem(KEY); if(cur)localStorage.setItem('dd_bs_backup_'+Date.now(),cur);
     localStorage.setItem(KEY,JSON.stringify(d));
+    // v70: hold the restored copy on this phone. The app will not sync it until you choose in "Sync needs you".
+    localStorage.setItem('dd_bs_sync_quarantine',JSON.stringify({reason:'restored (restore.html)',at:new Date().toISOString(),shows:d.shows.length,done:done(d)}));
     var chk=JSON.parse(localStorage.getItem(KEY)); line('   ✓ Saved: '+chk.shows.length+' shows, '+done(chk)+' finished','ok');
-    line('Done. Tap "Open the app". This copy stays on this phone only. If the app offers to LOAD THE CLOUD COPY, tap OK.','ok');
+    line('Done. Tap "Open the app". This copy stays on this phone only. The app will not send it to the cloud until you choose.','ok');
     document.getElementById('open').style.display='block'; btn.textContent='✅ Restored';
   }catch(e){ line('❌ '+(e&&e.message||e),'bad'); btn.disabled=false; btn.textContent='✅ Restore My Data'; }
 }
