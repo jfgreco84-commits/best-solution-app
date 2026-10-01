@@ -18,15 +18,16 @@ function el(){return{innerHTML:'',textContent:'',style:{},value:'',checked:false
   insertAdjacentHTML(){},setAttribute(){},getAttribute:()=>null,addEventListener(){},
   focus(){},click(){},scrollIntoView(){}};}
 
-// `appPath` boots a different copy of the app (e.g. the v69 base, to model an
+// `sharedStore` lets two boots share one localStorage, like two tabs of one
+// browser. `appPath` boots a different copy of the app (e.g. the v69 base, to model an
 // old tab still running). `seed` pre-populates localStorage before the app's scripts run, so a test can
 // simulate a page refresh that finds a value already on the device.
-function boot(seed,appPath){
+function boot(seed,appPath,sharedStore){
   const html=fs.readFileSync(appPath||APP,'utf8');
   let js=''; const re=/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi; let m;
   while((m=re.exec(html)))js+=m[1]+'\n';
   js=js.replace(/^let /gm,'var ').replace(/^const /gm,'var ');
-  const store={}; if(seed)Object.keys(seed).forEach(k=>{store[k]=String(seed[k]);});
+  const store=sharedStore||{}; if(seed)Object.keys(seed).forEach(k=>{store[k]=String(seed[k]);});
   const ctx={console:{log(){},warn(){},error(){}},TextEncoder,TextDecoder,URL,
     Blob:class{constructor(a){this.a=a;}},
     localStorage:{getItem:k=>(k in store?store[k]:null),setItem:(k,v)=>{store[k]=String(v);},

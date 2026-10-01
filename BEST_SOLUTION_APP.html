@@ -8653,7 +8653,8 @@ function restoreDeviceBackup(key){
   let d=null; try{ d=JSON.parse(localStorage.getItem(key)); }catch(e){}
   if(!d||!d.shows){ toast('That copy could not be read'); return; }
   if(typeof confirm==='function'&&!confirm('Put this copy back? ('+d.shows.length+' shows, '+doneShows(d)+' finished). What is on the screen now is saved as a copy first.'))return;
-  backupLocal(); _applyStateObj(d); mClose(); toast('✅ Restored. Reloading to apply updates…');
+  try{ backupLocal(); _applyStateObj(d); }catch(e){ toast('❌ Restore stopped: '+(e&&e.message||e),6000); return; }
+  mClose(); toast('✅ Restored. Reloading to apply updates…');
   setTimeout(()=>{ try{ location.reload(); }catch(e){} },900);
 }
 function _applyStateObj(parsed){
@@ -8665,7 +8666,10 @@ function _applyStateObj(parsed){
   pdNormalize(parsed);
   // v70: every restore or import is held on this device: pending saves are
   // cancelled and nothing syncs, across reloads, until the owner resolves it.
-  syncQuarantineSet('restored',parsed);
+  // If the hold cannot be written, NOTHING is replaced (fail closed).
+  delete parsed._syncBase; // a restored copy never inherits a sync base
+  if(!syncQuarantineSet('restored',parsed))
+    throw new Error('this device could not record the sync hold (storage full or blocked), so nothing was restored');
   S=parsed;
   localStorage.setItem('dd_bs_v7',JSON.stringify(S));
   renderCur();
@@ -8676,7 +8680,7 @@ function applyImport(){
     if(!txt){toast('Nothing to import!');return;}
     _applyStateObj(JSON.parse(txt));
     mClose();toast('✅ Data imported successfully!');go('home');
-  }catch(e){toast('Import failed. Invalid format.');}
+  }catch(e){toast(e instanceof SyntaxError?'Import failed. Invalid format.':'Import failed: '+(e&&e.message||e),6000);}
 }
 // ---- File-based backup (download a .json you keep safe) + restore from that file ----
 function downloadBackup(){
@@ -8694,7 +8698,7 @@ function restoreBackupFile(){
         const shows=(parsed.shows||[]).length, reps=(parsed.reps||[]).length;
         if(!confirm('Restore from "'+f.name+'"?\n\nThis REPLACES everything on this device with the backup ('+shows+' shows, '+reps+' reps). Your current data will be overwritten.'))return;
         _applyStateObj(parsed); toast('✅ Restored from backup'); go('home');
-      }catch(e){ toast('Restore failed — not a valid backup file.'); }
+      }catch(e){ toast(e instanceof SyntaxError?'Restore failed — not a valid backup file.':'Restore failed: '+(e&&e.message||e),6000); }
     };
     rdr.readAsText(f);
   };
@@ -8721,19 +8725,25 @@ const SYNC_PROTOCOL=2; // forward-compat marker only; NOT a defence against old 
 // v70 SYNC SAFETY. The cloud is one document. A device may write it only when
 // it can PROVE the write does not drop anything the cloud has:
 //   1. a successful read of the row this session (_cloudVerified);
-//   2. the device's copy descends from the row it read: the saved sync base
-//      (dd_bs_syncbase: the row version this device last matched, and the
-//      _updatedAt it had then) still equals the cloud's version. If the cloud
+//   2. the device's copy descends from the row it read: the sync base
+//      (S._syncBase: the row version THIS document last matched, and the
+//      _updatedAt it had then) still equals the cloud's version. The base lives
+//      inside the document, so a tab only ever uses the base of the copy it
+//      actually holds: another tab sharing localStorage cannot lend it a newer one. If the cloud
 //      moved AND this device has edits since its base, the copies have
 //      diverged: nothing is written until the owner resolves it explicitly;
 //   3. the write is a compare-and-swap on that version (updated_at, plus the
 //      server revision once the proposed server guard is installed);
-//   4. no restored copy is waiting (dd_bs_sync_quarantine). Every restore puts
-//      the device in quarantine, across reloads, until the owner resolves it.
+//   4. no restored copy is waiting (dd_bs_sync_quarantine, plus an in-memory
+//      flag). Every restore puts the device in quarantine, across reloads,
+//      until the owner resolves it; a restore that cannot record the hold is
+//      refused before it replaces anything;
+//   5. the cloud document was not written by a newer sync protocol (checked on
+//      every path that adopts or writes: hydrate, resolve, adopt).
 // Old v69 tabs still write unconditionally; only a server-side guard can stop
 // them (tools/proposed-server-guard.sql, NOT applied).
-let _cloudVerified=false,_cloudRow=null,_cloudBlocked='',_cloudDivergent=null;
-const SYNC_BASE_KEY='dd_bs_syncbase', SYNC_QUAR_KEY='dd_bs_sync_quarantine';
+let _cloudVerified=false,_cloudRow=null,_cloudBlocked='',_cloudDivergent=null,_syncQuarantined=false;
+const SYNC_QUAR_KEY='dd_bs_sync_quarantine';
 function doneShows(st){ return ((st&&st.shows)||[]).filter(x=>x&&x.status==='completed').length; }
 try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
 
@@ -8742,21 +8752,37 @@ function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent
 try{ if(typeof window.addEventListener==='function'){ window.addEventListener('offline',()=>setSync('error')); window.addEventListener('online',()=>{ if(_cloudUser){ if(_cloudVerified)cloudQueuePush(); else cloudHydrate(); } }); } }catch(e){}
 
 function syncBaseGet(){
-  try{ const b=JSON.parse(localStorage.getItem(SYNC_BASE_KEY)||'null');
-    if(b&&_cloudUser&&b.user===_cloudUser.id&&b.token)return b; }catch(e){}
-  return null;
+  const b=(typeof S!=='undefined'&&S)?S._syncBase:null;
+  return (b&&_cloudUser&&b.user===_cloudUser.id&&b.token)?b:null;
 }
+// Records the base IN the document and saves it with it (no _updatedAt bump),
+// so the copy on disk and its base can never come from different tabs.
 function syncBaseSet(row,at){
-  try{ localStorage.setItem(SYNC_BASE_KEY,JSON.stringify({user:_cloudUser.id,token:row.token,rev:(row.rev==null?null:row.rev),at:at||''})); }
-  catch(e){ console.warn('syncBaseSet',e); }
+  S._syncBase={user:_cloudUser.id,token:row.token,rev:(row.rev==null?null:row.rev),at:at||''};
+  try{ localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('syncBaseSet',e); }
 }
-function syncQuarantine(){ try{ return JSON.parse(localStorage.getItem(SYNC_QUAR_KEY)||'null'); }catch(e){ return {reason:'unreadable quarantine marker'}; } }
+function syncQuarantine(){
+  if(_syncQuarantined)return {reason:'restored (this session)'};
+  try{ return JSON.parse(localStorage.getItem(SYNC_QUAR_KEY)||'null'); }catch(e){ return {reason:'unreadable quarantine marker'}; }
+}
+// Returns true only if the hold is on disk (read back) as well as in memory.
 function syncQuarantineSet(reason,st){
-  try{ localStorage.setItem(SYNC_QUAR_KEY,JSON.stringify({reason,at:new Date().toISOString(),shows:((st&&st.shows)||[]).length,done:doneShows(st)})); }catch(e){}
+  const was=_syncQuarantined;
+  _syncQuarantined=true;
   try{ clearTimeout(_cloudTimer); }catch(e){}
   _cloudVerified=false; _cloudBlocked='restored copy held on this device';
   if(_cloudUser)setSync('error');
+  let ok=false;
+  try{
+    const v=JSON.stringify({reason,at:new Date().toISOString(),shows:((st&&st.shows)||[]).length,done:doneShows(st)});
+    localStorage.setItem(SYNC_QUAR_KEY,v);
+    ok=localStorage.getItem(SYNC_QUAR_KEY)===v;
+  }catch(e){ console.warn('syncQuarantineSet',e); }
+  if(!ok&&!was)_syncQuarantined=false; // nothing will be replaced, so the current copy needs no hold
+  return ok;
 }
+function syncQuarantineClear(){ _syncQuarantined=false; try{ localStorage.removeItem(SYNC_QUAR_KEY); }catch(e){} }
+function cloudTooNew(doc){ return (parseInt(doc&&doc._syncProtocol)||0)>SYNC_PROTOCOL; }
 
 // Three honest outcomes, never conflated:
 //   ok    the row was read and holds app data  → {state, row:{token,rev}}
@@ -8794,7 +8820,7 @@ function backupCloudSnap(doc){
     while(keys.length>3)localStorage.removeItem(keys.shift());
   }catch(e){console.warn('backupCloudSnap',e);}
 }
-const _syncStrip=d=>{ const c=Object.assign({},d); delete c._updatedAt; delete c._syncProtocol; return JSON.stringify(c); };
+const _syncStrip=d=>{ const c=Object.assign({},d); delete c._updatedAt; delete c._syncProtocol; delete c._syncBase; return JSON.stringify(c); };
 function sameDoc(a,b){ try{ return _syncStrip(a)===_syncStrip(b); }catch(e){ return false; } }
 
 // Returns {ok,reason?,error?} so a caller that must KNOW whether the write
@@ -8808,6 +8834,7 @@ async function cloudPush(){
   if(!S._updatedAt)S._updatedAt=new Date().toISOString();
   S._syncProtocol=SYNC_PROTOCOL;
   const atSent=S._updatedAt, doc=JSON.parse(JSON.stringify(S));
+  delete doc._syncBase; // per-device bookkeeping, never shared
   setSync('syncing');
   try{
     const now=new Date().toISOString(), row=_cloudRow;
@@ -8869,8 +8896,11 @@ function looksUsed(st){
 // Replace this device's copy with the cloud's (a backup of the device copy is
 // kept first) and record the cloud row as this device's sync base.
 function adoptCloud(cloud,row){
+  if(cloudTooNew(cloud)){ cloudBlock('the cloud was saved by a newer app version'); return false; }
   backupLocal();
   cloud.v=INIT.v;
+  if(row&&_cloudUser)cloud._syncBase={user:_cloudUser.id,token:row.token,rev:(row.rev==null?null:row.rev),at:cloud._updatedAt||''};
+  else delete cloud._syncBase;
   // The incoming document may predate migrations this device has already run.
   // Carry the show-seeding markers across so applyOneTimeUpdates() below does
   // not re-create those records under fresh ids. See MIGRATION REPLAY GUARD.
@@ -8886,6 +8916,7 @@ function adoptCloud(cloud,row){
   }
   renderCur();
   setSync('synced');
+  return true;
 }
 function cloudDiverge(kind,cloud,row){
   _cloudVerified=false;
@@ -8907,7 +8938,7 @@ async function cloudHydrate(){
     _cloudVerified=true; _cloudBlocked=''; await cloudPush(); return;
   }
   const cloud=rd.state, row=rd.row;
-  if((parseInt(cloud._syncProtocol)||0)>SYNC_PROTOCOL){
+  if(cloudTooNew(cloud)){
     cloudBlock('the cloud was saved by a newer app version');
     toast('⚠️ The cloud copy was saved by a newer version of the app. Reload to update. Nothing was uploaded.',7000);
     return;
@@ -8938,10 +8969,14 @@ async function cloudResolve(choice,phrase){
   if(!_cloudUser)return {ok:false,reason:'not signed in'};
   const rd=await cloudRead();
   if(rd.status==='error'){ cloudBlock('cloud could not be read'); return {ok:false,reason:rd.message}; }
+  if(rd.status==='ok'&&cloudTooNew(rd.state)){
+    cloudBlock('the cloud was saved by a newer app version');
+    return {ok:false,reason:'the cloud copy was saved by a newer version of the app. Reload to update first.'};
+  }
   if(choice==='cloud'){
     if(rd.status!=='ok')return {ok:false,reason:'there is no cloud copy to load'};
-    try{ localStorage.removeItem(SYNC_QUAR_KEY); }catch(e){}
-    adoptCloud(rd.state,rd.row); return {ok:true};
+    if(!adoptCloud(rd.state,rd.row))return {ok:false,reason:'the cloud copy could not be loaded'};
+    syncQuarantineClear(); return {ok:true};
   }
   if(choice!=='device')return {ok:false,reason:'unknown choice'};
   if(String(phrase||'').trim().toUpperCase()!==SYNC_OVERWRITE_PHRASE)return {ok:false,reason:'type '+SYNC_OVERWRITE_PHRASE+' to confirm'};
@@ -8952,7 +8987,7 @@ async function cloudResolve(choice,phrase){
     backupCloudSnap(rd.state);
     _cloudRow=rd.row;
   } else { if(seen)return {ok:false,reason:'the cloud row disappeared; compare again'}; _cloudRow=null; }
-  try{ localStorage.removeItem(SYNC_QUAR_KEY); }catch(e){}
+  syncQuarantineClear();
   _cloudDivergent=null; _cloudVerified=true;
   return await cloudPush();
 }

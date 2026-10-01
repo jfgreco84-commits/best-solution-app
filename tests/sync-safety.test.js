@@ -13,7 +13,7 @@
 'use strict';
 const {boot,reporter}=require('./harness');
 const {execSync}=require('child_process');
-const fs=require('fs'),os=require('os'),path=require('path');
+const fs=require('fs'),os=require('os'),path=require('path'),vm=require('vm');
 const R=reporter();
 
 // ---- Fake Supabase: one row per account. mode: ok | error | throw | garbage.
@@ -70,18 +70,39 @@ function realDoc(b){
   return d;
 }
 const settle=()=>new Promise(r=>setTimeout(r,900));
-function wired(db,seed,appPath){
-  const w=boot(seed,appPath);
+function wired(db,seed,appPath,store){
+  const w=boot(seed,appPath,store);
   w.ctx.__db=db; w.run('sb=__db.client;_cloudUser={id:"u1",email:"x"};');
   w.ctx.toast=()=>{}; w.ctx.mOpen=()=>{}; w.ctx.mClose=()=>{};
   return w;
+}
+// A fabricated encrypted emergency-restore package and a fetch that serves it.
+async function restoreFixture(doc,pass){
+  const enc=new TextEncoder(), salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
+  const base=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveKey']);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:1000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt']);
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,enc.encode(JSON.stringify(doc))));
+  const b64=u=>Buffer.from(u).toString('base64');
+  return {iter:1000,salt:b64(salt),iv:b64(iv),ct:b64(ct)};
+}
+async function runEmergencyRestore(w,doc){
+  const pass='test-pass-1234', pkg=await restoreFixture(doc,pass);
+  w.ctx.crypto=crypto; w.ctx.atob=atob;
+  w.ctx.fetch=async()=>({ok:true,json:async()=>pkg});
+  const real$$=w.ctx.$$; w.ctx.$$=id=>id==='er_pass'?{value:pass}:real$$(id);
+  try{ await w.run('emergencyRestore()'); } finally { w.ctx.$$=real$$; }
+}
+// Makes ONLY the quarantine-marker write fail, like a full quota on a new key.
+function failMarkerWrites(w){
+  const ls=w.ctx.localStorage, orig=ls.setItem;
+  ls.setItem=(k,v)=>{ if(k==='dd_bs_sync_quarantine'){ const e=new Error('QuotaExceededError'); e.name='QuotaExceededError'; throw e; } return orig(k,v); };
 }
 const doneIn=d=>((d&&d.shows)||[]).filter(s=>s.status==='completed').length;
 const paid=db=>db.row.data_value.testPaid;
 // A device that has synced before: it adopted the cloud with the owner's OK.
 // (Written so it also runs on the pre-fix code, where the same setup is
 // "hydrate and tap OK", to show each FINDING section fails there.)
-async function synced(db){ const w=wired(db);
+async function synced(db,store){ const w=wired(db,undefined,undefined,store);
   if(w.run('typeof cloudResolve')!=='function'){ w.ctx.confirm=()=>true; await w.run('cloudHydrate()'); return w; }
   await w.run('cloudHydrate()'); const r=await resolve(w,'cloud');
   if(!r.ok)throw new Error('setup: '+r.reason); return w; }
@@ -185,15 +206,7 @@ const resolve=(w,a,b)=>w.run('typeof cloudResolve==="function"?cloudResolve('+JS
     R.check('setup: cloud at 300',paid(db),300);
     A.run('S.pending=1;saveS()'); // 800 ms autosave queued, token verified
     const old=JSON.parse(JSON.stringify(REAL)); old.testPaid=100;
-    const pass='test-pass-1234', enc=new TextEncoder(), salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
-    const base=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveKey']);
-    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:1000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt']);
-    const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,enc.encode(JSON.stringify(old))));
-    const b64=u=>Buffer.from(u).toString('base64');
-    A.ctx.crypto=crypto; A.ctx.atob=atob;
-    A.ctx.fetch=async()=>({ok:true,json:async()=>({iter:1000,salt:b64(salt),iv:b64(iv),ct:b64(ct)})});
-    const real$$=A.ctx.$$; A.ctx.$$=id=>id==='er_pass'?{value:pass}:real$$(id);
-    await A.run('emergencyRestore()');
+    await runEmergencyRestore(A,old);
     R.check('restore applied on the device',A.run('S.testPaid'),100);
     await settle(); await settle();
     R.check('queued autosave did not write the restored copy',paid(db),300);
@@ -303,6 +316,94 @@ const resolve=(w,a,b)=>w.run('typeof cloudResolve==="function"?cloudResolve('+JS
     R.check('re-run without marker: WWW still 668.90',wwwPaid(),668.9);
     w.run('delete __d._applied.www_pay2_mm_2000_v69;I2().payments=I2().payments.filter(p=>!(pdNum(p.amount)===2000&&p.date==="2026-09-30"));I2().payments.push({amount:2000,date:"2026-09-30"});applyOneTimeUpdates(__d)');
     R.check('hand-entered $2,000 is recognised, no second one',paid2(),5000);
+  }
+
+  R.section('10. ROUND 3 #1: two tabs sharing localStorage never lend each other a sync base');
+  for(const guard of [false,true]){
+    const tag=guard?'[server guard] ':'';
+    const db=fakeSb(guard?Object.assign({},ROW,{revision:1}):ROW,{guard}); const store={};
+    const A=await synced(db,store);
+    const B=wired(db,undefined,undefined,store); await B.run('cloudHydrate()');
+    R.check(tag+'tab B starts in sync from the shared copy',B.run('_cloudVerified')&&B.run('S.testPaid'),100);
+    A.run('S.testPaid=300;saveS()'); await settle();
+    R.check(tag+'tab A saved 300',paid(db),300);
+    R.check(tag+'shared storage now holds A\'s newer copy and base',(JSON.parse(store.dd_bs_v7)._syncBase||{}).token,db.row.updated_at);
+    B.run('S.unrelated="later edit in B";saveS()'); await settle();
+    R.check(tag+'B\'s first write conflicts, cloud keeps 300',paid(db),300);
+    await B.run('cloudSyncNow()'); await settle();
+    R.check(tag+'Sync Now in B does NOT upload its stale copy',paid(db),300);
+    R.check(tag+'B is held as diverged',kindOf(B),'both');
+    B.run('saveS()'); await settle();
+    R.check(tag+'cloud still 300 after more saves in B',paid(db),300);
+    R.check(tag+'cloud never carries a sync base',db.row.data_value._syncBase,undefined);
+  }
+
+  R.section('11. ROUND 3 #2: a restore that cannot record its hold replaces NOTHING');
+  { const restored=JSON.parse(JSON.stringify(REAL)); restored.testPaid=7;
+    const entry=[
+      ['emergencyRestore', w=>runEmergencyRestore(w,restored)],
+      ['device backup restore', w=>{ w.store.dd_bs_backup_9=JSON.stringify(restored); w.ctx.confirm=()=>true; w.ctx.location={reload(){}}; w.run('restoreDeviceBackup("dd_bs_backup_9")'); }],
+      ['paste import', w=>{ w.store.__imp=JSON.stringify(restored); w.run('(()=>{ const o=$$; $$=id=>id==="importTxt"?{value:localStorage.getItem("__imp")}:o(id); try{ applyImport(); }finally{ $$=o; } })()'); }],
+      ['file restore (_applyStateObj)', w=>{ try{ w.run('_applyStateObj('+JSON.stringify(restored)+')'); }catch(e){} }]];
+    for(const [label,go] of entry){
+      // empty cloud, the case where Sync Now would INSERT whatever this device holds
+      const db=fakeSb(null); const w=wired(db); w.run('S.testPaid=100;');
+      failMarkerWrites(w);
+      await go(w); await settle();
+      R.check(label+': marker write failed -> state NOT replaced',w.run('S.testPaid'),100);
+      R.check(label+': stored copy NOT replaced',JSON.parse(w.store.dd_bs_v7||'{"testPaid":100}').testPaid===7,false);
+      await w.run('cloudSyncNow()'); await settle();
+      R.check(label+': the restored copy never reaches the cloud',!!(db.row&&db.row.data_value.testPaid===7),false);
+    }
+  }
+  { // the in-memory gate holds even if the stored marker disappears (another tab, cleared site data)
+    const db=fakeSb(ROW); const A=await synced(db);
+    const restored=JSON.parse(JSON.stringify(REAL)); restored.testPaid=7;
+    A.run('_applyStateObj('+JSON.stringify(restored)+')');
+    delete A.store.dd_bs_sync_quarantine;
+    A.run('saveS()'); await settle(); await A.run('cloudSyncNow()'); await settle();
+    R.check('stored marker removed: in-memory hold still blocks (cloud 100, restored 7 never sent)',paid(db),100);
+  }
+  { // restore.html: the hold is written and read back BEFORE the data is replaced
+    const html=fs.readFileSync(path.join(__dirname,'..','restore.html'),'utf8');
+    const js=html.slice(html.lastIndexOf('<script>')+8,html.lastIndexOf('</script>'));
+    const restored=JSON.parse(JSON.stringify(REAL)); restored.testPaid=7;
+    const pkg=await restoreFixture(restored,'word-word-word-1234');
+    for(const failMarker of [true,false]){
+      const store={dd_bs_v7:JSON.stringify({shows:[],inventory:{},testPaid:100})}, order=[];
+      const logs=[]; const els={}, el=id=>els[id]||(els[id]={id,value:'',textContent:'',innerHTML:'',style:{},disabled:false,appendChild(c){logs.push(c.textContent);}});
+      el('pw').value='word-word-word-1234';
+      const ctx={crypto,TextEncoder,TextDecoder,atob,Uint8Array,JSON,Date,Error,
+        fetch:async()=>({ok:true,json:async()=>pkg}),
+        localStorage:{getItem:k=>(k in store?store[k]:null),setItem:(k,v)=>{ if(failMarker&&k==='dd_bs_sync_quarantine')throw new Error('QuotaExceededError'); order.push(k); store[k]=String(v); },removeItem:k=>{delete store[k];}},
+        document:{getElementById:el,createElement:()=>({className:'',textContent:''})}};
+      ctx.window=ctx; vm.createContext(ctx); vm.runInContext(js,ctx); await ctx.run();
+      if(failMarker){
+        R.check('restore.html: got as far as saving (password and decrypt OK)',logs.some(t=>/Password OK/.test(t)),true);
+        R.check('restore.html: stops on the safety hold',logs.some(t=>/could not save the safety hold/.test(t)),true);
+        R.check('restore.html: marker write fails -> data NOT replaced',JSON.parse(store.dd_bs_v7).testPaid,100);
+      } else {
+        R.check('restore.html: data replaced',JSON.parse(store.dd_bs_v7).testPaid,7);
+        R.check('restore.html: hold written before the data',order.indexOf('dd_bs_sync_quarantine')>-1&&order.indexOf('dd_bs_sync_quarantine')<order.indexOf('dd_bs_v7'),true);
+      }
+    }
+  }
+
+  R.section('12. ROUND 3 #3: no path adopts or rewrites a document from a newer sync protocol');
+  for(const guard of [false,true]){
+    const tag=guard?'[server guard] ':'';
+    const fut=JSON.parse(JSON.stringify(REAL)); fut._syncProtocol=99; fut.testPaid=300;
+    const db=fakeSb({data_value:fut,updated_at:'2026-10-01T10:00:00.000Z',revision:guard?2:undefined},{guard}); const w=wired(db);
+    await w.run('cloudHydrate()');
+    const r1=await resolve(w,'cloud');
+    R.check(tag+'resolve "load the cloud copy" refused',r1.ok,false);
+    R.check(tag+'device did not adopt it',w.run('S._syncProtocol===99'),false);
+    const r2=await resolve(w,'device','OVERWRITE CLOUD');
+    R.check(tag+'resolve "overwrite" refused',r2.ok,false);
+    R.check(tag+'adoptCloud() refuses on its own',w.run('adoptCloud(JSON.parse('+JSON.stringify(JSON.stringify(fut))+'),{token:"t",rev:null})'),false);
+    w.run('saveS()'); await settle(); await w.run('cloudSyncNow()'); await settle();
+    R.check(tag+'future document never rewritten',db.writes.length,0);
+    R.check(tag+'cloud still protocol 99',db.row.data_value._syncProtocol,99);
   }
 
   R.done();

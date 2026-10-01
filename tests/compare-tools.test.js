@@ -66,6 +66,20 @@ R.section('Exhaustive diff is complete and untruncated');
   R.check('values are not clipped',full.differences.find(d=>d.path==='longText').b.length,500);
   R.check('summary text says it is not a repair ledger',/NOT A REPAIR LEDGER/.test(C.toText(C.compare(X,Y))),true); }
 
+R.section('ROUND 3 #4: an explicit null and a missing field are different');
+{ const base={id:1,keep:'same'}, withNull={id:1,keep:'same',x:null};
+  const added=C.exhaustive(base,withNull), removed=C.exhaustive(withNull,base);
+  R.check('null added: one difference',added.count,1);
+  R.check('null added: recorded as missing in A, present in B',JSON.stringify(added.differences[0]),JSON.stringify({path:'x',inA:false,inB:true,a:null,b:null}));
+  R.check('null removed: one difference',removed.count,1);
+  R.check('null removed: recorded as present in A, missing in B',[removed.differences[0].inA,removed.differences[0].inB],[true,false]);
+  R.check('summary counts it too',C.compare(base,withNull).allDiffCount,1);
+  R.check('summary text shows <missing>',/x: A <missing>  B null/.test(C.toText(C.compare(base,withNull))),true);
+  R.check('nested null vs missing',C.exhaustive({a:{b:null}},{a:{}}).count,1);
+  R.check('array slot null vs absent',C.exhaustive({a:[1,null]},{a:[1]}).count,1);
+  R.check('0 vs null is a difference',C.exhaustive({a:0},{a:null}).count,1);
+  R.check('identical nulls are not',C.exhaustive({a:null},{a:null}).count,0); }
+
 R.section('compare.html: a failed or changed comparison never leaves an old report downloadable');
 (async()=>{
   const html=src('compare.html'), js=html.slice(html.lastIndexOf('<script>')+8,html.lastIndexOf('</script>'));

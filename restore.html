@@ -50,10 +50,14 @@ async function run(){
     catch(e){ throw new Error('Wrong password. It looks like word-word-word-1234 (3 words and 4 numbers, with dashes).'); }
     var d=JSON.parse(txt); line('   ✓ Password OK: '+d.shows.length+' shows, '+done(d)+' finished','ok');
     line('3. Saving to this phone…');
-    var cur=localStorage.getItem(KEY); if(cur)localStorage.setItem('dd_bs_backup_'+Date.now(),cur);
+    // v70: the sync hold goes on FIRST and is read back. If it cannot be
+    // recorded, nothing is replaced: the app would otherwise sync this old copy.
+    var Q='dd_bs_sync_quarantine', qv=JSON.stringify({reason:'restored (restore.html)',at:new Date().toISOString(),shows:d.shows.length,done:done(d)});
+    try{ localStorage.setItem(Q,qv); }catch(e){}
+    if(localStorage.getItem(Q)!==qv)throw new Error('This phone could not save the safety hold (storage full or blocked). Nothing was changed.');
+    delete d._syncBase;
+    var cur=localStorage.getItem(KEY); if(cur){ try{ localStorage.setItem('dd_bs_backup_'+Date.now(),cur); }catch(e){} }
     localStorage.setItem(KEY,JSON.stringify(d));
-    // v70: hold the restored copy on this phone. The app will not sync it until you choose in "Sync needs you".
-    localStorage.setItem('dd_bs_sync_quarantine',JSON.stringify({reason:'restored (restore.html)',at:new Date().toISOString(),shows:d.shows.length,done:done(d)}));
     var chk=JSON.parse(localStorage.getItem(KEY)); line('   ✓ Saved: '+chk.shows.length+' shows, '+done(chk)+' finished','ok');
     line('Done. Tap "Open the app". This copy stays on this phone only. The app will not send it to the cloud until you choose.','ok');
     document.getElementById('open').style.display='block'; btn.textContent='✅ Restored';

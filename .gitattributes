@@ -5,3 +5,8 @@
 # differently, and the Load Latest Approved Package button refuses a clone that is
 # in fact correct. Pin them to LF so the working copy matches what is served.
 packages/*.json text eol=lf
+
+# The snapshot page pins tools/vendor/* with a Subresource Integrity hash, so
+# the browser refuses the file if a single byte differs. Never convert line
+# endings on checkout (core.autocrlf=true on Windows otherwise breaks it).
+tools/vendor/* -text

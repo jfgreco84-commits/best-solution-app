@@ -20,14 +20,20 @@
       completedAt:sh.completedAt||'',payRound:J(sh.payRound||null),
       workersPaid:r2(sum(sh.workers,w=>w&&w.paid)),showExpenses:r2(sum(sh.showExpenses,x=>x&&x.amount))};
   }
-  function deepDiff(a,b,path,out,limit){
+  // Existence is compared separately from value: a field set to null and a
+  // field that is absent are different, and an exact repair must know which.
+  // (J() maps undefined to null for display only; it is not used to decide.)
+  const own=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b)&&(a===undefined)===(b===undefined);
+  function deepDiff(a,b,path,out,limit,hasA,hasB){
     if(out.length>=limit)return;
-    if(J(a)===J(b))return;
-    const oa=a&&typeof a==='object',ob=b&&typeof b==='object';
+    if(hasA===undefined)hasA=true; if(hasB===undefined)hasB=true;
+    if(hasA!==hasB){ out.push({field:path,a:a,b:b,inA:hasA,inB:hasB}); return; }
+    const oa=a!==null&&typeof a==='object',ob=b!==null&&typeof b==='object';
     if(oa&&ob&&Array.isArray(a)===Array.isArray(b)){
       const keys=Array.from(new Set(Object.keys(a).concat(Object.keys(b))));
-      keys.forEach(k=>deepDiff(a[k],b[k],path?path+'.'+k:k,out,limit));
-    } else out.push({field:path,a:a,b:b});
+      keys.forEach(k=>deepDiff(a[k],b[k],path?path+'.'+k:k,out,limit,own(a,k),own(b,k)));
+    } else if(!same(a,b)) out.push({field:path,a:a,b:b,inA:hasA,inB:hasB});
   }
   function inv2(d){return (((d&&d.productDebt)||{}).invoices||[]).filter(i=>num(i.number)===2)[0]||null;}
   function invoiceView(inv){
@@ -128,7 +134,8 @@
     p(''); p('SETTINGS'); if(!rep.settings.length)p('  same'); rep.settings.forEach(x=>p('  '+x.field+': A '+J(x.a)+'  B '+J(x.b)));
     p(''); p('FIRST '+rep.allDiffs.length+' RAW DIFFERENCES (of '+rep.allDiffCount+'), values cut at 80 characters.');
     p('THIS TEXT IS A SUMMARY, NOT A REPAIR LEDGER. Use the exhaustive .json diff and the original files for exact repairs.');
-    rep.allDiffs.forEach(x=>p('  '+x.field+': A '+J(x.a).slice(0,80)+'  B '+J(x.b).slice(0,80)));
+    const show=(has,v)=>has?J(v).slice(0,80):'<missing>';
+    rep.allDiffs.forEach(x=>p('  '+x.field+': A '+show(x.inA,x.a)+'  B '+show(x.inB,x.b)));
     return L.join('\n');
   }
   // Every difference, untruncated, with full values: the input for an exact
@@ -136,7 +143,7 @@
   function exhaustive(A,B,meta){
     const all=[]; deepDiff(A,B,'',all,Infinity);
     return {kind:'best-solution exhaustive diff',meta:meta||{},count:all.length,
-      differences:all.map(d=>({path:d.field,inA:d.a!==undefined,inB:d.b!==undefined,a:d.a===undefined?null:d.a,b:d.b===undefined?null:d.b}))};
+      differences:all.map(d=>({path:d.field,inA:d.inA,inB:d.inB,a:d.inA?(d.a===undefined?null:d.a):null,b:d.inB?(d.b===undefined?null:d.b):null}))};
   }
   const api={compare,toText,v69Status,exhaustive};
   if(typeof module!=='undefined'&&module.exports)module.exports=api; else root.bsCompare=api;
