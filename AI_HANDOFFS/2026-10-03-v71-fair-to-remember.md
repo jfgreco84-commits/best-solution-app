@@ -11,13 +11,17 @@ One-time migration `fair_to_remember_v71` puts both shows on the board (and so o
 | A Fair to Remember, Fall | Fri Oct 23 + Sat Oct 24 2026 | Fri 4p-8p, Sat 9a-3p | Fri 11a-4p, Sat 6a-9a |
 | A Fair to Remember, Christmas | Sat Dec 12 2026 | 9a-3p | **Fri Dec 11 4p-8p**, Sat 6a-9a |
 
-Washington County Fair Park, West Bend WI, 38 mi. Confirmed (paid + accepted). Direct-sales area (4-H room or Pavilion hallway), 8-ft table and chairs. Booth amount was not on the confirmation email, so `boothCost` is 0: enter it in Edit Show when found.
+Washington County Fair Park, West Bend WI, 38 mi. Confirmed (paid + accepted). Direct-sales area (4-H room or Pavilion hallway), 8-ft table and chairs.
+
+**Booth: $60 per show, $120 total.** Source: Michele Desmondez (A Fair to Remember LLC) email 8/31 quoting the direct-sales fee at $60; Froggy mailed checks with the applications; confirmation "application and payment" received 9/7. Each show gets `boothCost` 60 and one $60 booth payment dated 2026-09-07 (ids `bp_ftr_fall_2026`, `bp_ftr_xmas_2026`). Whether it was one $120 check or two $60 checks is not in email.
+
+Froggy chose two separate shows over one combined record: the app's show days must be consecutive, and a split-date show would mean reworking date handling app-wide.
 
 The Christmas Friday is setup only, so it is not a show day (no sales count, no work-hours day). It is spelled out in the show notes and lives on Google/Outlook as its own event.
 
 ## Safety
 
-If a "fair to remember" show already exists in the same month, it is updated in place (confirmed, blank hours filled, notes appended if they carry no setup info) and nothing is created. Registered in `MRG_SEED_RECORDS`; replay-guard 156/156. Other suites unchanged vs `main` (passed-not-doing and product-debt-invoices carry the same pre-existing failures as `main`).
+If a "fair to remember" show already exists in the same month, it is updated in place (confirmed, blank hours filled, booth cost set to $60 if blank, the $60 payment added unless a $60 payment is already there, notes appended if they carry no setup info) and nothing is created. Registered in `MRG_SEED_RECORDS`; replay-guard 156/156. Other suites unchanged vs `main` (passed-not-doing and product-debt-invoices carry the same pre-existing failures as `main`).
 
 ## Live data
 

@@ -1400,26 +1400,28 @@ function applyOneTimeUpdates(d){
   }
 
   // v71 (Oct 3): A Fair to Remember, Fall + Christmas, Washington County Fair
-  // Park, West Bend. Both paid and accepted (amount not on the confirmation).
-  // Direct-sales area (4-H room or Pavilion hallway), 8-ft table + chairs.
+  // Park, West Bend. Both paid and accepted: $60 each (direct-sales table fee
+  // per Michele Desmondez 8/31), by check mailed with the application,
+  // acknowledged 9/7. Direct-sales area (4-H room or Pavilion hallway), 8-ft table + chairs.
   // A show already on the board for the same month is updated in place
   // (hours and notes only where blank), never duplicated.
   if(!d._applied['fair_to_remember_v71']){
     try{
       d.shows=d.shows||[];
-      const BOOTH='Direct-sales area (4-H room or Pavilion hallway), 8-ft table and chairs provided. PAID and ACCEPTED (amount not on the confirmation email, log it when found). Washington County Fair Park, West Bend WI. ~38 mi each way from Waterford.';
+      const BOOTH='Direct-sales area (4-H room or Pavilion hallway), 8-ft table and chairs provided. $60 table fee PAID by check (mailed with the application, confirmed paid and accepted Sep 7 2026). Organizer: Michele Desmondez, A Fair to Remember LLC, 262-573-4664, afairtoremember3@gmail.com. Enter through rear or overhead doors, no carts through the front. Washington County Fair Park, West Bend WI. ~38 mi each way from Waterford.';
       const FTR=[
-        {name:'A Fair to Remember, Fall',month:'2026-10',startDate:'2026-10-23',numDays:2,
+        {name:'A Fair to Remember, Fall',month:'2026-10',pid:'bp_ftr_fall_2026',startDate:'2026-10-23',numDays:2,
          hrs:[['16:00','20:00'],['09:00','15:00']],
-         notes:'A FAIR TO REMEMBER, FALL. Fri Oct 23 2026: setup 11am-4pm, show 4pm-8pm. Sat Oct 24 2026: setup 6am-9am, show 9am-3pm. '+BOOTH},
-        {name:'A Fair to Remember, Christmas',month:'2026-12',startDate:'2026-12-12',numDays:1,
+         notes:'A FAIR TO REMEMBER, FALL. Fri Oct 23 2026: setup 11am-4pm, show 4pm-8pm. Sat Oct 24 2026: setup 6am-9am, show 9am-3pm. You can leave everything set up overnight, doors are locked. '+BOOTH},
+        {name:'A Fair to Remember, Christmas',month:'2026-12',pid:'bp_ftr_xmas_2026',startDate:'2026-12-12',numDays:1,
          hrs:[['09:00','15:00']],
          notes:'A FAIR TO REMEMBER, CHRISTMAS. SETUP FRIDAY Dec 11 2026, 4pm-8pm (no show Friday). Sat Dec 12 2026: setup 6am-9am, show 9am-3pm. '+BOOTH}
       ];
+      const pay=e=>({id:e.pid,amount:60,date:'2026-09-07',note:'Table fee paid by check, mailed with the application. Confirmed paid and accepted 9/7.'});
       FTR.forEach(e=>{
         let sh=d.shows.find(x=>x&&/fair to remember/i.test(x.name||'')&&String(x.startDate||'').slice(0,7)===e.month);
         if(!sh){
-          sh=buildPlannedShow({name:e.name,location:'West Bend, WI',startDate:e.startDate,numDays:e.numDays,boothCost:0,miles:38,boothPayments:[]});
+          sh=buildPlannedShow({name:e.name,location:'West Bend, WI',startDate:e.startDate,numDays:e.numDays,boothCost:60,miles:38,boothPayments:[pay(e)]});
           sh.confirmed=true;
           e.hrs.forEach((t,i)=>{ if(sh.days[i]){ sh.days[i].openTime=t[0]; sh.days[i].closeTime=t[1]; } });
           sh.openTime=e.hrs[0][0]; sh.closeTime=e.hrs[0][1];
@@ -1431,6 +1433,9 @@ function applyOneTimeUpdates(d){
           (sh.days||[]).forEach((day,i)=>{ const t=e.hrs[i]; if(t&&!day.openTime&&!day.closeTime){ day.openTime=t[0]; day.closeTime=t[1]; } });
           if(!sh.location)sh.location='West Bend, WI';
           if(!sh.miles)sh.miles=38;
+          if(!(parseFloat(sh.boothCost)>0))sh.boothCost=60;
+          const bp=sh.boothPayments=sh.boothPayments||[];
+          if(!bp.some(x=>x&&(x.id===e.pid||Math.abs((parseFloat(x.amount)||0)-60)<0.005)))bp.push(pay(e));
           if(!/setup/i.test(sh.notes||''))sh.notes=(sh.notes?sh.notes+' ':'')+e.notes;
         }
       });
