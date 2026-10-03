@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v70 sync safety, Oct 1 2026](2026-10-01-v70-sync-safety.md)** (failed cloud read no longer uploads the device copy; draft, not deployed)
+**NEWEST: [v71 A Fair to Remember, Oct 3 2026](2026-10-03-v71-fair-to-remember.md)** (Fall Oct 23-24 + Christmas Dec 12 shows added)
+
+**Previous: [v70 sync safety, Oct 1 2026](2026-10-01-v70-sync-safety.md)** (failed cloud read no longer uploads the device copy; draft, not deployed)
 
 **START HERE: [Complete handoff, Sep 30 2026, v66](2026-09-30-COMPLETE-HANDOFF.md)** (everything about the app, owner guide + developer detail)
 
