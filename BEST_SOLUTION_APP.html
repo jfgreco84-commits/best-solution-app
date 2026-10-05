@@ -9056,6 +9056,12 @@ async function cloudInit(){
     if(session&&session.user){_cloudUser=session.user;setSync('syncing');await cloudHydrate();renderCur();}
   }catch(e){console.warn('cloudInit',e);}
 }
+// Supabase surfaces a dropped connection as the browser's raw "Failed to fetch" (Safari: "Load failed").
+function authErrMsg(e,fallback){
+  const m=String((e&&e.message)||'');
+  if(/failed to fetch|load failed|networkerror|network request failed/i.test(m))return 'No connection to the cloud. Check your signal and try again. Your data on this phone is safe.';
+  return m||fallback;
+}
 async function cloudSignIn(){
   if(!sb){toast('Cloud sync unavailable - no connection');return;}
   const email=($$('cl_email').value||'').trim();
@@ -9064,14 +9070,14 @@ async function cloudSignIn(){
   const btn=$$('cl_btn');if(btn){btn.disabled=true;btn.textContent='SIGNING IN…';}
   try{
     const{data,error}=await sb.auth.signInWithPassword({email,password:pass});
-    if(error){toast(error.message||'Sign in failed');if(btn){btn.disabled=false;btn.textContent='SIGN IN';}return;}
+    if(error){toast(authErrMsg(error,'Sign in failed'));if(btn){btn.disabled=false;btn.textContent='SIGN IN';}return;}
     _cloudUser=data.user;
     toast('✅ Signed in');
     setSync('syncing');
     await cloudHydrate();
     rSettings();
     toast('✅ Cloud sync on');
-  }catch(e){toast('Sign in failed');if(btn){btn.disabled=false;btn.textContent='SIGN IN';}}
+  }catch(e){toast(authErrMsg(e,'Sign in failed'));if(btn){btn.disabled=false;btn.textContent='SIGN IN';}}
 }
 async function cloudSignUp(){
   if(!sb){toast('Cloud sync unavailable - no connection');return;}
@@ -9081,14 +9087,14 @@ async function cloudSignUp(){
   if(pass.length<6){toast('Password must be at least 6 characters');return;}
   try{
     const{data,error}=await sb.auth.signUp({email,password:pass});
-    if(error){toast(error.message||'Sign up failed');return;}
+    if(error){toast(authErrMsg(error,'Sign up failed'));return;}
     if(data&&data.session&&data.user){
       _cloudUser=data.user; toast('✅ Account created'); setSync('syncing');
       await cloudHydrate(); rSettings(); toast('✅ Cloud sync on — this device\'s data is now backed up');
     } else {
       toast('✅ Account created — check your email to confirm, then tap Sign In');
     }
-  }catch(e){toast('Sign up failed');}
+  }catch(e){toast(authErrMsg(e,'Sign up failed'));}
 }
 async function cloudSignOut(){
   try{if(sb)await sb.auth.signOut();}catch(e){}
