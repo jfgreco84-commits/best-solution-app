@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v71';
+const APP_VERSION='v72';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -479,6 +479,33 @@ const SHOWS_2025=[
   {name:'Sip & Sleigh — N. Aurora',  dates:'Nov 14-16, 2025',   location:'North Aurora, IL',         numDays:3, gross:2185, cogs:719,  booth:400, otherExp:255,  net:1256,  note:'SATURDAY was the big day. Strong show.'},
   {name:'Baraboo Womens Market',     dates:'Nov 22, 2025',      location:'Baraboo, WI',              numDays:1, gross:1260, cogs:421,  booth:65,  otherExp:225,  net:660,   note:''},
   {name:'Kris Kringle — Carol Stream',dates:'Dec 2025',         location:'Carol Stream, IL',         numDays:1, gross:1200, cogs:391,  booth:200, otherExp:115,  net:294,   note:''},
+];
+// v72: what actually sold at each 2025 show, size by size and day by day,
+// from the 2025 Excel workbook (BEST SOLUTION 2025.xlsx). Same order as
+// SHOWS_2025, one row per show. sd is the first show day; sdApprox marks a
+// show the workbook only dated to the month. sales = bottles x sticker
+// price; pay = what was collected by method (empty when the sheet left it blank).
+const SHOWS_2025_DETAIL=[
+  {sd:'2025-06-07',sold:{'32oz':10,'16oz':2,'8oz':17,'2oz':29,c5s:29,c5l:9},sales:1015,pay:{cash:785,square:400},days:[{sold:{'32oz':6,'16oz':1,'8oz':14,'2oz':20,c5s:20,c5l:2},sales:615,pay:{cash:510,square:190}},{sold:{'32oz':4,'16oz':1,'8oz':3,'2oz':9,c5s:9,c5l:7},sales:400,pay:{cash:275,square:210}}]}, // 0 MUKWONAGO JUNE 2025
+  {sd:'2025-07-12',sold:{'32oz':0,'16oz':2,'8oz':15,'2oz':18,c5s:21,c5l:1},sales:500,pay:{cash:530,square:70},days:[{sold:{'32oz':0,'16oz':0,'8oz':8,'2oz':8,c5s:12,c5l:0},sales:240,pay:{cash:245,square:35}},{sold:{'32oz':0,'16oz':2,'8oz':7,'2oz':10,c5s:9,c5l:1},sales:260,pay:{cash:285,square:35}}]}, // 1 7 MILE FAIR JULY 12-13
+  {sd:'2025-07-19',sold:{'32oz':1,'16oz':1,'8oz':5,'2oz':28,c5s:24,c5l:3},sales:525,pay:{cash:395,square:105,cashapp:40},days:[{sold:{'32oz':1,'16oz':1,'8oz':5,'2oz':28,c5s:24,c5l:3},sales:525,pay:{cash:395,square:105,cashapp:40}}]}, // 2 7 MILE FAIR JULY 19-20
+  {sd:'2025-07-19',sold:{'32oz':3,'16oz':3,'8oz':6,'2oz':20,c5s:13,c5l:4},sales:475,pay:{cash:335,square:240},days:[{sold:{'32oz':2,'16oz':1,'8oz':2,'2oz':14,c5s:8,c5l:1},sales:245,pay:{cash:220,square:90}},{sold:{'32oz':1,'16oz':2,'8oz':4,'2oz':6,c5s:5,c5l:3},sales:230,pay:{cash:115,square:150}}]}, // 3 MUKWONAGO JULY 2025
+  {sd:'2025-07-23',sold:{'32oz':5,'16oz':2,'8oz':30,'2oz':31,c5s:52,c5l:9},sales:1285,pay:{cash:1220,square:140,venmo:85},days:[{sold:{'32oz':0,'16oz':0,'8oz':2,'2oz':1,c5s:5,c5l:1},sales:95,pay:{cash:45,square:35}},{sold:{'32oz':0,'16oz':2,'8oz':4,'2oz':7,c5s:12,c5l:3},sales:285,pay:{cash:280,square:35}},{sold:{'32oz':2,'16oz':0,'8oz':6,'2oz':10,c5s:10,c5l:2},sales:290,pay:{cash:285,square:45}},{sold:{'32oz':0,'16oz':0,'8oz':13,'2oz':7,c5s:17,c5l:2},sales:375,pay:{cash:360,square:25,venmo:55}},{sold:{'32oz':3,'16oz':0,'8oz':5,'2oz':6,c5s:8,c5l:1},sales:240,pay:{cash:250,venmo:30}}]}, // 4 RACINE COUNTY FAIR 7-23-25 (1)
+  {sd:'2025-08-02',sold:{'32oz':2,'16oz':1,'8oz':10,'2oz':11,c5s:10,c5l:6},sales:430,pay:{},days:[{sold:{'32oz':2,'16oz':0,'8oz':5,'2oz':8,c5s:5,c5l:2},sales:220,pay:{}},{sold:{'32oz':0,'16oz':1,'8oz':5,'2oz':3,c5s:5,c5l:4},sales:210,pay:{}}]}, // 5 7 MILE FAIR AUGUST 2-3
+  {sd:'2025-08-08',sold:{'32oz':2,'16oz':5,'8oz':16,'2oz':12,c5s:12,c5l:14},sales:735,pay:{cash:200,square:560},days:[{sold:{'32oz':2,'16oz':5,'8oz':16,'2oz':12,c5s:12,c5l:14},sales:735,pay:{cash:200,square:560}}]}, // 6 RUSTIC FOX - N. AURORA 8-8-25
+  {sd:'2025-08-15',sdApprox:true,sold:{'32oz':1,'16oz':1,'8oz':11,'2oz':10,c5s:15,c5l:7},sales:485,pay:{cash:375,square:115},days:[{sold:{'32oz':1,'16oz':1,'8oz':11,'2oz':10,c5s:15,c5l:7},sales:485,pay:{cash:375,square:115}}]}, // 7 WHEATON ALL NIGHT FLEA MARKET
+  {sd:'2025-08-30',sold:{'32oz':15,'16oz':8,'8oz':48,'2oz':60,c5s:67,c5l:42},sales:2710,pay:{cash:1955,square:700,venmo:95},days:[{sold:{'32oz':15,'16oz':8,'8oz':48,'2oz':60,c5s:67,c5l:42},sales:2710,pay:{cash:1955,square:700,venmo:95}}]}, // 8 ST MARTINS FEST
+  {sd:'2025-09-06',sold:{'32oz':5,'16oz':0,'8oz':13,'2oz':17,c5s:23,c5l:6},sales:665,pay:{},days:[{sold:{'32oz':5,'16oz':0,'8oz':13,'2oz':17,c5s:23,c5l:6},sales:665,pay:{cash:285,square:380}}]}, // 9 RUSTIC FOX -CAROL STREAM 9-6-2
+  {sd:'2025-09-20',sold:{'32oz':3,'16oz':1,'8oz':15,'2oz':4,c5s:2,c5l:19},sales:645,pay:{cash:80,square:570},days:[{sold:{'32oz':3,'16oz':1,'8oz':15,'2oz':4,c5s:2,c5l:19},sales:645,pay:{cash:80,square:570}}]}, // 10 RUSTIC FOX -CAROL STREAM 9-20-2
+  {sd:'2025-09-25',sold:{'32oz':19,'16oz':17,'8oz':103,'2oz':85,c5s:72,c5l:118},sales:5170,pay:{cash:3910,square:1560,venmo:100,zelle:30},days:[{sold:{'32oz':6,'16oz':12,'8oz':48,'2oz':30,c5s:30,c5l:59},sales:2410,pay:{cash:2155,square:460,venmo:30}},{sold:{'32oz':10,'16oz':4,'8oz':37,'2oz':35,c5s:27,c5l:40},sales:1875,pay:{cash:1190,square:700,venmo:70,zelle:30}},{sold:{'32oz':3,'16oz':1,'8oz':18,'2oz':20,c5s:15,c5l:19},sales:890,pay:{cash:565,square:400}}]}, // 11 2025 CRANBERRY FEST
+  {sd:'2025-10-04',sold:{'32oz':1,'16oz':5,'8oz':5,'2oz':6,c5s:4,c5l:11},sales:435,pay:{cash:170,square:360,venmo:40},days:[{sold:{'32oz':1,'16oz':5,'8oz':5,'2oz':6,c5s:4,c5l:11},sales:435,pay:{cash:170,square:360,venmo:40}}]}, // 12 RUSTIC FOX -CAROL STREAM 10-4
+  {sd:'2025-10-10',sold:{'32oz':7,'16oz':37,'8oz':22,'2oz':80,c5s:100,c5l:22},sales:2900,pay:{cash:2355,square:915,venmo:145},days:[{sold:{'32oz':3,'16oz':9,'8oz':22,'2oz':29,c5s:34,c5l:13},sales:1285,pay:{cash:895,square:380,venmo:105}},{sold:{'32oz':4,'16oz':28,'8oz':0,'2oz':51,c5s:66,c5l:9},sales:1615,pay:{cash:1460,square:535,venmo:40}}]}, // 13 BUGROO FEST OCT 10-12-25
+  {sd:'2025-10-15',sdApprox:true,sold:{'32oz':3,'16oz':17,'8oz':32,'2oz':17,c5s:30,c5l:32},sales:1835,pay:{cash:595,square:1335},days:[{sold:{'32oz':1,'16oz':1,'8oz':0,'2oz':0,c5s:1,c5l:3},sales:110,pay:{square:120}},{sold:{'32oz':0,'16oz':9,'8oz':20,'2oz':0,c5s:14,c5l:19},sales:955,pay:{cash:390,square:670}},{sold:{'32oz':2,'16oz':7,'8oz':12,'2oz':17,c5s:15,c5l:10},sales:735,pay:{cash:205,square:545}}]}, // 14 RUSTIC FOX OCT HOLIDAY MARKET
+  {sd:'2025-10-18',sold:{'32oz':3,'16oz':2,'8oz':7,'2oz':12,c5s:8,c5l:8},sales:460,pay:{cash:225,square:280},days:[{sold:{'32oz':3,'16oz':2,'8oz':7,'2oz':12,c5s:8,c5l:8},sales:460,pay:{cash:225,square:280}}]}, // 15 CAROL STREAM - 10-18-25
+  {sd:'2025-11-07',sold:{'32oz':10,'16oz':11,'8oz':20,'2oz':33,c5s:36,c5l:33},sales:1800,pay:{cash:675,square:1350},days:[{sold:{'32oz':1,'16oz':2,'8oz':1,'2oz':3,c5s:2,c5l:4},sales:180,pay:{cash:75,square:140}},{sold:{'32oz':6,'16oz':5,'8oz':13,'2oz':18,c5s:20,c5l:18},sales:1005,pay:{cash:430,square:660}},{sold:{'32oz':3,'16oz':4,'8oz':6,'2oz':12,c5s:14,c5l:11},sales:620,pay:{cash:170,square:550}}]}, // 16 CAROL STREAM - SIP & SLEIGH
+  {sd:'2025-11-14',sold:{'32oz':3,'16oz':17,'8oz':41,'2oz':30,c5s:39,c5l:46},sales:2185,pay:{cash:915,square:1645,venmo:70},days:[{sold:{'32oz':2,'16oz':14,'8oz':27,'2oz':14,c5s:21,c5l:33},sales:1460,pay:{cash:510,square:1200,venmo:35}},{sold:{'32oz':1,'16oz':3,'8oz':14,'2oz':16,c5s:18,c5l:13},sales:725,pay:{cash:405,square:445,venmo:35}}]}, // 17 NORTH AURORA - SIP & SLEIGH
+  {sd:'2025-11-22',sold:{'32oz':1,'16oz':6,'8oz':20,'2oz':30,c5s:28,c5l:26},sales:1260,pay:{cash:935,square:515},days:[{sold:{'32oz':1,'16oz':6,'8oz':20,'2oz':30,c5s:28,c5l:26},sales:1260,pay:{cash:935,square:515}}]}, // 18 BARABOO WOMENS MARKET
+  {sd:'2025-12-15',sdApprox:true,sold:{'32oz':5,'16oz':13,'8oz':6,'2oz':33,c5s:32,c5l:18},sales:1200,pay:{cash:365,square:835},days:[{sold:{'32oz':5,'16oz':13,'8oz':6,'2oz':33,c5s:32,c5l:18},sales:1200,pay:{cash:365,square:835}}]}, // 19 CAROL STREAM - KRIS KRINGLE
 ];
 const DEFAULT_SUPPLIES=[
   {id:'sup_bags_lg',   name:'Bags (Large)',      qty:0,low:5, unit:'pk'},
@@ -5722,6 +5749,104 @@ function printShowReport(shId){
 }
 
 // ===================================================
+// v72 — PREVIOUS YEARS: what this same show did in earlier years
+// ===================================================
+// Every show screen gets a 📅 Previous Years drop-down. A show is matched to
+// its earlier years by a series key (the name with months, years and
+// punctuation stripped, plus a few known renames such as Mukwonago Maxwell ->
+// Maxwell Street Days and Baraboo Womens -> Christmas Market). A show that runs
+// several times a year (Rustic Fox, Maxwell Street Days) only matches an
+// earlier one within 21 days of the same calendar date, so the June show
+// never borrows September's numbers. Sources: the 2025 workbook above, and
+// every completed show in the app, so 2026 shows appear here in 2027 by
+// themselves.
+const PY_WINDOW_DAYS=21;
+function showSeriesKey(name,location){
+  const n=String(name||'').toLowerCase().replace(/&/g,' and ').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  const where=n+' '+String(location||'').toLowerCase().replace(/[^a-z ]/g,' ');
+  const town=/north aurora|\bn aurora/.test(where)?'north aurora':/carol stream/.test(where)?'carol stream':'';
+  const A=[[/maxwell/,'maxwell street days'],[/burgoo/,'burgoo'],[/cranberry/,'cranberry'],[/\bst martins?\b|\bsaint martins?\b/,'st martins'],
+    [/\b7 mile\b|\bseven mile\b/,'7 mile fair'],[/racine county/,'racine county fair'],[/wheaton/,'wheaton flea'],[/baraboo/,'baraboo market'],
+    [/sip and sleigh/,'sip and sleigh '+town],[/kris kringle/,'kris kringle '+town],[/rustic fox.*holiday|holiday.*rustic fox/,'rustic fox holiday'],
+    [/rustic fox|fox and found/,'rustic fox '+town]];
+  for(const [re,k] of A)if(re.test(n))return k.trim();
+  return n.replace(/\b(19|20)\d\d\b/g,' ').replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/g,' ').replace(/\bfestival\b/g,'fest').replace(/\s+/g,' ').trim();
+}
+function _pyDoy(sd){ const m=/^\d{4}-(\d{2})-(\d{2})/.exec(sd||''); return m?((+m[1])-1)*31+(+m[2]):0; }
+function _pyPayFromDays(days){ const p={}; (days||[]).forEach(d=>Object.keys(d.pay||{}).forEach(k=>p[k]=(p[k]||0)+(parseFloat(d.pay[k])||0))); return p; }
+// Every finished show we know about, any year, in one shape.
+function pastShowRecords(st){
+  st=st||S; const out=[];
+  SHOWS_2025.forEach((s,i)=>{ const x=SHOWS_2025_DETAIL[i]; if(!x)return;
+    const pay=Object.keys(x.pay||{}).length?x.pay:_pyPayFromDays(x.days);
+    out.push({src:'book',id:'b2025_'+i,name:s.name,location:s.location,dates:s.dates,sd:x.sd,sdApprox:!!x.sdApprox,numDays:s.numDays,
+      gross:s.gross,cogs:s.cogs,booth:s.booth,otherExp:s.otherExp,net:s.net,note:s.note||'',sold:x.sold,sales:x.sales,pay,days:x.days||[]}); });
+  const book=out.slice();
+  ((st&&st.shows)||[]).forEach(sh=>{
+    if(!sh||sh.status!=='completed'||isPassed(sh)||!/^\d{4}-\d{2}-\d{2}/.test(sh.startDate||''))return;
+    const key=showSeriesKey(sh.name,sh.location);
+    if(book.some(b=>b.sd.slice(0,7)===sh.startDate.slice(0,7)&&showSeriesKey(b.name,b.location)===key))return; // the workbook already has it
+    const t=calcShow(sh), days=(sh.days||[]).map(d=>{ const counted=!!(d.morningCount&&d.eveningCount), pay={};
+      PMTS.forEach(p=>{ const v=parseFloat((d.payments||{})[p.key])||0; if(v)pay[p.key]=v; });
+      return {sold:counted?daySold(d):null,sales:calcPmt(d.payments||{}),pay,date:d.date||''}; });
+    out.push({src:'app',id:sh.id,name:sh.name,location:sh.location||'',dates:(sh.dates||[]).join(' → ')||sh.startDate,sd:sh.startDate,numDays:(sh.days||[]).length,
+      gross:t.gross,cogs:t.cogs,booth:t.booth,otherExp:Math.round((t.expenses-t.booth)*100)/100,net:Math.round(t.profit*100)/100,note:sh.notes||'',
+      sold:showUnitsSold(sh),sales:t.gross,pay:_pyPayFromDays(days),days}); });
+  return out;
+}
+// [{year, rec}] newest year first: the same show in each earlier year.
+function previousYears(sh,st){
+  st=st||S;
+  if(!sh||!/^\d{4}-\d{2}-\d{2}/.test(sh.startDate||''))return [];
+  const key=showSeriesKey(sh.name,sh.location), yr=+sh.startDate.slice(0,4), doy=_pyDoy(sh.startDate);
+  const runsThisYear=((st&&st.shows)||[]).filter(x=>x&&!isPassed(x)&&(x.startDate||'').slice(0,4)===String(yr)&&showSeriesKey(x.name,x.location)===key).length;
+  const byYear={};
+  pastShowRecords(st).forEach(r=>{ if(r.id===sh.id||!r.sd||+r.sd.slice(0,4)>=yr||showSeriesKey(r.name,r.location)!==key)return;
+    (byYear[r.sd.slice(0,4)]=byYear[r.sd.slice(0,4)]||[]).push(r); });
+  return Object.keys(byYear).sort().reverse().map(y=>{
+    const c=byYear[y], gap=r=>Math.abs(_pyDoy(r.sd)-doy), best=c.slice().sort((a,b)=>gap(a)-gap(b))[0];
+    if((c.length>1||runsThisYear>1)&&gap(best)>PY_WINDOW_DAYS)return null;
+    return {year:+y,rec:best};
+  }).filter(Boolean);
+}
+function previousYearCardHTML(y,open){
+  const r=y.rec, days=(r.days||[]).filter(d=>d.sold||d.sales), multi=days.length>1;
+  const tot=SKUS.reduce((t,s)=>t+((r.sold||{})[s.key]||0),0);
+  const col=n=>`<td style="padding:4px 6px;text-align:right">${n}</td>`;
+  const rows=SKUS.map(s=>`<tr style="border-top:1px solid var(--border)"><td style="padding:4px 6px;font-weight:700">${s.short}</td>${multi?days.map(d=>col(d.sold?(d.sold[s.key]||0):'—')).join(''):''}${col('<b>'+((r.sold||{})[s.key]||0)+'</b>')}</tr>`).join('');
+  const dayTot=d=>d.sold?SKUS.reduce((t,s)=>t+(d.sold[s.key]||0),0):'—';
+  const pays=PMTS.filter(p=>(r.pay||{})[p.key]).map(p=>`${p.icon} ${p.label} ${fmt(r.pay[p.key])}`);
+  const collected=PMTS.reduce((t,p)=>t+((r.pay||{})[p.key]||0),0);
+  const netC=r.net>=0?'var(--green)':'var(--red)';
+  return `<details ${open?'open':''} style="margin-top:8px;border:1px solid var(--goldbd);border-radius:10px;padding:8px 10px;background:var(--card)">
+    <summary style="cursor:pointer;font-weight:900;font-size:14px;color:var(--gold)">${y.year} · ${_esc(r.name)} <span style="font-size:11px;color:var(--muted);font-weight:700">${_esc(r.dates||'')}</span></summary>
+    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">${_esc(r.location||'')}${r.numDays?' · '+r.numDays+' day'+(r.numDays>1?'s':''):''}${r.src==='book'?' · from the 2025 workbook':''}</div>
+    <div class="g2" style="gap:8px;margin-bottom:8px">
+      <div class="sbox gb"><div class="sl">Gross sales</div><div class="sv" style="font-size:18px">${fmt(r.gross)}</div></div>
+      <div class="sbox"><div class="sl">Net profit</div><div class="sv" style="font-size:18px;color:${netC}">${fmt(r.net)}</div></div>
+    </div>
+    <div class="sr"><span class="srl">Product cost (COGS)</span><span class="srv red">-${fmt(r.cogs)}</span></div>
+    <div class="sr"><span class="srl">Booth</span><span class="srv red">-${fmt(r.booth)}</span></div>
+    <div class="sr"><span class="srl">Other expenses</span><span class="srv red">-${fmt(r.otherExp)}</span></div>
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:10px 0 4px">🧴 Bottles sold · ${tot} total</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><td style="padding:4px 6px">Size</td>${multi?days.map((d,i)=>`<td style="padding:4px 6px;text-align:right">Day ${i+1}</td>`).join(''):''}<td style="padding:4px 6px;text-align:right">Total</td></tr>
+      ${rows}
+      ${multi?`<tr style="border-top:2px solid var(--border);font-weight:800"><td style="padding:4px 6px">All</td>${days.map(d=>col(dayTot(d))).join('')}${col(tot)}</tr>
+      <tr style="color:var(--green)"><td style="padding:4px 6px">$</td>${days.map(d=>col(fmt(d.sales||0))).join('')}${col(fmt(r.sales||0))}</tr>`:''}
+    </table>
+    ${pays.length?`<div style="font-size:11px;margin-top:8px"><b>Collected ${fmt(collected)}:</b> ${pays.join(' · ')}</div>`:''}
+    ${r.note?`<div style="font-size:11px;color:var(--muted);margin-top:6px">📝 ${_esc(r.note)}</div>`:''}
+  </details>`;
+}
+function previousYearsHTML(sh){
+  let ys=[]; try{ ys=previousYears(sh); }catch(e){ console.warn('previousYears',e); }
+  return `<details class="clps" style="margin-bottom:12px"><summary>📅 Previous Years${ys.length?' <span style="color:var(--muted);font-size:11px">('+ys.map(y=>y.year).join(', ')+')</span>':''}</summary>
+    ${ys.length?ys.map((y,i)=>previousYearCardHTML(y,i===0)).join(''):'<div class="card" style="margin-top:8px;font-size:12px;color:var(--muted)">No earlier year on file for this show yet. Once it is done this year it shows up here next year.</div>'}
+  </details>`;
+}
+
+// ===================================================
 // SHOW DETAIL
 // ===================================================
 // v46: the show screen in tabs. Everything is still rendered (so every
@@ -5761,6 +5886,7 @@ function rShow(){
     if(conf.length)h+=`<div class="wb" style="margin-bottom:10px;background:rgba(255,140,0,0.12);border:1px solid rgba(255,140,0,0.45);color:#ffc266;font-weight:700">🚨 Schedule Conflict: multiple shows on this date.<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">Overlaps with ${conf.map(c=>c.name+' ('+(c.dates?c.dates.join(' – '):c.startDate)+')').join(', ')}. Assign reps or choose which show to attend.</div></div>`;
     return h;})()}
   ${_pd?`<div class="wb gold" style="margin-bottom:12px">🚫 <strong>Passed / Not Doing.</strong> ${_esc(passedReason(sh)||'No reason recorded')}${passedRevisit(sh)?`<div style="font-weight:400;font-size:11px;margin-top:4px;color:var(--muted)">🔔 Revisit / next cycle: <strong style="color:var(--gold)">${_esc(passedRevisit(sh))}</strong></div>`:''}${sh.passedAt?`<div style="font-weight:400;font-size:10px;margin-top:3px;color:var(--muted)">Recorded ${_esc(String(sh.passedAt).replace('T',' ').slice(0,16))}${sh.passedSource&&sh.passedSource!=='manual'?' · '+_esc(sh.passedSource):''}</div>`:''}<div style="font-weight:400;font-size:11px;margin-top:5px;color:var(--muted)">Everything below is preserved history. This show is out of Upcoming, the pipeline, payment-due alerts, the calendar and booking totals.</div></div>`:''}
+  ${previousYearsHTML(sh)}
   ${showTabsBarHTML(sh)}
   <div class="stab-pane" data-stab="day" style="display:${showTabOf(sh)==='day'?'block':'none'}">
   ${_pd?'':truckTopCardHTML(sh)}

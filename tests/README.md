@@ -15,6 +15,7 @@ node tests/money-by-person.test.js
 node tests/cranberry-scoreboard.test.js
 node tests/sync-safety.test.js
 node tests/compare-tools.test.js
+node tests/previous-years.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 
