@@ -178,6 +178,29 @@
     .wl-x{margin-top:6px}
     .wl-note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
 
+    /* MILEAGE BY SHOW */
+    .mi-h,.mi-r>summary,.mi-t{display:grid;grid-template-columns:minmax(0,1fr) 46px 72px 62px;column-gap:8px;align-items:center}
+    .mi-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800;padding-bottom:8px;border-bottom:1px solid var(--border)}
+    .mi-r{border-bottom:1px solid var(--border)}
+    .mi-r>summary{list-style:none;cursor:pointer;padding:10px 0}
+    .mi-r>summary::-webkit-details-marker{display:none}
+    .mi-r>summary .mi-n::before{content:'▸ ';color:var(--gold)}
+    .mi-r[open]>summary .mi-n::before{content:'▾ '}
+    .mi-n{font-size:13px;font-weight:700;color:var(--text);line-height:1.3;overflow-wrap:anywhere}
+    .mi-s{display:block;font-size:11px;font-weight:400;color:var(--muted)}
+    .mi-v{text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .mi-h .mi-v{font-size:10px}
+    .mi-g{color:var(--green)}
+    .mi-none .mi-n{color:var(--muted)}
+    .mi-x{background:var(--card2);border-radius:8px;padding:6px 10px;margin:0 0 10px}
+    .mi-d{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:5px 0}
+    .mi-d+.mi-d{border-top:1px solid var(--border)}
+    .mi-d>span:last-child{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .mi-w>span{color:var(--gold)!important;text-align:left!important;font-size:11px}
+    .mi-d i{color:var(--muted);font-style:normal;font-size:11px}
+    .mi-t{border-top:2px solid var(--border);padding-top:11px;margin-top:2px}
+    .mi-t .mi-n{font-size:14px;font-weight:800}.mi-t .mi-v{font-size:13px;font-weight:900}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -4047,13 +4070,47 @@ function secInventory(C){
 }
 function secMileage(C){
   if(!(C.ytd.miles>0))return '';
+  const rate=S.settings.irsRate||0;
+  // Same shows calcYTD counts (completed + running), newest first, so the rows add up to the totals.
+  const list=(S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
+  const dt=sh=>(sh.startDate&&/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))?new Date(sh.startDate+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+  const gasTotal=C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice;
+  const noMiles=list.filter(sh=>!(showMiles(sh)>0)).length;
+  const line=(l,v)=>`<div class="mi-d"><span>${l}</span><span>${v}</span></div>`;
+  const rows=list.map(sh=>{
+    const mi=showMiles(sh),gas=showGas(sh),trips=showRoundTrips(sh);
+    const route=parseFloat(sh.totalMiles)>0;
+    const manualGas=sh.gasOverride!=null&&sh.gasOverride!=='';
+    const tripsSet=sh.roundTrips!=null&&sh.roundTrips!=='';
+    const gasMiles=(sh.miles||0)*2*trips;
+    const det=mi>0?[
+      line('One-way distance',`${fmtN(sh.miles||0)} mi`),
+      line('Round trips',`${trips}${tripsSet?'':' <i>(1 per show day)</i>'}`),
+      route?line('Miles driven',`${fmtN(mi)} mi <i>(real route)</i>`):line('Miles driven',`${fmtN(sh.miles||0)} × 2 × ${trips} = ${fmtN(mi)} mi`),
+      line('IRS deduction',`${fmtN(mi)} mi × $${rate.toFixed(2)} = <b class="mi-g">${fmt(mi*rate)}</b>`),
+      manualGas?line('Gas','<b>'+fmt(gas)+'</b> <i>(entered)</i>')
+        :line('Gas (est.)',`${fmtN(gasMiles)} mi ÷ ${showMpg(sh)} mpg × $${showGasPrice(sh).toFixed(2)} = <b>${fmt(gas)}</b>`),
+      (route&&gasMiles!==mi?`<div class="mi-d mi-w"><span>⚠️ Gas is figured on ${fmtN(gasMiles)} mi, not the ${fmtN(mi)} mi real route. Enter the gas in ✏️ Edit Show to fix.</span></div>`:''),
+      (parseFloat(sh.lodging)||0)>0?line('Lodging',fmt(parseFloat(sh.lodging))):''
+    ].join(''):`<div class="mi-d"><span>No miles entered. Add them in ✏️ Edit Show.</span></div>`;
+    return `<details class="mi-r${mi>0?'':' mi-none'}"><summary>
+        <div class="mi-n">${_esc(sh.name)}<span class="mi-s">${dt(sh)}${sh.status==='active'?' · LIVE':''}</span></div>
+        <div class="mi-v">${mi>0?fmtN(mi):'—'}</div><div class="mi-v mi-g">${mi>0?fmt(mi*rate):'—'}</div><div class="mi-v">${gas>0?fmt(gas):'—'}</div>
+      </summary><div class="mi-x">${det}</div></details>`;
+  }).join('');
   return `<div class="card">
       <div class="g3">
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(C.ytd.miles)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(C.mileDeduct)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
-        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(gasTotal)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">IRS rate $${rate.toFixed(2)}/mile · ${S.settings.mpg} mpg · gas $${(parseFloat(S.settings.gasPrice)||0).toFixed(2)}/gal (defaults, a show can override)</div>
+    </div>
+    <div class="card">
+      <div class="mi-h"><div>Show</div><div class="mi-v">Miles</div><div class="mi-v">Deduct</div><div class="mi-v">Gas</div></div>
+      ${rows}
+      <div class="mi-t"><div class="mi-n">Total <span class="mi-s">${list.length} shows${noMiles?` · ${noMiles} with no miles`:''}</span></div>
+        <div class="mi-v">${fmtN(C.ytd.miles)}</div><div class="mi-v mi-g">${fmt(C.mileDeduct)}</div><div class="mi-v">${fmt(gasTotal)}</div></div>
     </div>`;
 }
 function secBest(C){
