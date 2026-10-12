@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v72';
+const APP_VERSION='v73';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1468,6 +1468,28 @@ function applyOneTimeUpdates(d){
       });
       d._applied['fair_to_remember_v71']=true;
     }catch(e){ console.error('fair_to_remember_v71',e); }
+  }
+
+  // v73: Burgoo Fest 2026 restock repair. Froggy, Oct 11 morning: restocked
+  // 2oz and C5 Small from the stock at the show, 33 of each to booth 1 (F37)
+  // and 24 of each to booth 2 (Jamie's Outpost), entered it, and it "did not
+  // look right". His live data was not visible from here, so this puts the
+  // day into the one correct shape and undoes only the known ways the entry
+  // goes wrong, each one matched exactly so nothing legitimate is touched:
+  //   1. restock day = the latest day any booth has an opening count;
+  //      that day's restock is set to exactly 33/33 (F37) and 24/24 (JO);
+  //   2. an opening raised by exactly the restock on top of last night's
+  //      close (+ garage delivery) is put back to last night's close;
+  //   3. the same 33/33 or 24/24 logged on an EARLIER day is removed there
+  //      (it was inflating that day's sales);
+  //   4. if the tables then hold more than the show has, the gap came from
+  //      the garage: it is booked garage -> truck on the restock day, so the
+  //      garage drops and the truck covers the restock.
+  // Idempotent: on data already in that shape it changes nothing. Logged on
+  // the show and in the audit log.
+  if(!d._applied['burgoo_restock_fix_v73']){
+    try{ const r=burgooRestockFix(d); if(r&&r.done)d._applied['burgoo_restock_fix_v73']=true; }
+    catch(e){ console.error('burgoo_restock_fix_v73',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -5748,6 +5770,58 @@ function printShowReport(shId){
         '<tr class="tot"><td>Fixed costs</td><td class="r">'+_money(be.fixedCosts)+'</td></tr></table>'; })());
 }
 
+// v73: see the burgoo_restock_fix_v73 note in applyOneTimeUpdates.
+function burgooRestockFix(d){
+  // literals, not the GARAGE_ID / TRUCK_ID consts: this runs from loadS(), before those lines execute
+  const BURGOO_RESTOCK_V73={qty:[33,24],skus:['2oz','c5s']};
+  const sh=((d&&d.shows)||[]).find(x=>x&&/burgoo/i.test(x.name||'')&&String(x.startDate||'').startsWith('2026-10')&&!isPassed(x));
+  if(!sh||sh.status!=='active')return {done:false,reason:'Burgoo 2026 is not running on this device'};
+  const booths=showBooths(sh); if(booths.length!==2)return {done:false,reason:'Burgoo does not have exactly two booths'};
+  const by=re=>booths.find(b=>re.test(b.name||''));
+  const b1=by(/f\s*37/i)||booths[0], b2=by(/jamie/i)||booths.find(b=>b!==b1);
+  const days=sh.days||[];
+  const K=BURGOO_RESTOCK_V73.skus, log=[], n=v=>parseInt(v)||0, sName=k=>(SKUS.find(s=>s.key===k)||{}).short||k;
+  // The restock day: a day after the first that already carries a 2oz/C5-S
+  // restock; else the latest one that was really worked (counted by hand,
+  // money in, or closed); else the latest with any opening. An opening the
+  // app pre-filled from last night (morningSeeded) alone does not make a day.
+  const pick=f=>{ let r=-1; days.forEach((x,i)=>{ if(i>0&&booths.some(b=>{ const e=dayBoothRead(x,b.id); return e&&e.morningCount&&f(e); }))r=i; }); return r; };
+  let R=pick(e=>K.some(k=>n((e.restock||{})[k])>0));
+  if(R<0)R=pick(e=>!e.morningSeeded||e.eveningCount||(e.payments&&calcPmt(e.payments)>0));
+  if(R<0)R=pick(()=>true);
+  if(R<1)return {done:false,reason:'No second-day opening count yet'};
+  const plan=[[b1,BURGOO_RESTOCK_V73.qty[0]],[b2,BURGOO_RESTOCK_V73.qty[1]]];
+  // 3. the same restock on an earlier day
+  for(let j=0;j<R;j++){ plan.forEach(([b,q])=>{ const e=dayBoothRead(days[j],b.id); if(!e||!e.restock)return;
+    if(K.every(k=>n(e.restock[k])===q)){ K.forEach(k=>delete e.restock[k]); rollupDay(sh,j);
+      log.push((days[j].date||('Day '+(j+1)))+' '+b.name+': removed restock '+K.map(k=>q+' '+sName(k)).join(' + ')+' (it belongs on '+(days[R].date||('Day '+(R+1)))+')'); } }); }
+  // 1 + 2. the restock day itself
+  plan.forEach(([b,q])=>{
+    const e=dayBoothWrite(days[R],b.id), prev=dayBoothRead(days[R-1],b.id), gi=boothGarageIn(days[R],b.id);
+    if(!e.restock||typeof e.restock!=='object')e.restock={};
+    K.forEach(k=>{
+      if(e.morningCount&&prev&&prev.eveningCount){ const exp=n(prev.eveningCount[k])+(gi[k]||0);
+        if(n(e.morningCount[k])===exp+q){ e.morningCount[k]=exp; log.push(b.name+' opening '+sName(k)+' '+(exp+q)+'→'+exp+' (the restock was in the opening AND in restock)'); } }
+      if(n(e.restock[k])!==q){ log.push(b.name+' restock '+sName(k)+' '+n(e.restock[k])+'→'+q); e.restock[k]=q; }
+    });
+  });
+  rollupDay(sh,R);
+  // 4. more on the tables than the show has: the gap came from the garage
+  const short={}; truckShort(sh).filter(x=>x.di===R&&K.indexOf(x.sku)>=0).forEach(x=>short[x.sku]=Math.max(short[x.sku]||0,x.over));
+  Object.keys(short).forEach(k=>{ const q=short[k]; d.inventory=d.inventory||{};
+    d.inventory[k]=Math.max(0,n(d.inventory[k])-q);
+    sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[k]=n(sh.packedInventory[k])+q;
+    const day=days[R]; if(!day.truckIn||typeof day.truckIn!=='object')day.truckIn={}; day.truckIn[k]=n(day.truckIn[k])+q;
+    if(!Array.isArray(d.transfers))d.transfers=[];
+    d.transfers.push({id:'tr_v73_'+k,batch:'tr_v73',ts:new Date().toISOString(),date:day.date||'',sku:k,qty:q,landed:'truck',
+      fromShowId:'garage',fromName:'🏠 Garage',toShowId:sh.id,toName:sh.name,di:R,dayDate:day.date||'',boothId:'truck',boothName:'🚚 Truck'});
+    log.push('+'+q+' '+sName(k)+' booked from the garage to the truck: the booths held more than the show had packed'); });
+  if(Object.keys(short).length)rollupDay(sh,R);
+  const ts=new Date().toISOString();
+  invLogPush(sh,{ts,di:R,date:days[R].date,type:'🔧 Restock repair (v73)',changes:log.length?log:['Restock already correct: '+b1.name+' 33/33, '+b2.name+' 24/24 (2oz / C5-S). Nothing changed.'],by:'owner'});
+  auditState(d).log.push({ts,showId:sh.id,show:sh.name,msg:'Burgoo restock repair (v73): '+(log.length?log.join(' · '):'already correct, nothing changed')});
+  return {done:true,day:R,log};
+}
 // ===================================================
 // v72 — PREVIOUS YEARS: what this same show did in earlier years
 // ===================================================
