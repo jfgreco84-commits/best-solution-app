@@ -17,6 +17,7 @@ node tests/sync-safety.test.js
 node tests/compare-tools.test.js
 node tests/previous-years.test.js
 node tests/burgoo-restock-fix.test.js
+node tests/inventory-alert.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 

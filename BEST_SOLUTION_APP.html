@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v73';
+const APP_VERSION='v74';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -3386,6 +3386,47 @@ function invUnresolved(sh){ return invCarryIssues(sh).filter(m=>!((sh.days[m.di]
 function invStatus(sh){ const carry=invCarryIssues(sh),neg=invNegativeSold(sh); if(truckShort(sh).length)return'red'; if(!carry.length&&!neg.length)return'green'; if(invUnresolved(sh).length||neg.length)return'red'; return'yellow'; }
 function invStatusMeta(st){ return st==='green'?{c:'var(--green)',l:'Reconciled',i:'🟢'}:st==='yellow'?{c:'var(--gold)',l:'Reviewed (override)',i:'🟡'}:{c:'var(--red)',l:'Mismatch — review needed',i:'🔴'}; }
 function invLogPush(sh,entry){ if(!sh.invLog)sh.invLog=[]; sh.invLog.push(entry); if(sh.invLog.length>200)sh.invLog=sh.invLog.slice(-200); }
+// v74: a show closed before the last garage recount (settings.audit.baseline)
+// is settled history. The recount already absorbed whatever its counts said,
+// so editing them now changes nothing real. Same rule auditSkip uses, plus an
+// end-date fallback for shows closed before completedAt was recorded.
+function invSettled(sh){
+  const b=S&&S.settings&&S.settings.audit&&S.settings.audit.baseline;
+  if(!b||!sh||sh.status!=='completed')return false;
+  if(sh.completedAt)return sh.completedAt<b;
+  const e=showEndKey(sh); return /^\d{4}-\d{2}-\d{2}$/.test(e)&&e<b.slice(0,10);
+}
+// Shows the Home alert should raise: running or recently closed, with a red count problem.
+function invAlertShows(){ return (S.shows||[]).filter(sh=>!isMissed(sh)&&sh.status!=='planned'&&!invSettled(sh)&&invStatus(sh)==='red'); }
+// Every red problem on a show, in plain words, with the one-tap fix for it.
+function invIssues(sh){
+  const out=[], days=sh.days||[], dn=i=>(days[i]&&days[i].date)||('Day '+(i+1)), id=sh.id;
+  const byDay={}; invUnresolved(sh).forEach(m=>{ (byDay[m.di]=byDay[m.di]||[]).push(m); });
+  Object.keys(byDay).forEach(k=>{ const di=+k, xs=byDay[k];
+    out.push({di,text:dn(di)+': opened with '+xs.map(m=>m.morn+' '+m.short+' (last night ended '+m.prevEve+(m.brought?' + '+m.brought+' from garage':'')+')').join(', ')+'.',
+      fixes:[{label:'↩︎ Use last night\'s count',js:`invFix('carry','${id}',${di})`},{label:'✓ Morning count is right',js:`invFix('keep','${id}',${di})`}]}); });
+  invNegativeSold(sh).forEach(m=>out.push({di:m.di,text:dn(m.di)+': '+m.short+' ended at '+m.eve+' but only '+m.morn+' were out. A restock was never logged.',
+    fixes:[hasBooths(sh)?{label:'Open show',js:`mClose();go('show','${id}');setShowTab('stock')`}:{label:'± Log the restock',js:`openAdjustModal('${id}',${m.di})`}]}));
+  truckShort(sh).forEach(x=>out.push({di:x.di,text:dn(x.di)+': '+x.table+' '+x.short+' on the table but the show only had '+x.have+' (+'+x.over+'). Garage stock not transferred, or a count typo.',
+    fixes:[{label:'Open show',js:`mClose();go('show','${id}');setShowTab('stock')`}]}));
+  return out.sort((a,b)=>a.di-b.di);
+}
+function openInvFix(){
+  const shows=invAlertShows();
+  if(!shows.length){ mClose(); toast('✅ All inventory counts reconcile'); return; }
+  mOpen(`<div style="font-weight:900;font-size:16px;margin-bottom:4px">🔴 Fix inventory counts</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Each line says what doesn't add up. Pick the fix that matches what really happened.</div>
+    ${shows.map(sh=>`<div class="card" style="margin-bottom:8px"><div style="font-weight:800;font-size:13px;margin-bottom:4px">${_esc(sh.name)}</div>
+      ${invIssues(sh).map(x=>`<div style="padding:6px 0;border-top:1px solid var(--border)"><div style="font-size:12px">${_esc(x.text)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${x.fixes.map(f=>`<button class="btn btn-xs btn-ghost" onclick="${f.js}">${f.label}</button>`).join('')}</div></div>`).join('')}</div>`).join('')}
+    <button class="btn btn-ghost" style="width:100%;margin-top:4px" onclick="mClose()">Close</button>`);
+}
+function invFix(kind,shId,di){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const d=(sh.days||[])[di]; if(!d)return;
+  if(kind==='carry')fixCarryFromPrev(shId,di);
+  else if(kind==='keep'){ d.carryReason='Morning count checked, it is right'; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'reconcile',changes:['override accepted: '+d.carryReason],by:'owner'}); saveS(); toast('✅ Morning count kept'); }
+  openInvFix();
+}
 // Cash vs inventory: money collected vs full price of product that actually sold that day. A shortfall = discounts OR a cash problem.
 function dayCashCheck(sh,di){
   const d=(sh.days||[])[di]; if(!d||!d.morningCount||!d.eveningCount)return {state:'na'};
@@ -3653,16 +3694,18 @@ function rHome(){
   }
 
   // ---- Inventory mismatch alert (any active/completed show whose counts don't reconcile) ----
-  const invAlertShows=(S.shows||[]).filter(sh=>!isMissed(sh)&&sh.status!=='planned'&&invStatus(sh)==='red');
+  const invAlert=invAlertShows();
   if(doneShows(S)===0&&S.shows.length){
     html+=`<div class="card" style="border:2px solid var(--red);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="openRestoreCenter()">
       <div style="font-weight:900;color:#ffb3b3;font-size:15px">⚠️ Your data looks wiped</div>
       <div style="font-size:13px;margin-top:4px">No finished shows on this phone. <b>Tap here to restore it.</b></div></div>`;
   }
-  if(invAlertShows.length){
-    html+=`<div class="card" style="border:1px solid var(--redbd);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="go('show','${invAlertShows[0].id}')">
-      <div style="font-weight:800;color:#ffb3b3;font-size:13px">🔴 Inventory mismatch needs review</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:2px">${invAlertShows.map(s=>s.name).join(', ')} — opening/ending counts don't reconcile. Tap to fix.</div>
+  if(invAlert.length){
+    const lines=invAlert.map(sh=>{ const xs=invIssues(sh); return `<div style="margin-top:3px"><b style="color:var(--text)">${_esc(sh.name)}</b> · ${_esc((xs[0]||{}).text||'')}${xs.length>1?` <span style="opacity:.8">+${xs.length-1} more</span>`:''}</div>`; }).join('');
+    html+=`<div class="card" style="border:1px solid var(--redbd);background:var(--redbg);margin-bottom:10px;cursor:pointer" onclick="openInvFix()">
+      <div style="font-weight:800;color:#ffb3b3;font-size:13px">🔴 Inventory count${invAlert.length>1?'s':''} to fix</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${lines}</div>
+      <div style="font-size:12px;color:#ffb3b3;margin-top:4px;font-weight:700">Tap to fix in one step →</div>
     </div>`;
   }
 
@@ -6082,7 +6125,7 @@ function rShow(){
   <div class="stab-pane" data-stab="stock" style="display:${showTabOf(sh)==='stock'?'block':'none'}">
   ${_pd?'':showStockCardHTML(sh)}
   ${preShowCalcHTML(sh)}
-  <details class="clps" ${sh.status!=='planned'&&(invUnresolved(sh).length||invNegativeSold(sh).length)?'open':''}><summary>📦 Inventory Reconciliation ${sh.status!=='planned'?invStatusMeta(invStatus(sh)).i:''}</summary>
+  <details class="clps" ${sh.status!=='planned'&&!invSettled(sh)&&(invUnresolved(sh).length||invNegativeSold(sh).length)?'open':''}><summary>📦 Inventory Reconciliation ${sh.status!=='planned'?invStatusMeta(invStatus(sh)).i:''}</summary>
   ${sh.status!=='planned'?(()=>{
     const st=invStatus(sh),meta=invStatusMeta(st),carry=invCarryIssues(sh),neg=invNegativeSold(sh),unres=invUnresolved(sh);
     let h=`<div class="card" style="margin-top:12px;border-color:${meta.c}">
@@ -6090,7 +6133,8 @@ function rShow(){
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">📦 Daily Inventory Reconciliation</div>
         <span style="font-size:11px;font-weight:800;color:${meta.c}">${meta.i} ${meta.l}</span>
       </div>`;
-    if(unres.length||neg.length){ h+=`<div class="wb" style="background:var(--redbg);border:1px solid var(--redbd);color:#ffb3b3;margin-bottom:8px"><strong>⚠️ Inventory mismatch detected.</strong> Review before you trust these numbers.</div>`; }
+    if(invSettled(sh)&&st==='red'){ h+=`<div class="wb" style="margin-bottom:8px">🗂️ <strong>Settled by the garage recount${auditState().baseline?' on '+_esc(auditState().baseline.slice(0,10)):''}.</strong> These counts don't add up, but the recount already fixed the real stock. Nothing to do here.</div>`; }
+    else if(unres.length||neg.length){ h+=`<div class="wb" style="background:var(--redbg);border:1px solid var(--redbd);color:#ffb3b3;margin-bottom:8px"><strong>⚠️ Inventory mismatch detected.</strong> Review before you trust these numbers.</div>`; }
     h+=(sh.days||[]).map((d,i)=>{
       const hasM=!!d.morningCount,hasE=!!d.eveningCount;
       const openT=hasM?SKUS.reduce((t,s)=>t+(d.morningCount[s.key]||0),0):null;
