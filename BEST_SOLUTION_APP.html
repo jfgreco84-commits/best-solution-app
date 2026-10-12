@@ -166,6 +166,18 @@
     .ct-cnt{display:block;font-size:10px;color:var(--muted);font-weight:600}
     .ct-note{font-size:11px;color:var(--muted);margin-top:8px;text-align:center}
 
+    /* WORKLOAD TABLE */
+    .wl-r{display:grid;grid-template-columns:minmax(0,1fr) 58px 72px 64px;column-gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+    .wl-h{padding:0 0 8px}
+    .wl-h .wl-v{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;color:var(--muted)}
+    .wl-l{font-size:14px;font-weight:700;color:var(--text);line-height:1.25}
+    .wl-s{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .wl-v{text-align:right;font-size:14px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+    .wl-v.wl-t{color:var(--text);font-weight:900}
+    .wl-gold .wl-t{color:var(--gold)}
+    .wl-x{margin-top:6px}
+    .wl-note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -3928,22 +3940,22 @@ function secUnits(C){
   </div>`;
 }
 function secWorkload(C){
+  // Same numbers as before, laid out as Done / Coming up / Total so each row adds across.
+  const staffDone=(S.shows||[]).filter(sh=>!isMissed(sh)&&!isPassed(sh)&&sh.status==='completed').reduce((t,sh)=>t+staffedHours(sh),0);
+  const h=n=>fmtN(n)+'h';
+  const row=(label,sub,d,u,t,cls)=>`<div class="wl-r${cls?' '+cls:''}"><div class="wl-l">${label}<span class="wl-s">${sub}</span></div><div class="wl-v">${d}</div><div class="wl-v">${u}</div><div class="wl-v wl-t">${t}</div></div>`;
+  const missed=C.missedShows.length;
   return `<div class="card">
-    <div class="g3" style="margin-bottom:8px">
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${C.done.length}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Shows Done</div></div>
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${C.plannedCount}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Shows Planned</div></div>
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:${C.missedShows.length?'var(--red)':'var(--muted)'}">${C.missedShows.length}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Missed</div></div>
+    <div class="wl-r wl-h"><div></div><div class="wl-v" style="color:var(--green)">Done</div><div class="wl-v" style="color:var(--gold)">Coming up</div><div class="wl-v">Total</div></div>
+    ${row('Shows','booked',C.done.length,C.plannedCount,C.bookedCount)}
+    ${row('Show days','3-day show = 3',C.completedDays,C.plannedDays,C.bookedShowDays)}
+    ${row('Work hours','show hours, 1 person',h(C.completedHours),h(C.plannedHours),h(C.completedHours+C.plannedHours))}
+    ${row('Staff hours ⚡','work hours × people',h(staffDone),h(C.totalStaffedHours-staffDone),h(C.totalStaffedHours),'wl-gold')}
+    <div class="wl-x">
+      <div class="sr"><span class="srl">Your hours <span class="wl-s" style="display:inline">${C.myHoursTotal>0?'logged in Edit Show':'not logged yet · add them in Edit Show'}</span></span><span class="srv">${h(C.myHoursTotal)}</span></div>
+      ${missed?`<div class="sr"><span class="srl">Missed <span class="wl-s" style="display:inline">date passed, never started or closed out</span></span><span class="srv red">${missed} show${missed===1?'':'s'}</span></div>`:''}
     </div>
-    <div class="sr"><span class="srl b">Shows booked</span><span class="srv">${C.bookedCount}</span></div>
-    <div class="sr"><span class="srl">Booked show-days <span style="color:var(--muted)">(stacks overlaps)</span></span><span class="srv">${C.bookedShowDays}</span></div>
-    <div class="sr"><span class="srl b">Total staffed hours ⚡</span><span class="srv gold">${fmtN(C.totalStaffedHours)}h</span></div>
-    <div class="sr"><span class="srl">My hours (you)</span><span class="srv">${fmtN(C.myHoursTotal)}h</span></div>
-    <div style="height:6px"></div>
-    <div class="sr"><span class="srl">Planned show days</span><span class="srv">${C.plannedDays}</span></div>
-    <div class="sr"><span class="srl">Completed show days</span><span class="srv">${C.completedDays}</span></div>
-    <div class="sr"><span class="srl">Est. planned work hours</span><span class="srv">${fmtN(C.plannedHours)}h</span></div>
-    <div class="sr"><span class="srl">Completed work hours</span><span class="srv">${fmtN(C.completedHours)}h</span></div>
-    <div style="font-size:10px;color:var(--muted);margin-top:6px">⚡ Staffed hours = each show-day's hours × people working it (reps + you), so two shows running at once count double. "My hours" is logged per show in Edit Show.</div>
+    <div class="wl-note">⚡ Staff hours count every person. 3 people working an 8-hour day = 24 staff hours. Two shows on the same day both count.</div>
   </div>`;
 }
 function secBooth(){
