@@ -241,6 +241,47 @@
     .bs-none{font-size:11px;color:var(--muted)}
     .bs-loc{font-size:11px;color:var(--muted);margin-top:10px}
 
+    /* BOOTH COSTS */
+    .bc-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-top:2px}
+    .bc-bar{height:8px;background:var(--card2);border-radius:4px;overflow:hidden;margin-top:14px}
+    .bc-bar i{display:block;height:100%;background:var(--green)}
+    .bc-cap{font-size:11px;color:var(--muted);text-align:center;margin-top:6px}
+    .bc-hd{font-size:12px;font-weight:800;color:var(--text);text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .bc-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .bc-due{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+    .bc-due:last-child{border-bottom:none}
+    .bc-due b{font-size:14px;font-variant-numeric:tabular-nums}
+    .bc-n{font-size:13px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+    .bc-n span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .bc-list{padding-top:4px;padding-bottom:10px}
+    .bc-r{border-bottom:1px solid var(--border)}
+    .bc-r>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0}
+    .bc-r>summary::-webkit-details-marker{display:none}
+    .bc-r>summary .bc-n::before{content:'▸ ';color:var(--gold)}
+    .bc-r[open]>summary .bc-n::before{content:'▾ '}
+    .bc-v{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+    .bc-v b{font-size:14px;font-weight:900;margin-left:6px}
+    .bc-v em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:2px}
+    .bc-tag{font-size:9px;font-weight:900;letter-spacing:.05em;border-radius:4px;padding:2px 5px;vertical-align:2px}
+    .bc-paid{background:var(--greenbg);color:var(--green);border:1px solid var(--greenbd)}
+    .bc-part{background:var(--goldbg);color:var(--gold);border:1px solid var(--goldbd)}
+    .bc-owed{background:var(--redbg);color:var(--red);border:1px solid var(--redbd)}
+    .bc-free{background:var(--card2);color:var(--muted);border:1px solid var(--border)}
+    .bc-x{background:var(--card2);border-radius:8px;padding:6px 10px 10px;margin-bottom:10px}
+    .bc-l{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);padding:7px 0;border-bottom:1px solid var(--border)}
+    .bc-l>span:last-child{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+    .bc-x .bc-l{font-size:12px;padding:5px 0}
+    .bc-big{font-size:14px;color:var(--text);font-weight:800}
+    .card>.bc-l:last-child{border-bottom:none}
+    .bc-big>span:last-child{font-weight:900}
+    .bc-sh{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:10px 0 2px}
+    .bc-p{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:5px 0}
+    .bc-p i{display:block;font-style:normal;font-size:11px;opacity:.8}
+    .bc-p b{color:var(--green);font-variant-numeric:tabular-nums}
+    .bc-tot{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:800;padding-top:10px}
+    .bc-tot>span:last-child{font-variant-numeric:tabular-nums;text-align:right}
+    .bc-red{color:var(--red)}.bc-grn{color:var(--green)}.bc-gold{color:var(--gold)}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -4025,20 +4066,73 @@ function secBooth(){
   // Committed / owed are forward-looking, so a passed show is not in them.
   // Anything already PAID on a passed show is real money gone, and gets its own
   // sunk-cost line below rather than quietly disappearing.
-  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed'&&!isPassed(sh)).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const passedSunk=(S.shows||[]).filter(sh=>isPassed(sh)).reduce((t,sh)=>t+boothPaid(sh),0);
+  const byDate=(a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0;
+  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed'&&!isPassed(sh)).sort(byDate);
+  const passed=(S.shows||[]).filter(sh=>isPassed(sh)&&boothPaid(sh)>0.005).sort(byDate);
+  const passedSunk=passed.reduce((t,sh)=>t+boothPaid(sh),0);
+  const doneShows=(S.shows||[]).filter(sh=>sh.status==='completed'&&!isPassed(sh)).sort(byDate).reverse();
   const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
   const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
   const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
   const unpaidList=allUpcoming.filter(sh=>boothBalance(sh)>0.01);
+  const doneBooth=doneShows.reduce((t,sh)=>t+calcShow(sh).booth,0);
+  const doneGross=doneShows.reduce((t,sh)=>t+calcShow(sh).gross,0);
+  const seasonSpent=doneBooth+totalBoothPaidSeason+passedSunk;
+  const paidPct=totalBoothCommitted>0?Math.min(100,Math.round(totalBoothPaidSeason/totalBoothCommitted*100)):100;
+  const dates=sh=>sh.dates&&sh.dates.length?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+  const dfmt=d=>(typeof csFmtDate==='function'?csFmtDate(d):d)||'no date';
+  const days=sh=>sh.numDays||(sh.days||[]).length||1;
+  const pays=sh=>(sh.boothPayments||[]).length?(sh.boothPayments||[]).map(p=>`<div class="bc-p"><span>${_esc(dfmt(p.date))}${p.note?`<i>${_esc(p.note)}</i>`:''}</span><b>${fmt(parseFloat(p.amount)||0)}</b></div>`).join(''):'<div class="bc-p"><span>No payments logged yet</span></div>';
+  const tag=sh=>{const c=sh.boothCost||0,pd=boothPaid(sh);
+    if(c<=0.005&&pd<=0.005)return '<span class="bc-tag bc-free">FREE</span>';
+    if(boothBalance(sh)<=0.01)return '<span class="bc-tag bc-paid">PAID</span>';
+    return pd>0.005?'<span class="bc-tag bc-part">PARTIAL</span>':'<span class="bc-tag bc-owed">NOT PAID</span>';};
+  const line=(l,v)=>`<div class="bc-l"><span>${l}</span><span>${v}</span></div>`;
+  const upRows=allUpcoming.map(sh=>{const c=sh.boothCost||0,pd=boothPaid(sh),bal=boothBalance(sh);
+    return `<details class="bc-r"><summary><div class="bc-n">${_esc(sh.name)}<span>${dates(sh)}${sh.status==='active'?' · LIVE':''}</span></div>
+        <div class="bc-v">${tag(sh)}<b>${fmt(c)}</b>${bal>0.01?`<em class="bc-red">${fmt(bal)} owed</em>`:''}</div></summary>
+      <div class="bc-x">
+        ${line('Booth price',fmt(c))}${line('Paid so far',`<span class="bc-grn">${fmt(pd)}</span>`)}${line('Balance',bal>0.01?`<span class="bc-red">${fmt(bal)}</span>`:'<span class="bc-grn">$0.00</span>')}
+        ${line('Show days',days(sh))}${c>0?line('Booth cost per day',fmt(c/days(sh))):''}
+        ${pd>c+0.01?line('Paid over sticker',`<span class="bc-red">${fmt(pd-c)}</span>`):''}
+        <div class="bc-sh">Payments</div>${pays(sh)}
+        ${bal>0.01?`<button class="btn btn-green btn-full" style="margin-top:8px" onclick="openBoothPmt('${sh.id}')">+ Log a payment</button>`:''}
+      </div></details>`;}).join('');
+  const doneRows=doneShows.map(sh=>{const t=calcShow(sh),pc=t.gross>0?Math.round(t.booth/t.gross*100):null;
+    return `<details class="bc-r"><summary><div class="bc-n">${_esc(sh.name)}<span>${dates(sh)}</span></div>
+        <div class="bc-v"><b>${fmt(t.booth)}</b><em>${pc!=null?pc+'% of '+fmt(t.gross)+' gross':'no sales logged'}</em></div></summary>
+      <div class="bc-x">
+        ${line('Booth price',fmt(sh.boothCost||0))}${line('Paid',fmt(boothPaid(sh)))}
+        ${line('Booth booked in P&amp;L',fmt(t.booth))}${line('Show days',days(sh))}${line('Booth cost per day',fmt(t.booth/days(sh)))}
+        ${line('Gross collected',`<span class="bc-gold">${fmt(t.gross)}</span>`)}${t.booth>0?line('Gross per $1 of booth',fmt(t.gross/t.booth)):''}
+        <div class="bc-sh">Payments</div>${pays(sh)}
+      </div></details>`;}).join('');
+  const passRows=passed.map(sh=>`<div class="bc-l"><span>${_esc(sh.name)} <i style="font-style:normal;color:var(--muted)">${dates(sh)}</i></span><span style="color:#FFA500">${fmt(boothPaid(sh))}</span></div>`).join('');
   return `<div class="card">
-    <div class="g3" style="margin-bottom:${unpaidList.length?10:0}px">
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Total Committed</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Paid</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
+    <div class="g3">
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div class="bc-k">Committed</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div class="bc-k">Paid</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div class="bc-k">Still owed</div></div>
     </div>
-    ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
-    ${passedSunk>0.005?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">🚫 Not counted above: <strong style="color:#FFA500">${fmt(passedSunk)}</strong> already paid on shows marked Passed / Not Doing. That money is spent and still counts in the P&amp;L — it is just no longer a booking commitment.</div>`:''}
+    <div class="bc-bar"><i style="width:${paidPct}%"></i></div>
+    <div class="bc-cap">${paidPct}% paid on ${allUpcoming.length} upcoming show${allUpcoming.length===1?'':'s'} · ${unpaidList.length} still owe${unpaidList.length===1?'s':''} money</div>
+  </div>
+  ${unpaidList.length?`<div class="bc-hd">💸 Pay these next</div><div class="card">${unpaidList.map(sh=>`<div class="bc-due"><div class="bc-n">${_esc(sh.name)}<span>${dates(sh)} · ${fmt(boothPaid(sh))} of ${fmt(sh.boothCost||0)} paid</span></div><b class="bc-red">${fmt(boothBalance(sh))}</b><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div>`).join('')}</div>`
+    :'<div class="card" style="text-align:center;color:var(--green);font-size:13px;font-weight:700">✅ All booth fees paid</div>'}
+  ${allUpcoming.length?`<div class="bc-hd">📅 Upcoming shows <span>tap for payments</span></div><div class="card bc-list">${upRows}
+    <div class="bc-tot"><span>Upcoming total</span><span>${fmt(totalBoothPaidSeason)} paid of ${fmt(totalBoothCommitted)}</span></div></div>`:''}
+  ${doneShows.length?`<div class="bc-hd">✅ Completed shows <span>booth vs sales</span></div><div class="card bc-list">${doneRows}
+    <div class="bc-tot"><span>Completed total</span><span>${fmt(doneBooth)}${doneGross>0?` · ${Math.round(doneBooth/doneGross*100)}% of gross`:''}</span></div></div>`:''}
+  ${passed.length?`<div class="bc-hd">🚫 Passed / Not Doing <span>money already spent</span></div><div class="card">${passRows}
+    <div class="bc-cap" style="text-align:left;margin-top:8px">Not in Committed above. That money is spent and still counts in the P&amp;L; it's just no longer a booking.</div></div>`:''}
+  <div class="bc-hd">🧾 Whole season</div>
+  <div class="card">
+    ${line('Booth on completed shows',fmt(doneBooth))}
+    ${line('Paid toward upcoming shows',fmt(totalBoothPaidSeason))}
+    ${passedSunk>0.005?line('Paid on passed shows',fmt(passedSunk)):''}
+    <div class="bc-l bc-big"><span>Spent on booths so far</span><span>${fmt(seasonSpent)}</span></div>
+    ${totalBoothOwed>0.005?line('Still to pay',`<span class="bc-red">${fmt(totalBoothOwed)}</span>`):''}
+    <div class="bc-l bc-big"><span>Season booth total</span><span>${fmt(seasonSpent+totalBoothOwed)}</span></div>
   </div>`;
 }
 function secExpenses(C){
