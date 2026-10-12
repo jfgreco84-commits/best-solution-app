@@ -364,6 +364,42 @@
     .ex-tot{border-top:2px solid var(--border);margin-top:6px;padding-top:9px}
     .ex-note{font-size:11px;color:var(--muted);margin-top:8px}
 
+    /* MASTER INVENTORY */
+    .iv-top{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;text-align:center}
+    .iv-top span,.iv-hero span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+    .iv-top b{display:block;font-size:17px;font-weight:900;margin-top:2px;font-variant-numeric:tabular-nums}
+    .iv-hero{text-align:center;background:var(--greenbg);border:1px solid var(--greenbd);border-radius:10px;padding:10px;margin-top:12px}
+    .iv-hero b{display:block;font-size:24px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums;margin:2px 0}
+    .iv-hero em{font-style:normal;font-size:11px;color:var(--muted)}
+    .iv-btns{margin-top:10px;display:grid}
+    .iv-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .iv-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .iv-h,.iv-r>summary,.iv-t{display:grid;grid-template-columns:minmax(0,1fr) 44px 78px 84px;gap:6px;align-items:center}
+    .iv-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800;padding-bottom:6px;border-bottom:1px solid var(--border)}
+    .iv-r{border-bottom:1px solid var(--border)}
+    .iv-r>summary{list-style:none;cursor:pointer;padding:10px 0}
+    .iv-r>summary::-webkit-details-marker{display:none}
+    .iv-n{font-size:14px;font-weight:800}
+    .iv-r .iv-n::before{content:'▸ ';color:var(--gold)}
+    .iv-r[open] .iv-n::before{content:'▾ '}
+    .iv-n>span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .iv-q,.iv-v{text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .iv-h .iv-q,.iv-h .iv-v{font-size:10px}
+    .iv-t{border-top:2px solid var(--border);padding-top:10px;margin-top:2px}
+    .iv-t>div{font-weight:900}
+    .iv-x{background:var(--card2);border-radius:8px;padding:4px 10px 10px;margin-bottom:10px}
+    .iv-sh{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:10px 0 2px}
+    .iv-l{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:5px 0;border-bottom:1px solid var(--border)}
+    .iv-l>span:last-child{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .iv-l em{font-style:normal;color:var(--muted);font-size:11px}
+    .card>.iv-l{font-size:13px;padding:7px 0}
+    .iv-gold{color:var(--gold)!important}.iv-grn{color:var(--green)}.iv-red{color:var(--red)!important}
+    .iv-warn{font-size:13px;color:var(--gold);padding-bottom:6px}
+    .iv-note{font-size:11px;color:var(--muted);margin-top:8px}
+    .iv-ex p{font-size:12px;color:var(--muted);line-height:1.5;margin:0 0 8px}
+    .iv-ex p:last-child{margin:0}
+    .iv-ex b{color:var(--text)}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -4337,21 +4373,60 @@ function secPayments(C){
     </div>`;
 }
 function secInventory(C){
-  return `<div class="sec-row"><div class="sec-lbl" style="margin:0">SNAPSHOT</div><button class="btn btn-ghost btn-xs" onclick="go('stock')">Manage →</button></div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;margin-bottom:12px">
-      <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Total Units</div><div style="font-size:24px;font-weight:900;color:var(--gold)">${C.invUnits}</div></div>
-      <div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:20px;font-weight:900">${fmt(C.invCost)}</div></div>
-      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</div></div>
+  // Selling pace = units sold per selling show this season, so "shows left" is an estimate, not a promise.
+  const nSell=(C.sellShows||[]).length;
+  const upcoming=C.plannedCount||0;
+  const rows=SKUS.map(s=>{const q=S.inventory[s.key]||0,c=getCost(s.key),pr=getP(s.key),sold=(C.ytd.units||{})[s.key]||0,pace=nSell?sold/nSell:0;
+    return {s,q,c,pr,sold,pace,left:pace>0?q/pace:null,need:Math.max(0,Math.ceil(pace*upcoming-q))};});
+  const margin=C.invRetail-C.invCost;
+  const mPct=C.invRetail>0?Math.round(margin/C.invRetail*100):0;
+  const fx=n=>n==null?'—':n>=10?Math.round(n):n.toFixed(1);
+  const lowest=rows.filter(r=>r.left!=null).sort((a,b)=>a.left-b.left)[0];
+  const needs=rows.filter(r=>r.need>0);
+  const ln=(l,v)=>`<div class="iv-l"><span>${l}</span><span>${v}</span></div>`;
+  const prod=rows.map(r=>{const low=r.q<5;const unitM=r.pr-r.c;
+    return `<details class="iv-r"><summary>
+        <div class="iv-n">${r.s.emoji} ${r.s.short}${low?' <span class="chip red" style="font-size:9px;padding:1px 5px">LOW</span>':''}<span>${r.left==null?'no sales yet':'≈ '+fx(r.left)+' shows left'}</span></div>
+        <div class="iv-q${low?' iv-red':''}">${fmtN(r.q)}</div><div class="iv-v">${fmt(r.q*r.c)}</div><div class="iv-v iv-gold">${fmt(r.q*r.pr)}</div></summary>
+      <div class="iv-x">
+        <div class="iv-sh">Per bottle</div>
+        ${ln('You pay (cost)',fmt(r.c))}${ln('You sell it for',fmt(r.pr))}${ln('You make per bottle',`<b class="iv-grn">${fmt(unitM)}</b> <em>${r.pr>0?Math.round(unitM/r.pr*100):0}% margin</em>`)}
+        <div class="iv-sh">This product on the shelf</div>
+        ${ln('Bottles on hand',fmtN(r.q))}${ln('Cost of those bottles',fmt(r.q*r.c))}${ln('If all sell at full price',`<span class="iv-gold">${fmt(r.q*r.pr)}</span>`)}${ln('Profit locked in the stock',`<b class="iv-grn">${fmt(r.q*unitM)}</b>`)}
+        <div class="iv-sh">Selling pace</div>
+        ${ln('Sold this season',fmtN(r.sold)+' bottles')}${ln('Average per show',nSell?fx(r.pace):'—')}${ln('Stock lasts about',r.left==null?'—':fx(r.left)+' shows')}
+        ${upcoming?ln(`Need for ${upcoming} booked show${upcoming===1?'':'s'}`,r.pace?fmtN(Math.ceil(r.pace*upcoming))+' bottles':'—'):''}
+        ${r.need>0?ln('Short by','<b class="iv-red">'+fmtN(r.need)+' bottles</b>'):''}
+        ${ln('Share of your stock',`${C.invUnits?Math.round(r.q/C.invUnits*100):0}% of bottles · ${C.invRetail?Math.round(r.q*r.pr/C.invRetail*100):0}% of retail value`)}
+      </div></details>`;}).join('');
+  return `<div class="card">
+      <div class="iv-top">
+        <div><span>Bottles on hand</span><b class="iv-gold">${fmtN(C.invUnits)}</b></div>
+        <div><span>What you paid</span><b>${fmt(C.invCost)}</b></div>
+        <div><span>Full-price value</span><b class="iv-gold">${fmt(C.invRetail)}</b></div>
+      </div>
+      <div class="iv-hero"><span>Profit sitting on the shelf</span><b>${fmt(margin)}</b><em>${mPct}% margin if every bottle sells at full price</em></div>
+      <div class="iv-btns"><button class="btn btn-ghost" onclick="go('stock')">Manage stock →</button></div>
     </div>
-    <table class="inv-table">
-      <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
-      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:10px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*getCost(s.key))}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
-      <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${C.invUnits}</td><td style="font-weight:900">${fmt(C.invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</td></tr>
-    </table>
-    ${C.lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${C.lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
-    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Potential margin on current stock: <strong style="color:var(--green)">${fmt(C.invRetail-C.invCost)}</strong></div>
-  </div>`;
+    ${C.lowStock.length||needs.length?`<div class="iv-hd">⚠️ Restock watch</div><div class="card">
+      ${C.lowStock.length?`<div class="iv-warn">Under 5 left: <b>${C.lowStock.map(s=>s.short+' ('+(S.inventory[s.key]||0)+')').join(', ')}</b></div>`:''}
+      ${needs.map(r=>ln(`${r.s.emoji} ${r.s.short} for the ${upcoming} booked show${upcoming===1?'':'s'}`,`<b class="iv-red">order ~${fmtN(r.need)}</b>`)).join('')}
+      <div class="iv-note">Based on your average sold per show this season. Bigger shows sell more.</div></div>`:''}
+    <div class="iv-hd">By product <span>tap for the detail</span></div>
+    <div class="card">
+      <div class="iv-h"><div>Product</div><div class="iv-q">Qty</div><div class="iv-v">Cost</div><div class="iv-v">Retail</div></div>
+      ${prod}
+      <div class="iv-t"><div class="iv-n">Total</div><div class="iv-q">${fmtN(C.invUnits)}</div><div class="iv-v">${fmt(C.invCost)}</div><div class="iv-v iv-gold">${fmt(C.invRetail)}</div></div>
+      ${lowest?`<div class="iv-note">First to run out: <b>${lowest.s.short}</b>, about ${fx(lowest.left)} show${lowest.left===1?'':'s'} of stock at your current pace.</div>`:''}
+    </div>
+    <div class="iv-hd">What these numbers mean</div>
+    <div class="card iv-ex">
+      <p><b>Bottles on hand</b> is what's counted in your master (garage) inventory right now.</p>
+      <p><b>What you paid</b> (cost basis) is bottles × what each one cost you. It's the money tied up in stock.</p>
+      <p><b>Full-price value</b> (retail) is bottles × your selling price. It's what you'd take in if everything sold with no discounts.</p>
+      <p><b>Profit on the shelf</b> is the difference. Discounts, freebies and show costs come out of it, so real profit lands lower.</p>
+      <p><b>Shows left</b> divides bottles on hand by your average sold per show this season${nSell?` (${nSell} selling show${nSell===1?'':'s'})`:''}.</p>
+    </div>`;
 }
 function secMileage(C){
   if(!(C.ytd.miles>0))return '';
