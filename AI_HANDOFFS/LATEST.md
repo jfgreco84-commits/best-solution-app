@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v72 Previous Years, Oct 10 2026](2026-10-10-v72-previous-years.md)** (every show screen shows the same show in earlier years, per size and per day)
+**NEWEST: [v73 Burgoo restock repair, Oct 11 2026](2026-10-11-v73-burgoo-restock-fix.md)** (Day 2 restock 33/33 F37, 24/24 Jamie's Outpost, set right on load)
 
-**Previous: [v71 A Fair to Remember, Oct 3 2026](2026-10-03-v71-fair-to-remember.md)** (Fall Oct 23-24 + Christmas Dec 12 shows added)
+**Previous: [v72 Previous Years, Oct 10 2026](2026-10-10-v72-previous-years.md)** (every show screen shows the same show in earlier years, per size and per day)
+
+**Before that: [v71 A Fair to Remember, Oct 3 2026](2026-10-03-v71-fair-to-remember.md)** (Fall Oct 23-24 + Christmas Dec 12 shows added)
 
 **Before that: [v70 sync safety, Oct 1 2026](2026-10-01-v70-sync-safety.md)** (failed cloud read no longer uploads the device copy; draft, not deployed)
 
