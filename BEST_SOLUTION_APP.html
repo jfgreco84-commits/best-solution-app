@@ -201,6 +201,46 @@
     .mi-t{border-top:2px solid var(--border);padding-top:11px;margin-top:2px}
     .mi-t .mi-n{font-size:14px;font-weight:800}.mi-t .mi-v{font-size:13px;font-weight:900}
 
+    /* TOP 10 SHOWS */
+    .bs-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+    .bs-sum b{display:block;font-size:18px;font-weight:900;font-variant-numeric:tabular-nums}
+    .bs-sum span,.bs-k span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-top:2px}
+    .bs-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 6px}
+    .bs-tab{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:9px 0;font-size:12px;font-weight:800;cursor:pointer}
+    .bs-tab.on{background:var(--goldbg);border-color:var(--goldbd);color:var(--gold)}
+    .bs-note{font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px}
+    .bs-c{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
+    .bs-c[open]{border-color:var(--goldbd)}
+    .bs-c>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px 14px}
+    .bs-c>summary::-webkit-details-marker{display:none}
+    .bs-rk{width:28px;height:28px;border-radius:50%;background:var(--card3);color:var(--muted);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center}
+    .bs-m1{background:#FFD700;color:#000}.bs-m2{background:#C0C0C0;color:#000}.bs-m3{background:#CD7F32;color:#000}
+    .bs-nm{font-size:14px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+    .bs-mt{font-size:11px;color:var(--muted);margin-top:2px}
+    .bs-pf{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+    .bs-pf b{display:block;font-size:15px;font-weight:900}
+    .bs-pf span{display:block;font-size:11px;color:var(--muted)}
+    .bs-b{padding:0 14px 14px;border-top:1px solid var(--border)}
+    .bs-k{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px}
+    .bs-k>div{background:var(--card2);border-radius:8px;padding:8px 4px;text-align:center}
+    .bs-k b{font-size:14px;font-weight:900;font-variant-numeric:tabular-nums}
+    .bs-sh{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:14px 0 4px}
+    .bs-l{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--border)}
+    .bs-l>span:last-child{color:var(--text);font-variant-numeric:tabular-nums}
+    .bs-tot{border-top:2px solid var(--border);border-bottom:none;font-weight:800;color:var(--text);padding-top:8px;font-size:14px}
+    .bs-gold{color:var(--gold)}
+    .bs-us{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+    .bs-u{background:var(--card2);border-radius:8px;padding:6px 0;text-align:center}
+    .bs-u b{display:block;font-size:14px;font-weight:900;color:var(--gold)}
+    .bs-u span{font-size:10px;color:var(--muted);font-weight:700}
+    .bs-bar{display:grid;grid-template-columns:64px 1fr auto;gap:8px;align-items:center;font-size:12px;padding:4px 0;color:var(--muted)}
+    .bs-bar>div{height:8px;background:var(--card2);border-radius:4px;overflow:hidden}
+    .bs-bar i{display:block;height:100%;background:var(--green);border-radius:4px}
+    .bs-bar>span:last-child{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+    .bs-bar em{font-style:normal;color:var(--muted);font-weight:400;font-size:11px}
+    .bs-none{font-size:11px;color:var(--muted)}
+    .bs-loc{font-size:11px;color:var(--muted);margin-top:10px}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -4114,13 +4154,77 @@ function secMileage(C){
     </div>`;
 }
 function secBest(C){
-  let h='';
-  if(C.bestGross||C.bestProfit){
-    if(C.bestGross)h+=bestShowCardHTML(C.bestGross,'🥇 Highest Grossing Show');
-    if(C.bestProfit&&C.bestProfit!==C.bestGross)h+=bestShowCardHTML(C.bestProfit,'💰 Highest Profit Show');
-    else if(C.bestProfit&&C.bestProfit===C.bestGross)h+=`<div style="font-size:11px;color:var(--muted);margin:-2px 0 8px;text-align:center">Same show is both highest grossing and highest profit.</div>`;
-  }
-  return h;
+  // Top 10 completed shows. Every show is rendered once; the sort tabs reorder them and show the first 10.
+  const shows=(C.done||[]).map(sh=>{
+    const t=calcShow(sh),u=showUnitsSold(sh),p=showPmtTotals(sh);
+    const days=sh.numDays||(sh.days||[]).length||1;
+    const units=SKUS.reduce((n,k)=>n+(u[k.key]||0),0);
+    const hrs=(typeof showWorkHoursTotal==='function')?showWorkHoursTotal(sh):0;
+    return {sh,t,u,p,days,units,hrs,margin:t.gross>0?t.profit/t.gross:0,perDay:t.profit/days};
+  });
+  if(!shows.length)return '';
+  const seasonProfit=shows.reduce((n,x)=>n+x.t.profit,0);
+  const pct=n=>Math.round(n*100)+'%';
+  const dateStr=sh=>sh.dates&&sh.dates.length?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+  const ln=(l,v,cls)=>`<div class="bs-l${cls?' '+cls:''}"><span>${l}</span><span>${v}</span></div>`;
+  const neg=n=>n>0.005?'−'+fmt(n):fmt(0);
+  const cards=shows.map(x=>{
+    const {sh,t,u,p}=x;
+    const other=Math.max(0,t.expenses-t.booth-t.repPay-t.workerPay-t.supplyCost-t.cardFees-t.gasAuto-(sh.lodging||0));
+    const money=[
+      ln('Gross collected','<b class="bs-gold">'+fmt(t.gross)+'</b>'),
+      t.salesTax>0?ln('Sales tax (state’s cut)',neg(t.salesTax)):'',
+      ln('Product cost',neg(t.cogs)),
+      ln('Booth',neg(t.booth)),
+      t.repPay>0?ln('Rep pay',neg(t.repPay)):'',
+      t.workerPay>0?ln('Worker pay',neg(t.workerPay)):'',
+      t.gasAuto>0?ln('Gas (estimate)',neg(t.gasAuto)):'',
+      (sh.lodging||0)>0?ln('Lodging',neg(sh.lodging)):'',
+      t.supplyCost>0?ln('Bags & supplies',neg(t.supplyCost)):'',
+      t.cardFees>0?ln('Card fees',neg(t.cardFees)):'',
+      other>0.005?ln('Other expenses',neg(other)):'',
+      ln('Net profit',`<b style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</b>`,'bs-tot')
+    ].join('');
+    const pg=PMTS.reduce((n,k)=>n+(p[k.key]||0),0);
+    const pay=PMTS.filter(k=>(p[k.key]||0)>0).sort((a,b)=>p[b.key]-p[a.key]).map(k=>`<div class="bs-bar"><span>${k.label}</span><div><i style="width:${pg?Math.round(p[k.key]/pg*100):0}%"></i></div><span>${fmt(p[k.key])} <em>${pg?pct(p[k.key]/pg):''}</em></span></div>`).join('')||'<div class="bs-none">No payment data</div>';
+    const un=SKUS.filter(k=>(u[k.key]||0)>0).map(k=>`<div class="bs-u"><b>${u[k.key]}</b><span>${k.short}</span></div>`).join('')||'<div class="bs-none">No unit data</div>';
+    return `<details class="bs-c" data-profit="${t.profit}" data-gross="${t.gross}" data-perday="${x.perDay}" data-margin="${x.margin}"><summary>
+        <div class="bs-rk">#</div>
+        <div class="bs-hd"><div class="bs-nm">${_esc(sh.name)}</div><div class="bs-mt">${[dateStr(sh),x.days+' day'+(x.days===1?'':'s'),pct(x.margin)+' margin'].filter(Boolean).join(' · ')}</div></div>
+        <div class="bs-pf"><b style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</b><span>${fmt(t.gross)} gross</span></div>
+      </summary><div class="bs-b">
+        <div class="bs-k">
+          <div><b>${fmt(x.perDay)}</b><span>Profit / day</span></div>
+          <div><b>${fmt(t.gross/x.days)}</b><span>Gross / day</span></div>
+          <div><b>${x.hrs>0?fmt(t.profit/x.hrs):'—'}</b><span>Profit / hour</span></div>
+          <div><b>${fmtN(x.units)}</b><span>Units sold</span></div>
+          <div><b>${x.units?fmt(t.gross/x.units):'—'}</b><span>Avg / unit</span></div>
+          <div><b>${seasonProfit>0?pct(t.profit/seasonProfit):'—'}</b><span>Of season profit</span></div>
+        </div>
+        <div class="bs-sh">Where the money went</div>${money}
+        <div class="bs-sh">Units sold</div><div class="bs-us">${un}</div>
+        <div class="bs-sh">How they paid</div>${pay}
+        ${sh.location?`<div class="bs-loc">📍 ${_esc(sh.location)}</div>`:''}
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="go('show','${sh.id}')">Open show →</button>
+      </div></details>`;
+  }).join('');
+  const tabs=[['profit','Profit'],['gross','Gross'],['perday','$ / day'],['margin','Margin']].map(([k,l],i)=>`<button class="bs-tab${i?'':' on'}" onclick="bestSort(this,'${k}')">${l}</button>`).join('');
+  const top=shows.slice().sort((a,b)=>b.t.profit-a.t.profit).slice(0,10);
+  const topProfit=top.reduce((n,x)=>n+x.t.profit,0);
+  return `<div class="card bs-sum">
+      <div><b>${shows.length}</b><span>Shows done</span></div>
+      <div><b style="color:var(--green)">${fmt(seasonProfit)}</b><span>Season profit</span></div>
+      <div><b>${seasonProfit>0?pct(topProfit/seasonProfit):'—'}</b><span>From top ${top.length}</span></div>
+    </div>
+    <div class="bs-tabs">${tabs}</div>
+    <div class="bs-note">Tap a show for the full breakdown</div>
+    <div id="bsList">${cards}</div>`;
+}
+function bestSort(btn,key){
+  const list=document.getElementById('bsList'); if(!list)return;
+  (btn&&btn.parentNode?btn.parentNode.querySelectorAll('.bs-tab'):[]).forEach(b=>b.classList.toggle('on',b===btn));
+  const cs=[...list.querySelectorAll('.bs-c')].sort((a,b)=>parseFloat(b.dataset[key])-parseFloat(a.dataset[key]));
+  cs.forEach((c,i)=>{ list.appendChild(c); c.style.display=i<10?'':'none'; const r=c.querySelector('.bs-rk'); r.textContent=i+1; r.className='bs-rk'+(i<3?' bs-m'+(i+1):''); });
 }
 // ---- BORROWED FROM BATMAN ----
 // batmanBorrow is the debt. + Borrowed More / - Returned also move the garage,
@@ -4284,7 +4388,7 @@ function dashSectionGrid(){
     })()},
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
-    {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
+    {k:'best',icon:'🏆',label:'Top 10 Shows',sub:'Ranked by profit, gross, $/day'},
     {k:'batman',icon:'🦇',label:'Borrowed from Batman',sub:bmBottles()+' bottles owed · '+fmt(bmRetail())},
     {k:'online',icon:'📮',label:'Online Sales',sub:(function(){ const T=olTotals(); return T.orders+' order'+(T.orders!==1?'s':'')+' · '+fmt(T.amount); })()}
   ];
@@ -4309,7 +4413,7 @@ function rSection(){
     debt:{t:'Product Debt — '+((S.productDebt||{}).supplier||'Mark Martone'),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
     payments:{t:'Payment Breakdown (YTD)',f:secPayments},
-    best:{t:'Best Shows This Season',f:secBest},
+    best:{t:'Top 10 Shows This Season',f:secBest},
     batman:{t:'Borrowed from Batman',f:secBatman},
     online:{t:'Online Sales',f:secOnline}
   };
@@ -4320,6 +4424,7 @@ function rSection(){
   h+=(body&&body.trim())?body:`<div class="card" style="text-align:center;color:var(--muted)">No data for this section yet.</div>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin:16px 0 8px" onclick="go('home')">← Back to Dashboard</button>`;
   setPG('section',h);
+  if(curSection==='best')bestSort(document.querySelector('.bs-tab'),'profit');
 }
 
 // ===================================================
