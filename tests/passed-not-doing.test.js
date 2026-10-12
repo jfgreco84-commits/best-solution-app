@@ -23,6 +23,12 @@ const R=reporter();
 const H=boot();
 if(H.bootError){ console.log('BOOT FAILED: '+H.bootError.stack); process.exit(1); }
 const C=H.ctx;
+// The package sections below replay real shows (Cranberry Fest Sep 25, The
+// Last Fling Aug 30) and assert they are still upcoming, which was true the
+// day this suite was written. Pin the app's clock to that day so the suite
+// keeps testing the same thing instead of rotting as the calendar moves.
+H.run(`(()=>{ const R=Date, T=new R('2026-08-26T12:00:00').getTime();
+  Date=class extends R{ constructor(...a){ a.length?super(...a):super(T); } static now(){ return T; } }; })();`);
 
 // ---- fixture builders -------------------------------------------------
 // Dates are computed from the app's own _todayKey() so the suite does not rot.
