@@ -255,8 +255,11 @@ R.section('=== NO UNRELATED DATA TOUCHED ===');
   // migration's marker, and boot again. Every other migration is already
   // marked, so the single thing that runs is the invoice split. Anything that
   // moves outside productDebt was moved by it.
-  const before=JSON.parse(JSON.stringify(C.S));
-  const wound=JSON.parse(JSON.stringify(C.S));
+  // A fresh install converges over two loads: a few later migrations look for
+  // shows that an earlier step seeds in the same pass. Reload once so the
+  // control really has run every migration, as a real device has.
+  const before=JSON.parse(JSON.stringify(boot({dd_bs_v7:JSON.stringify(C.S)}).ctx.S));
+  const wound=JSON.parse(JSON.stringify(before));
   delete wound._applied['mm_sequential_invoices_v1'];
   wound.productDebt=JSON.parse(JSON.stringify(legacyState(C).productDebt));
   const after=boot({dd_bs_v7:JSON.stringify(wound)}).ctx.S;
