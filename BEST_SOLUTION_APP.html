@@ -282,6 +282,51 @@
     .bc-tot>span:last-child{font-variant-numeric:tabular-nums;text-align:right}
     .bc-red{color:var(--red)}.bc-grn{color:var(--green)}.bc-gold{color:var(--gold)}
 
+    /* PAYMENT BREAKDOWN */
+    .pm-hero{text-align:center;margin-bottom:12px}
+    .pm-hero span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+    .pm-hero b{display:block;font-size:28px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums;margin:2px 0}
+    .pm-hero em{font-style:normal;font-size:11px;color:var(--muted)}
+    .pm-bar{display:flex;gap:2px;border-radius:7px;overflow:hidden;background:var(--card2)}
+    .pm-bar i{display:block;min-width:2px}
+    .pm-split{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px;text-align:center}
+    .pm-split>div{background:var(--card2);border-radius:8px;padding:8px 4px}
+    .pm-split b{display:block;font-size:18px;font-weight:900}
+    .pm-split span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:.05em}
+    .pm-split em{display:block;font-style:normal;font-size:12px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+    .pm-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .pm-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .pm-th,.pm-tr{display:grid;grid-template-columns:minmax(0,1fr) 92px 50px 46px;gap:6px;align-items:center}
+    .pm-th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800;padding-bottom:6px;border-bottom:1px solid var(--border)}
+    .pm-th span:not(:first-child),.pm-tr span:not(:first-child){text-align:right}
+    .pm-tr{font-size:13px;padding:9px 0 0;font-variant-numeric:tabular-nums}
+    .pm-tr span:first-child{font-weight:700}
+    .pm-tr span:nth-child(3),.pm-tr span:nth-child(4){color:var(--muted)}
+    .pm-mini{grid-column:1/-1;height:4px;background:var(--card2);border-radius:2px;overflow:hidden;margin-bottom:6px}
+    .pm-mini i{display:block;height:100%}
+    .pm-ttl{border-top:2px solid var(--border);margin-top:4px;padding-top:10px;font-weight:900}
+    .pm-ttl span{color:var(--text)!important}
+    .pm-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:0}
+    .pm-l{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);padding:7px 0;border-bottom:1px solid var(--border)}
+    .pm-l>span:last-child{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .pm-l em{font-style:normal;color:var(--muted);font-size:11px}
+    .pm-tot{border-top:2px solid var(--border);border-bottom:none;color:var(--text);font-weight:800;font-size:14px;padding-top:9px}
+    .pm-tot>span:last-child{font-weight:900}
+    .pm-red{color:var(--red)}
+    .pm-note{font-size:11px;color:var(--muted);margin-top:8px}
+    .pm-list{padding-top:4px}
+    .pm-r{border-bottom:1px solid var(--border)}
+    .pm-r>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 0}
+    .pm-r>summary::-webkit-details-marker{display:none}
+    .pm-r>summary b{font-size:14px;font-weight:900;font-variant-numeric:tabular-nums}
+    .pm-r>summary .pm-bar{grid-column:1/-1}
+    .pm-n{font-size:13px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+    .pm-n::before{content:'▸ ';color:var(--gold)}
+    .pm-r[open] .pm-n::before{content:'▾ '}
+    .pm-n span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .pm-x{background:var(--card2);border-radius:8px;padding:4px 10px 10px;margin-bottom:10px}
+    .pm-x .pm-l{font-size:12px;padding:6px 0}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -4171,18 +4216,58 @@ function secSplit(C){
 }
 function secPayments(C){
   if(!(C.pmtGrand>0))return '';
-  const pmtHasData=PMTS.filter(p=>(C.ytd.pmtTotals[p.key]||0)>0);
+  const T=C.ytd.pmtTotals, G=C.pmtGrand;
+  const pct=v=>G>0?Math.round(v/G*100):0;
+  const used=PMTS.filter(p=>(T[p.key]||0)>0).sort((a,b)=>T[b.key]-T[a.key]);
+  const card=PMTS.filter(p=>p.commRate===COMM_CARD).reduce((n,p)=>n+(T[p.key]||0),0);
+  const cash=T.cash||0, apps=G-cash-card;
+  // Same shows calcYTD counts (completed + running), newest first.
+  const shows=(S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').map(sh=>{const p=showPmtTotals(sh);return{sh,p,tot:PMTS.reduce((n,k)=>n+(p[k.key]||0),0)};}).filter(x=>x.tot>0).sort((a,b)=>showSortKey(a.sh)<showSortKey(b.sh)?1:-1);
+  const showsUsing=k=>shows.filter(x=>(x.p[k]||0)>0).length;
+  const bar=(vals,h)=>`<div class="pm-bar" style="height:${h}px">${vals.filter(([v])=>v>0).map(([v,c,tot])=>`<i style="flex:${v};background:${c}" title="${Math.round(v/tot*100)}%"></i>`).join('')}</div>`;
+  const ln=(l,v,cls)=>`<div class="pm-l${cls?' '+cls:''}"><span>${l}</span><span>${v}</span></div>`;
+  const fees=C.ytd.cardFees||0, stax=C.ytd.salesTax||0;
+  const best=k=>shows.slice().sort((a,b)=>(b.p[k]||0)-(a.p[k]||0))[0];
+  const topCash=best('cash');
+  const cardShare=x=>x.tot>0?PMTS.filter(p=>p.commRate===COMM_CARD).reduce((n,p)=>n+(x.p[p.key]||0),0)/x.tot:0;
+  const topCard=shows.slice().sort((a,b)=>cardShare(b)-cardShare(a))[0];
+  const rows=shows.map(x=>{const parts=used.map(p=>[x.p[p.key]||0,p.color,x.tot]);
+    return `<details class="pm-r"><summary><div class="pm-n">${_esc(x.sh.name)}<span>${x.sh.dates&&x.sh.dates.length?x.sh.dates[0]:''}${x.sh.status==='active'?' · LIVE':''} · ${Math.round((x.p.cash||0)/x.tot*100)}% cash</span></div><b>${fmt(x.tot)}</b>${bar(parts,6)}</summary>
+      <div class="pm-x">${PMTS.filter(p=>(x.p[p.key]||0)>0).map(p=>ln(`<i class="pm-dot" style="background:${p.color}"></i>${p.label}`,`${fmt(x.p[p.key])} <em>${Math.round(x.p[p.key]/x.tot*100)}%</em>`)).join('')}
+      ${ln('Total collected','<b>'+fmt(x.tot)+'</b>','pm-tot')}
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="go('show','${x.sh.id}')">Open show →</button></div></details>`;}).join('');
   return `<div class="card">
-      <div class="hbar" style="height:14px;border-radius:7px">
-        ${pmtHasData.map(p=>{const pct=(C.ytd.pmtTotals[p.key]/C.pmtGrand)*100;return`<div class="hbar-seg" style="background:${p.color};flex:${pct};min-width:${pct>1?2:0}px"></div>`;}).join('')}
+      <div class="pm-hero"><span>Total collected this season</span><b>${fmt(G)}</b><em>across ${shows.length} show${shows.length===1?'':'s'} · ${fmt(shows.length?G/shows.length:0)} average per show</em></div>
+      ${bar(used.map(p=>[T[p.key]||0,p.color,G]),14)}
+      <div class="pm-split">
+        <div><b style="color:#00D26A">${pct(cash)}%</b><span>Cash</span><em>${fmt(cash)}</em></div>
+        <div><b style="color:#4FC3F7">${pct(card)}%</b><span>Card</span><em>${fmt(card)}</em></div>
+        <div><b style="color:#9b6dff">${pct(apps)}%</b><span>Apps</span><em>${fmt(apps)}</em></div>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">
-        ${PMTS.map(p=>{const v=C.ytd.pmtTotals[p.key]||0;if(!v)return'';const pct=Math.round((v/C.pmtGrand)*100);return`<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span><span style="font-size:12px;font-weight:700">${p.label}: ${fmt(v)} <span style="color:var(--muted)">(${pct}%)</span></span></div>`;}).join('')}
-      </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
-        <span style="font-size:12px;color:var(--muted)">💵 Cash</span>
-        <span style="font-size:15px;font-weight:900;color:var(--green)">${fmt(C.ytd.pmtTotals.cash||0)} (${C.pmtGrand>0?Math.round(((C.ytd.pmtTotals.cash||0)/C.pmtGrand)*100):0}% of total)</span>
-      </div>
+    </div>
+    <div class="pm-hd">By payment type</div>
+    <div class="card">
+      <div class="pm-th"><span>Method</span><span>Amount</span><span>Share</span><span>Shows</span></div>
+      ${used.map(p=>`<div class="pm-tr"><span><i class="pm-dot" style="background:${p.color}"></i>${p.label}</span><span>${fmt(T[p.key])}</span><span>${pct(T[p.key])}%</span><span>${showsUsing(p.key)}</span><div class="pm-mini"><i style="width:${G>0?T[p.key]/G*100:0}%;background:${p.color}"></i></div></div>`).join('')}
+      <div class="pm-tr pm-ttl"><span>Total</span><span>${fmt(G)}</span><span>100%</span><span>${shows.length}</span></div>
+    </div>
+    ${card>0?`<div class="pm-hd">What card sales cost</div>
+    <div class="card">
+      ${ln('Card sales (Square + Debit)',fmt(card))}
+      ${ln(`Processing fees (${(((S.settings&&S.settings.sqFee)||0)*100).toFixed(1)}%)`,`<span class="pm-red">−${fmt(fees)}</span>`)}
+      ${stax>0?ln('Sales tax inside card sales (owed to state)',`<span class="pm-red">−${fmt(stax)}</span>`):''}
+      ${ln('Card money you keep',fmt(card-fees-stax),'pm-tot')}
+      <div class="pm-note">Cash and app payments have no fee here, which is why the cash share matters.</div>
+    </div>`:''}
+    ${shows.length>1?`<div class="pm-hd">Highlights</div>
+    <div class="card">
+      ${topCash&&(topCash.p.cash||0)>0?ln('Most cash in one show',`${_esc(topCash.sh.name)} · <b>${fmt(topCash.p.cash)}</b>`):''}
+      ${topCard&&cardShare(topCard)>0?ln('Most card-heavy show',`${_esc(topCard.sh.name)} · <b>${Math.round(cardShare(topCard)*100)}% card</b>`):''}
+      ${ln('Biggest single show',`${_esc(shows.slice().sort((a,b)=>b.tot-a.tot)[0].sh.name)} · <b>${fmt(Math.max(...shows.map(x=>x.tot)))}</b>`)}
+    </div>`:''}
+    <div class="pm-hd">By show <span>tap for the split</span></div>
+    <div class="card pm-list">${rows}
+      <div class="pm-l pm-tot"><span>All shows</span><span>${fmt(shows.reduce((n,x)=>n+x.tot,0))}</span></div>
     </div>`;
 }
 function secInventory(C){
@@ -4506,7 +4591,7 @@ function rSection(){
     expenses:{t:'Other Expenses',f:secExpenses},
     debt:{t:'Product Debt — '+((S.productDebt||{}).supplier||'Mark Martone'),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
-    payments:{t:'Payment Breakdown (YTD)',f:secPayments},
+    payments:{t:'Payment Breakdown — 2026 Season',f:secPayments},
     best:{t:'Top 10 Shows This Season',f:secBest},
     batman:{t:'Borrowed from Batman',f:secBatman},
     online:{t:'Online Sales',f:secOnline}
