@@ -149,6 +149,23 @@
     .srv{font-size:14px;font-weight:700}
     .srv.gold{color:var(--gold)}.srv.green{color:var(--green)}.srv.red{color:var(--red)}.srv.lg{font-size:18px}
 
+    /* COLLECTED VS FULL PRICE TABLE */
+    .ct-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding-bottom:12px;margin-bottom:4px;border-bottom:1px solid var(--border);text-align:center}
+    .ct-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+    .ct-big{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+    .ct-r{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;column-gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+    .ct-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:10px 0 6px}
+    .ct-h .ct-v{font-size:10px;font-weight:700;color:var(--muted)}
+    .ct-n{font-size:13px;color:var(--text);line-height:1.3;overflow-wrap:anywhere}
+    .ct-v{text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:52px}
+    .ct-col{color:var(--green)}.ct-mut{color:var(--muted);font-weight:600}
+    .ct-up{color:var(--green)}.ct-dn{color:var(--red)}.ct-z{color:var(--muted);font-weight:400}
+    .ct-live{font-size:9px;font-weight:800;color:var(--gold);border:1px solid var(--goldbd);background:var(--goldbg);border-radius:4px;padding:1px 4px;vertical-align:1px}
+    .ct-t{border-top:2px solid var(--border);border-bottom:none;padding-top:11px}
+    .ct-t .ct-n{font-weight:800;font-size:14px}.ct-t .ct-v{font-size:14px;font-weight:900}
+    .ct-cnt{display:block;font-size:10px;color:var(--muted);font-weight:600}
+    .ct-note{font-size:11px;color:var(--muted);margin-top:8px;text-align:center}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -3879,14 +3896,27 @@ function secCollected(){
   let h='';
   const _sell=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)).sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
   if(_sell.length){
-    let tp=0,tc=0;
-    const rows=_sell.map(sh=>{const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col;tp+=pot;tc+=col;
-      return `<div class="sr"><span class="srl">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:10px">●LIVE</span>':''}</span><span class="srv"><span style="color:var(--green)">${fmt(col)}</span> <span style="color:var(--muted)">/ ${fmt(pot)}</span>${gap>0.5?` <span style="color:var(--red)">−${fmt(gap)}</span>`:''}</span></div>`;}).join('');
-    const tg=tp-tc;
-    h+=`<div class="card">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Collected (green) / full price · <span style="color:var(--red)">red</span> = discount or freebie given that show</div>
+    const data=_sell.map(sh=>({sh,pot:showPotentialRev(sh),col:showActualRev(sh)}));
+    const tp=data.reduce((t,d)=>t+d.pot,0),tc=data.reduce((t,d)=>t+d.col,0);
+    // Whole dollars when every figure is whole, so the columns stay narrow on a phone.
+    const whole=data.every(d=>Math.abs(d.pot-Math.round(d.pot))<0.005&&Math.abs(d.col-Math.round(d.col))<0.005);
+    const m=n=>whole?fmt(Math.round(n)).replace(/\.00$/,''):fmt(n);
+    const diff=n=>Math.abs(n)<0.5?'<span class="ct-z">—</span>':n>0?`<span class="ct-up">+${m(n)}</span>`:`<span class="ct-dn">−${m(-n)}</span>`;
+    const rows=data.map(({sh,pot,col})=>`<div class="ct-r">
+        <div class="ct-n">${sh.name}${sh.status==='active'?' <span class="ct-live">LIVE</span>':''}</div>
+        <div class="ct-v ct-col">${m(col)}</div><div class="ct-v ct-mut">${m(pot)}</div><div class="ct-v">${diff(col-pot)}</div>
+      </div>`).join('');
+    h+=`<div class="card ct">
+        <div class="ct-sum">
+          <div><div class="ct-k">Collected</div><div class="ct-big" style="color:var(--green)">${m(tc)}</div></div>
+          <div><div class="ct-k">Full price</div><div class="ct-big">${m(tp)}</div></div>
+          <div><div class="ct-k">Over / under</div><div class="ct-big">${diff(tc-tp)}</div></div>
+        </div>
+        <div class="ct-r ct-h"><div>Show</div><div class="ct-v">Collected</div><div class="ct-v">Full</div><div class="ct-v">+/−</div></div>
         ${rows}
-        <div class="sr" style="border-top:1px solid var(--border);margin-top:5px;padding-top:7px"><span class="srl b">Season total</span><span class="srv b"><span style="color:var(--green)">${fmt(tc)}</span> <span style="color:var(--muted)">/ ${fmt(tp)}</span>${tg>0.5?` <span style="color:var(--red)">−${fmt(tg)} given away</span>`:''}</span></div>
+        <div class="ct-r ct-t"><div class="ct-n">Season total <span class="ct-cnt">${data.length} shows</span></div>
+          <div class="ct-v ct-col">${m(tc)}</div><div class="ct-v ct-mut">${m(tp)}</div><div class="ct-v">${diff(tc-tp)}</div></div>
+        <div class="ct-note"><span class="ct-up">+</span> took in more than full price &nbsp;·&nbsp; <span class="ct-dn">−</span> discounts or freebies given</div>
       </div>`;
   }
   return h;
