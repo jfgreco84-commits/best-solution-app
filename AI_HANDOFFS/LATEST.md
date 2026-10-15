@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
+**NEWEST: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
 
-**Previous: [v73 Burgoo restock repair, Oct 11 2026](2026-10-11-v73-burgoo-restock-fix.md)** (Day 2 restock 33/33 F37, 24/24 Jamie's Outpost, set right on load)
+**Previous: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
+
+**Before that: [v73 Burgoo restock repair, Oct 11 2026](2026-10-11-v73-burgoo-restock-fix.md)** (Day 2 restock 33/33 F37, 24/24 Jamie's Outpost, set right on load)
 
 **Before that: [v72 Previous Years, Oct 10 2026](2026-10-10-v72-previous-years.md)** (every show screen shows the same show in earlier years, per size and per day)
 

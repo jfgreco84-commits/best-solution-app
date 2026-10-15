@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v74';
+const APP_VERSION='v75';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1490,6 +1490,15 @@ function applyOneTimeUpdates(d){
   if(!d._applied['burgoo_restock_fix_v73']){
     try{ const r=burgooRestockFix(d); if(r&&r.done)d._applied['burgoo_restock_fix_v73']=true; }
     catch(e){ console.error('burgoo_restock_fix_v73',e); }
+  }
+
+  // v75: Batman history log. Back-fills what the backups show (Jul 6, Aug 18,
+  // the Sep 24 borrow, Sep 30) plus any net change since Sep 30, so the new
+  // History list starts complete. Log only: no count or garage moves. Waits
+  // for a device whose Batman tally actually holds bottles.
+  if(!d._applied['batman_history_seed_v75']){
+    try{ if(bmSeedHistory(d))d._applied['batman_history_seed_v75']=true; }
+    catch(e){ console.error('batman_history_seed_v75',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -4027,10 +4036,51 @@ function secBest(C){
 // batmanBorrow is the debt. + Borrowed More / - Returned also move the garage,
 // because the borrowed bottles are sold (restored v42; a July redeploy had
 // dropped it). Set Exact edits only the debt. Do NOT isolate this again.
+// v75: every change is also written to S.settings.batmanLog (no new top-level
+// key): {id,ts,date,type,items:{sku:+/-qty},owed:{sku:count after},note,src}.
+// type: borrow | return | set | change (net change between backups) | snapshot.
+// src 'app' entries can be undone; 'backup' entries are history only.
 function bmInv(){ if(!S.batmanBorrow||typeof S.batmanBorrow!=="object")S.batmanBorrow={}; return S.batmanBorrow; }
 function bmBottles(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0),0);}
 function bmCost(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getCost(s.key),0);}
 function bmRetail(){const b=bmInv();return SKUS.reduce((t,s)=>t+(b[s.key]||0)*getP(s.key),0);}
+function bmLogOf(st){ st.settings=st.settings||{}; if(!Array.isArray(st.settings.batmanLog))st.settings.batmanLog=[]; return st.settings.batmanLog; }
+function bmLog(){ return bmLogOf(S); }
+function bmOwedNow(){ const b=bmInv(), o={}; SKUS.forEach(s=>o[s.key]=parseInt(b[s.key])||0); return o; }
+function bmAddLog(type,items,date,note){
+  const e={id:'bmh_'+Date.now()+'_'+Math.floor(Math.random()*1e4),ts:new Date().toISOString(),date:date||_todayKey(),
+    type,items,owed:bmOwedNow(),note:note||'',src:'app'};
+  bmLog().push(e); return e;
+}
+function bmItemsText(items,signed){
+  return SKUS.filter(s=>(parseInt((items||{})[s.key])||0)!==0).map(s=>{const q=parseInt(items[s.key]);
+    return s.short+' '+(signed?(q>0?'+':'−')+Math.abs(q):Math.abs(q));}).join(' · ');
+}
+function bmSum(o){ return SKUS.reduce((t,s)=>t+(parseInt((o||{})[s.key])||0),0); }
+function bmSortedLog(){ return bmLog().slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.ts||'').localeCompare(String(a.ts||''))); }
+// Counts read from Froggy's backups (Jul 14 email, Aug 26 Drive, Sep 30 email).
+const BM_SNAP_JUL06={'32oz':64,'16oz':81,'8oz':186,'2oz':240,c5s:0,c5l:201};
+const BM_SNAP_AUG18={'32oz':0,'16oz':0,'8oz':0,'2oz':0,c5s:758,c5l:404};
+const BM_SEP24={'8oz':48,'2oz':80,c5l:34};
+const BM_SNAP_SEP30={'32oz':11,'16oz':4,'8oz':123,'2oz':263,c5s:1054,c5l:445};
+function bmDiff(a,b){ const o={}; SKUS.forEach(s=>{const v=(parseInt((a||{})[s.key])||0)-(parseInt((b||{})[s.key])||0); if(v)o[s.key]=v;}); return o; }
+function bmSeedHistory(d){
+  const cur={}; SKUS.forEach(s=>cur[s.key]=parseInt((d.batmanBorrow||{})[s.key])||0);
+  if(!bmSum(cur))return false;
+  const L=bmLogOf(d); if(L.some(e=>e&&String(e.id).indexOf('bmh_seed_')===0))return true;
+  const mk=(id,date,type,items,owed,note)=>({id:'bmh_seed_'+id,ts:date+'T12:00:00.000Z',date,type,items,owed,note,src:'backup'});
+  const sepOther=bmDiff(bmDiff(BM_SNAP_SEP30,BM_SNAP_AUG18),BM_SEP24);
+  L.push(mk('jul06','2026-07-06','snapshot',Object.assign({},BM_SNAP_JUL06),Object.assign({},BM_SNAP_JUL06),'What you owed in the Jul 14 backup (last saved Jul 6).'));
+  L.push(mk('aug18','2026-08-18','change',bmDiff(BM_SNAP_AUG18,BM_SNAP_JUL06),Object.assign({},BM_SNAP_AUG18),'Net change between the Jul 6 and Aug 18 backups. Dates not saved. 2oz to 32oz going to zero looks like a Set Exact.'));
+  L.push(mk('sep24','2026-09-24','borrow',Object.assign({},BM_SEP24),null,'Borrowed Sep 24 (from the app log).'));
+  L.push(mk('sep30','2026-09-30','borrow',sepOther,Object.assign({},BM_SNAP_SEP30),'Other borrows between Aug 18 and Sep 30. Dates not saved; total read from the backups.'));
+  const since=bmDiff(cur,BM_SNAP_SEP30);
+  if(Object.keys(since).length){
+    const allUp=Object.keys(since).every(k=>since[k]>0);
+    L.push(mk('since_sep30',_todayKey(),allUp?'borrow':'change',since,cur,'Net change since the Sep 30 backup. Dates not saved.'));
+  }
+  return true;
+}
 function secBatman(){
   const b=bmInv(); const units=bmBottles(), cost=bmCost(), retail=bmRetail();
   let h=`<div class="card bb">
@@ -4055,7 +4105,56 @@ function secBatman(){
     <button class="btn btn-ghost" onclick="showReturnBatman()">− Returned to Him</button>
   </div>
   <button class="btn btn-ghost btn-full" onclick="showSetBatman()">📋 Set Exact Counts</button>`;
+  h+=bmHistoryHTML();
   return h;
+}
+const BM_TYPE={borrow:{t:'Borrowed',c:'var(--gold)'},return:{t:'Returned',c:'var(--green)'},set:{t:'Set Exact',c:'var(--blue)'},
+  change:{t:'Change between backups',c:'var(--muted)'},snapshot:{t:'Owed on this date',c:'var(--muted)'}};
+function bmHistoryHTML(){
+  const L=bmSortedLog();
+  const borrowed=bmLog().filter(e=>e.type==='borrow').reduce((t,e)=>t+bmSum(e.items),0);
+  const returned=bmLog().filter(e=>e.type==='return').reduce((t,e)=>t+bmSum(e.items),0);
+  let h=`<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+    <div style="font-weight:900;font-size:15px">📜 History</div>
+    ${L.length?`<span style="font-size:12px;color:var(--gold);cursor:pointer;font-weight:700" onclick="bmExportCSV()">⬇ CSV</span>`:''}</div>`;
+  if(!L.length)return h+`<div class="card" style="text-align:center;color:var(--muted)">No history yet. Every borrow, return and Set Exact shows up here with its date.</div>`;
+  h+=`<div class="card" style="font-size:12px;color:var(--muted);text-align:center">Borrowed in log <b style="color:var(--gold)">${borrowed}</b> · Returned <b style="color:var(--green)">${returned}</b> · Owe now <b style="color:var(--text)">${bmBottles()}</b></div>`;
+  h+=L.map(e=>{const T=BM_TYPE[e.type]||{t:e.type,c:'var(--muted)'}; const n=bmSum(e.items);
+    const sign=e.type==='return'?'−':(e.type==='borrow'?'+':'');
+    const head=e.type==='snapshot'?n+' bottles owed':(e.type==='borrow'||e.type==='return'?sign+Math.abs(n)+' bottles':(n>0?'+':n<0?'−':'')+Math.abs(n)+' net');
+    const items=e.type==='snapshot'||e.type==='borrow'||e.type==='return'?bmItemsText(e.items,false):bmItemsText(e.items,true);
+    const d=String(e.date||''); const ds=d?(d.slice(5).replace('-','/')+'/'+d.slice(2,4)):'';
+    return `<div class="card" style="padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="min-width:0"><div style="font-size:11px;color:var(--muted)">${_esc(ds)} · <b style="color:${T.c}">${T.t}</b>${e.src==='backup'?' · from backups':''}</div>
+          <div style="font-weight:800;font-size:13px;margin-top:2px">${head}</div>
+          <div style="font-size:12px;margin-top:2px">${_esc(items||'no change')}</div>
+          ${e.owed?`<div style="font-size:10px;color:var(--muted);margin-top:2px">Owed after: ${bmSum(e.owed)}</div>`:''}
+          ${e.note?`<div style="font-size:10px;color:var(--muted);margin-top:2px">${_esc(e.note)}</div>`:''}</div>
+        ${e.src==='app'&&e.type!=='snapshot'&&e.type!=='change'?`<span style="cursor:pointer;color:var(--muted);font-weight:900;font-size:16px;flex-shrink:0" title="Undo" onclick="bmUndo('${e.id}')">✕</span>`:''}
+      </div></div>`;}).join('');
+  return h;
+}
+// Undo one app entry: Borrowed/Returned reverse the debt and the garage,
+// Set Exact reverses the debt only. The entry is removed from the log.
+function bmUndo(id){
+  const L=bmLog(), i=L.findIndex(e=>e.id===id); if(i<0)return; const e=L[i]; if(e.src!=='app')return;
+  const T=(BM_TYPE[e.type]||{}).t||e.type;
+  if(typeof confirm==='function'&&!confirm('Undo '+T+' on '+e.date+' ('+bmItemsText(e.items,e.type==='set')+')?'))return;
+  const b=bmInv();
+  Object.keys(e.items||{}).forEach(k=>{const q=parseInt(e.items[k])||0; if(!q)return;
+    if(e.type==='borrow'){ b[k]=Math.max(0,(b[k]||0)-q); S.inventory[k]=Math.max(0,(parseInt(S.inventory[k])||0)-q); }
+    else if(e.type==='return'){ b[k]=(b[k]||0)+q; S.inventory[k]=(parseInt(S.inventory[k])||0)+q; }
+    else if(e.type==='set'){ b[k]=Math.max(0,(b[k]||0)-q); }
+  });
+  L.splice(i,1); saveS(); toast(T+' undone');
+}
+function bmExportCSV(){
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const rows=[['date','type','source',...SKUS.map(s=>s.short),'total','owed_after','note'].map(q).join(',')];
+  bmSortedLog().slice().reverse().forEach(e=>rows.push([e.date,(BM_TYPE[e.type]||{}).t||e.type,e.src==='backup'?'from backups':'app',
+    ...SKUS.map(s=>parseInt((e.items||{})[s.key])||0),bmSum(e.items),e.owed?bmSum(e.owed):'',e.note||''].map(q).join(',')));
+  dlFile('batman-history-'+_todayKey()+'.csv',rows.join('\n'),'text/csv');
 }
 
 /* ---------------------------------------------------------------------
@@ -4337,24 +4436,29 @@ function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);
 function showAddBatman(){
   mOpen(`<div class="mh"><div class="mt">🦇 Borrowed More from Batman</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you just borrow? This ADDS to what you owe him AND puts them in the garage.</div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="bma_date" value="${_todayKey()}"></div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bma_${s.key}" placeholder="0" min="0"></div>`).join('')}
+  <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="bma_note" placeholder="e.g. for Burgoo"></div>
   <button class="btn btn-gold btn-full" onclick="applyAddBatman()">Add to What I Owe</button>`);
 }
-function applyAddBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' borrowed from Batman (added to the garage)');}
+function bmField(id){ const el=$$(id); return el&&el.value?String(el.value).trim():''; }
+function applyAddBatman(){const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;it[s.key]=v;}});if(n)bmAddLog('borrow',it,bmField('bma_date'),bmField('bma_note'));mClose();saveS();toast('+'+n+' borrowed from Batman (added to the garage)');}
 function showReturnBatman(){
   mOpen(`<div class="mh"><div class="mt">− Returned to Batman</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe, bottle for bottle, and takes them out of the garage.</div>
+  <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="bmr_date" value="${_todayKey()}"></div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bmr_${s.key}" placeholder="0" min="0"></div>`).join('')}
+  <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="bmr_note" placeholder="e.g. pallet came in"></div>
   <button class="btn btn-gold btn-full" onclick="applyReturnBatman()">Subtract Returned</button>`);
 }
-function applyReturnBatman(){const b=bmInv();let n=0;SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-dec);n+=dec;}});mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
+function applyReturnBatman(){const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-dec);n+=dec;if(dec)it[s.key]=dec;}});if(n)bmAddLog('return',it,bmField('bmr_date'),bmField('bmr_note'));mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
 function showSetBatman(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Bottles Owed</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT number of each you currently owe Batman.</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name}</label><input class="fi" type="number" id="bms_${s.key}" value="${bmInv()[s.key]||0}" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applySetBatman()">Save Counts</button>`);
 }
-function applySetBatman(){const b=bmInv();SKUS.forEach(s=>{const v=parseInt($$('bms_'+s.key).value);if(!isNaN(v))b[s.key]=Math.max(0,v);});mClose();saveS();toast('Batman tally updated');}
+function applySetBatman(){const b=bmInv();const it={};SKUS.forEach(s=>{const v=parseInt($$('bms_'+s.key).value);if(!isNaN(v)){const nv=Math.max(0,v),dv=nv-(parseInt(b[s.key])||0);b[s.key]=nv;if(dv)it[s.key]=dv;}});if(Object.keys(it).length)bmAddLog('set',it,_todayKey(),'');mClose();saveS();toast('Batman tally updated');}
 
 // ===================================================
 // SHOWS LIST
