@@ -106,14 +106,20 @@ R.section('3. One-time back-fill from the backups');
   ctx.applyOneTimeUpdates(d);
   const L=d.settings.batmanLog;
   chk('3b. marked done',d._applied['batman_history_seed_v75'],true);
-  chk('3c. four entries when nothing changed since Sep 30',L.map(e=>e.id),['bmh_seed_jul06','bmh_seed_aug18','bmh_seed_sep24','bmh_seed_sep30']);
-  chk('3d. Sep 24 borrow',[L[2].items.c5l,L[2].items['2oz'],L[2].items['8oz']],[34,80,48]);
-  chk('3e. other Aug 18 to Sep 30 borrows',SK.map(k=>L[3].items[k]||0),[11,4,75,183,296,7]);
-  chk('3f. Aug 18 + all borrows = Sep 30 owed',SK.map(k=>(k==='c5s'?758:k==='c5l'?404:0)+(L[2].items[k]||0)+(L[3].items[k]||0)),SK.map(k=>SEP30[k]));
+  const by=id=>L.find(e=>e.id==='bmh_seed_'+id);
+  chk('3c. seven entries when nothing changed since Sep 30',L.map(e=>e.id.replace('bmh_seed_','')),['jul06','jul14','aug02','aug18','sep18','sep24','sep30']);
+  chk('3d. Jul 14 borrow',SK.map(k=>by('jul14').items[k]||0),[48,0,72,0,280,0]);
+  chk('3d2. Jul 14 to Aug 2 borrow',SK.map(k=>by('aug02').items[k]||0),[0,60,48,80,140,42]);
+  chk('3d3. Sep 18 (Batman text) and Sep 24',[SK.map(k=>by('sep18').items[k]||0),SK.map(k=>by('sep24').items[k]||0)],[[9,3,58,160,0,0],[0,0,48,80,0,34]]);
+  chk('3e. other Aug 26 to Sep 30 borrows',SK.map(k=>by('sep30').items[k]||0),[2,1,17,23,296,7]);
+  const run={}; SK.forEach(k=>run[k]=0);
+  L.forEach(e=>{ if(e.type==='snapshot'){SK.forEach(k=>run[k]=e.items[k]||0);} else SK.forEach(k=>run[k]+=e.items[k]||0);
+    if(e.owed)chk('3f. running total matches owed after '+e.id.replace('bmh_seed_',''),SK.map(k=>run[k]),SK.map(k=>e.owed[k]||0)); });
+  chk('3f2. ends on the Sep 30 owed',SK.map(k=>run[k]),SK.map(k=>SEP30[k]));
   chk('3g. log only: garage untouched',JSON.stringify(d.inventory),inv);
   chk('3h. all marked from backups',L.every(e=>e.src==='backup'),true);
   ctx.applyOneTimeUpdates(d);
-  chk('3i. only once',d.settings.batmanLog.length,4);
+  chk('3i. only once',d.settings.batmanLog.length,7);
 }
 {
   const {ctx}=world();

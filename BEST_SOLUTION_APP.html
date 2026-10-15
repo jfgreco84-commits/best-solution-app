@@ -4058,9 +4058,14 @@ function bmItemsText(items,signed){
 }
 function bmSum(o){ return SKUS.reduce((t,s)=>t+(parseInt((o||{})[s.key])||0),0); }
 function bmSortedLog(){ return bmLog().slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.ts||'').localeCompare(String(a.ts||''))); }
-// Counts read from Froggy's backups (Jul 14 email, Aug 26 Drive, Sep 30 email).
+// Counts read from Froggy's backups: Jul 14 email, the Jul 14 cloud dump taken
+// before the Batman merge, the Aug 10 rolling backup inside the Aug 21 export,
+// Aug 18 (every Aug 20-26 export), Sep 30 email. Sep 18 is Batman's own text.
 const BM_SNAP_JUL06={'32oz':64,'16oz':81,'8oz':186,'2oz':240,c5s:0,c5l:201};
+const BM_SNAP_JUL14={'32oz':112,'16oz':81,'8oz':258,'2oz':240,c5s:280,c5l:201};
+const BM_SNAP_AUG02={'32oz':112,'16oz':141,'8oz':306,'2oz':320,c5s:420,c5l:243};
 const BM_SNAP_AUG18={'32oz':0,'16oz':0,'8oz':0,'2oz':0,c5s:758,c5l:404};
+const BM_SEP18={'32oz':9,'16oz':3,'8oz':58,'2oz':160};
 const BM_SEP24={'8oz':48,'2oz':80,c5l:34};
 const BM_SNAP_SEP30={'32oz':11,'16oz':4,'8oz':123,'2oz':263,c5s:1054,c5l:445};
 function bmDiff(a,b){ const o={}; SKUS.forEach(s=>{const v=(parseInt((a||{})[s.key])||0)-(parseInt((b||{})[s.key])||0); if(v)o[s.key]=v;}); return o; }
@@ -4069,11 +4074,15 @@ function bmSeedHistory(d){
   if(!bmSum(cur))return false;
   const L=bmLogOf(d); if(L.some(e=>e&&String(e.id).indexOf('bmh_seed_')===0))return true;
   const mk=(id,date,type,items,owed,note)=>({id:'bmh_seed_'+id,ts:date+'T12:00:00.000Z',date,type,items,owed,note,src:'backup'});
-  const sepOther=bmDiff(bmDiff(BM_SNAP_SEP30,BM_SNAP_AUG18),BM_SEP24);
-  L.push(mk('jul06','2026-07-06','snapshot',Object.assign({},BM_SNAP_JUL06),Object.assign({},BM_SNAP_JUL06),'What you owed in the Jul 14 backup (last saved Jul 6).'));
-  L.push(mk('aug18','2026-08-18','change',bmDiff(BM_SNAP_AUG18,BM_SNAP_JUL06),Object.assign({},BM_SNAP_AUG18),'Net change between the Jul 6 and Aug 18 backups. Dates not saved. 2oz to 32oz going to zero looks like a Set Exact.'));
-  L.push(mk('sep24','2026-09-24','borrow',Object.assign({},BM_SEP24),null,'Borrowed Sep 24 (from the app log).'));
-  L.push(mk('sep30','2026-09-30','borrow',sepOther,Object.assign({},BM_SNAP_SEP30),'Other borrows between Aug 18 and Sep 30. Dates not saved; total read from the backups.'));
+  const cp=o=>Object.assign({},o);
+  const sepOther=bmDiff(bmDiff(bmDiff(BM_SNAP_SEP30,BM_SNAP_AUG18),BM_SEP24),BM_SEP18);
+  L.push(mk('jul06','2026-07-06','snapshot',cp(BM_SNAP_JUL06),cp(BM_SNAP_JUL06),'What you owed in the Jul 14 backup (last saved Jul 6).'));
+  L.push(mk('jul14','2026-07-14','borrow',bmDiff(BM_SNAP_JUL14,BM_SNAP_JUL06),cp(BM_SNAP_JUL14),'Entered Jul 14 between about 2:33 and 2:46 PM (two backups that afternoon).'));
+  L.push(mk('aug02','2026-08-02','borrow',bmDiff(BM_SNAP_AUG02,BM_SNAP_JUL14),cp(BM_SNAP_AUG02),'Borrowed between Jul 14 and Aug 2 (in the backup saved Aug 2, 7:42 PM). Exact day not saved.'));
+  L.push(mk('aug18','2026-08-18','change',bmDiff(BM_SNAP_AUG18,BM_SNAP_AUG02),cp(BM_SNAP_AUG18),'Changed between Aug 10 and Aug 18, 4:06 PM. 32oz to 2oz went to zero and C5 went up: looks like a Set Exact, not returns.'));
+  L.push(mk('sep18','2026-09-18','borrow',cp(BM_SEP18),null,'From Batman\'s text "Giving you now" (sent on or before Sep 18, 9:23 PM).'));
+  L.push(mk('sep24','2026-09-24','borrow',cp(BM_SEP24),null,'Borrowed Sep 24 (from the app log).'));
+  L.push(mk('sep30','2026-09-30','borrow',sepOther,cp(BM_SNAP_SEP30),'Other borrows between Aug 26 and Sep 30, incl. the C5. Dates not saved; total read from the backups.'));
   const since=bmDiff(cur,BM_SNAP_SEP30);
   if(Object.keys(since).length){
     const allUp=Object.keys(since).every(k=>since[k]>0);
