@@ -1476,7 +1476,7 @@ function applyOneTimeUpdates(d){
   // Ultimate Women's Expo (Women's Expo Management, Inc.). Exhibit space
   // $1,095 paid in full by ACH (Bluevine, ran 10/13, receipt confirmed by
   // their accounting 10/14). Show hours Sat 10a-5p, Sun 11a-5p. Froggy works
-  // it with Alivia, maybe Michele. A Women's Expo already on the board in
+  // it with Alivia and Michele. A Women's Expo already on the board in
   // October 2026 is updated in place (blanks only), never duplicated.
   if(!d._applied['chicago_womens_expo_v76']){
     try{
@@ -1492,7 +1492,7 @@ function applyOneTimeUpdates(d){
         +"Free guest tickets for customers: www.ChicagoWomensExpo.com/ExhibitorComp (regular $10 GA, $30 VIP). "
         +"Free Founders LIVE TV Studio interview: book it on site / from the Set-Up Kit. No COI required (Erika, Oct 12). "
         +"Contact: Erika Hayward (866) 618-3434 x428, erika.hayward@thewomensexpo.com. Exhibit Services x419. "
-        +"Crew: Froggy + Alivia, maybe Michele.";
+        +"Crew: Froggy + Alivia + Michele.";
       let sh=d.shows.find(x=>x&&!x.passed&&/women.?s expo/i.test(x.name||'')&&String(x.startDate||'').slice(0,7)==='2026-10');
       if(!sh){
         sh=buildPlannedShow({name:"Chicago Women's Expo",location:'Rosemont, IL',startDate:'2026-10-24',numDays:2,boothCost:1095,miles:70,boothPayments:[pay]});
@@ -1501,7 +1501,7 @@ function applyOneTimeUpdates(d){
         sh.openTime=HRS[0][0]; sh.closeTime=HRS[0][1];
         sh.hoursVerified=true; sh.hoursNeedConfirm=false; sh.datesNeedConfirm=false;
         sh.notes=NOTES;
-        sh.repIds=['rep_alivia']; sh.repOnlyShow=false;
+        sh.repIds=['rep_alivia','rep_michele']; sh.repOnlyShow=false;
         mrgPushShow(d,sh,'chicago_womens_expo_v76');
       } else {
         sh.confirmed=true;
@@ -1512,11 +1512,27 @@ function applyOneTimeUpdates(d){
         const bp=sh.boothPayments=sh.boothPayments||[];
         if(!bp.some(x=>x&&(x.id===PID||Math.abs((parseFloat(x.amount)||0)-1095)<0.005)))bp.push(pay);
         if(!Array.isArray(sh.repIds))sh.repIds=[];
-        if(sh.repIds.indexOf('rep_alivia')<0)sh.repIds.push('rep_alivia');
+        ['rep_alivia','rep_michele'].forEach(id=>{ if(sh.repIds.indexOf(id)<0)sh.repIds.push(id); });
         if(!/exhibitorcomp/i.test(sh.notes||''))sh.notes=(sh.notes?sh.notes+' ':'')+NOTES;
       }
       d._applied['chicago_womens_expo_v76']=true;
     }catch(e){ console.error('chicago_womens_expo_v76',e); }
+  }
+
+  // v76 (Oct 16): A Fair to Remember, Fall (Oct 23-24) is worked by TJ.
+  // Froggy is at the Chicago Women's Expo that Saturday. TJ goes on the crew
+  // and the show becomes crew-run. Waits until the show is on the board.
+  if(!d._applied['ftr_fall_tj_v76']){
+    try{
+      const sh=(d.shows||[]).find(x=>x&&!x.passed&&/fair to remember/i.test(x.name||'')&&String(x.startDate||'').slice(0,7)==='2026-10');
+      if(sh){
+        if(!Array.isArray(sh.repIds))sh.repIds=[];
+        if(sh.repIds.indexOf('rep_tj')<0)sh.repIds.push('rep_tj');
+        sh.repOnlyShow=true;
+        if(!/TJ works this show/.test(sh.notes||''))sh.notes=(sh.notes?sh.notes+' ':'')+"CREW: TJ works this show (Froggy is at the Chicago Women's Expo in Rosemont Sat Oct 24).";
+        d._applied['ftr_fall_tj_v76']=true;
+      }
+    }catch(e){ console.error('ftr_fall_tj_v76',e); }
   }
 
   // v73: Burgoo Fest 2026 restock repair. Froggy, Oct 11 morning: restocked

@@ -83,7 +83,7 @@ Migration `chicago_womens_expo_v76`, registered in `MRG_SEED_RECORDS`
 | Venue | Donald E. Stephens Convention Center, 5555 N River Rd, Rosemont IL |
 | Miles | ~70 each way from Waterford (approx) |
 | Booth | **$1,095**, paid in full by ACH Oct 13 (Bluevine), receipt confirmed Oct 14 |
-| Crew | Froggy + Alivia (`rep_alivia`); Michele added to the roster (`rep_michele`) but not the crew, she is a maybe |
+| Crew | Froggy + Alivia (`rep_alivia`) + Michele (`rep_michele`, new on the roster) |
 
 Sources: Froggy's Gmail (Erika Hayward welcome 10/12, Bluevine ACH 10/12 + 10/13,
 accounting confirmation + Set-Up Kit 10/14) and public listings for the hours.
@@ -93,8 +93,12 @@ Froggy said $1,100; the ACH is $1,095, so the app carries $1,095.
 Set-Up Kit PDF attached to the 10/14 email, which could not be opened from here.
 Notes say so. Exhibit space includes **no tables or chairs**.
 
-**Conflict:** A Fair to Remember, Fall (West Bend) is Fri Oct 23 + **Sat Oct 24**,
-the same Saturday. Both are paid. The calendar will show Oct 24 red.
+**Conflict, settled:** A Fair to Remember, Fall (West Bend) is Fri Oct 23 + **Sat Oct 24**,
+the same Saturday. **TJ works A Fair to Remember** (migration `ftr_fall_tj_v76`:
+`rep_tj` on the crew, show crew-run, note added; the Christmas show is untouched).
+The calendar still shows both shows on Oct 24, which is correct.
+
+**Batman stock:** all 192 bottles stay in the garage; none go with Isaiah (as built).
 
 An existing Women's Expo record in Oct 2026 is updated in place (blanks only).
-`tests/womens-expo.test.js` 18/18.
+`tests/womens-expo.test.js` 23/23.
