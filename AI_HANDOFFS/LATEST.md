@@ -1,6 +1,6 @@
 # LATEST
 
-**NEWEST: [v76 Fox & Found Oct packed for Isaiah, Oct 16 2026](2026-10-16-v76-fox-found-oct-pack.md)** (352 units from the garage incl. 19 travel sets, Isaiah crew-run; plus 192 bottles borrowed from Batman Oct 16)
+**NEWEST: [v76 Fox & Found Oct packed for Isaiah, Oct 16 2026](2026-10-16-v76-fox-found-oct-pack.md)** (352 units from the garage incl. 19 travel sets, Isaiah crew-run; plus 192 bottles borrowed from Batman Oct 16; Chicago Women's Expo Oct 24-25 added)
 
 **Previous: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
 

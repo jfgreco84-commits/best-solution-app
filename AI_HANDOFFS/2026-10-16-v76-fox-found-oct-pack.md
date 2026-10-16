@@ -68,3 +68,33 @@ Borrowed from Batman: History shows an Oct 16 borrow of 32oz 108 · 16oz 60 · 8
 
 Open the app, open Fox & Found Oct: it should read active, packed 352, crew
 Isaiah. Isaiah does the evening count and money at close as usual.
+
+---
+
+## Also in v76: Chicago Women's Expo, Oct 24-25 2026
+
+Migration `chicago_womens_expo_v76`, registered in `MRG_SEED_RECORDS`
+(replay-guard 157/157).
+
+| | |
+|---|---|
+| Show | **Chicago Women's Expo** (30th season, Ultimate Women's Expo) |
+| Dates | Sat Oct 24 10am-5pm · Sun Oct 25 11am-5pm |
+| Venue | Donald E. Stephens Convention Center, 5555 N River Rd, Rosemont IL |
+| Miles | ~70 each way from Waterford (approx) |
+| Booth | **$1,095**, paid in full by ACH Oct 13 (Bluevine), receipt confirmed Oct 14 |
+| Crew | Froggy + Alivia (`rep_alivia`); Michele added to the roster (`rep_michele`) but not the crew, she is a maybe |
+
+Sources: Froggy's Gmail (Erika Hayward welcome 10/12, Bluevine ACH 10/12 + 10/13,
+accounting confirmation + Set-Up Kit 10/14) and public listings for the hours.
+Froggy said $1,100; the ACH is $1,095, so the app carries $1,095.
+
+**Not entered:** setup / move-in times, badges, parking and dock. They are in the
+Set-Up Kit PDF attached to the 10/14 email, which could not be opened from here.
+Notes say so. Exhibit space includes **no tables or chairs**.
+
+**Conflict:** A Fair to Remember, Fall (West Bend) is Fri Oct 23 + **Sat Oct 24**,
+the same Saturday. Both are paid. The calendar will show Oct 24 red.
+
+An existing Women's Expo record in Oct 2026 is updated in place (blanks only).
+`tests/womens-expo.test.js` 18/18.
