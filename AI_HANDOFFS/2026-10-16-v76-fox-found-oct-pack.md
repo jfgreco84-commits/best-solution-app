@@ -22,7 +22,19 @@ with this from the garage, and wants it entered without doing it by hand:
 A travel set is one 2oz Best Solution + one C5 Small, so the 19 sets are
 counted into those two sizes (the app has no travel-set SKU).
 
+**Follow-up the same day:** Froggy also took 32oz 108, 16oz 60, 8oz 24 from
+Mom's and wants it on **Borrowed from Batman**.
+
 ## COMPLETED
+
+**Batman borrow** (`batman_borrow_oct16_v76`, `bmBorrowOct16(d)`): same as
+**+ Borrowed More**, dated 2026-10-16, note "Took from Mom's". Owed to Batman
+up 108/60/24 (192 bottles), garage up the same, one History entry (id
+`bmh_v76_oct16`, `src:'app'`, so the ✕ in History undoes it). Runs **before**
+the pack so the garage holds the stock. Waits for a device whose Batman tally
+holds bottles, like v75. Never books twice (flag + entry id).
+
+**Show pack:**
 
 One-time load step `fox_found_oct_pack_v76` (`foxFoundOctPack(d)`) does exactly
 what **Pack for Show → Start Show** does:
@@ -41,16 +53,18 @@ negative) and the shortfall is written in the log.
 
 ## VERIFIED
 
-`node tests/fox-found-oct-pack.test.js` 26/26 (new). All other suites match
+`node tests/fox-found-oct-pack.test.js` 37/37 (new). All other suites match
 unmodified `main` (the same pre-existing failures in passed-not-doing and
 product-debt-invoices). `cranberry-scoreboard` and `batman-history` pre-mark
-v76 on their blank-board full loads, as they already do for other migrations.
+the v76 steps on their blank-board full loads, as they already do for other migrations.
 Booted in Chromium: v76, no page errors.
 
 **Live data changed:** No Supabase read or write. The step runs on Froggy's
 device the first time the app opens after merge.
 
 ## AFTER MERGE
+
+Borrowed from Batman: History shows an Oct 16 borrow of 32oz 108 · 16oz 60 · 8oz 24.
 
 Open the app, open Fox & Found Oct: it should read active, packed 352, crew
 Isaiah. Isaiah does the evening count and money at close as usual.

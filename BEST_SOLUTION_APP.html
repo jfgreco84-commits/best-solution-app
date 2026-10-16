@@ -1501,6 +1501,16 @@ function applyOneTimeUpdates(d){
     catch(e){ console.error('batman_history_seed_v75',e); }
   }
 
+  // v76: borrowed more from Batman (Mom's), Oct 16 2026: 32oz 108, 16oz 60,
+  // 8oz 24. Same as + Borrowed More: owed up, garage up, one History entry.
+  // Runs before the Fox & Found pack below so the garage holds the stock.
+  // Waits for a device whose Batman tally holds bottles (like v75), so a blank
+  // device before cloud sync does not book it.
+  if(!d._applied['batman_borrow_oct16_v76']){
+    try{ if(bmBorrowOct16(d))d._applied['batman_borrow_oct16_v76']=true; }
+    catch(e){ console.error('batman_borrow_oct16_v76',e); }
+  }
+
   // v76: Fox & Found North Aurora, Sat Oct 17 2026. Froggy is sending Isaiah
   // to work it alone with this from the garage (19 travel sets = 1 C5-S +
   // 1 2oz each, so they are counted into those two sizes):
@@ -5989,6 +5999,20 @@ function burgooRestockFix(d){
   invLogPush(sh,{ts,di:R,date:days[R].date,type:'🔧 Restock repair (v73)',changes:log.length?log:['Restock already correct: '+b1.name+' 33/33, '+b2.name+' 24/24 (2oz / C5-S). Nothing changed.'],by:'owner'});
   auditState(d).log.push({ts,showId:sh.id,show:sh.name,msg:'Burgoo restock repair (v73): '+(log.length?log.join(' · '):'already correct, nothing changed')});
   return {done:true,day:R,log};
+}
+// v76: see the batman_borrow_oct16_v76 note in applyOneTimeUpdates.
+function bmBorrowOct16(d){
+  const it={'32oz':108,'16oz':60,'8oz':24}, L=bmLogOf(d);
+  if(L.some(e=>e&&e.id==='bmh_v76_oct16'))return true;
+  const b=(d.batmanBorrow&&typeof d.batmanBorrow==='object')?d.batmanBorrow:null;
+  if(!b||!SKUS.some(s=>(parseInt(b[s.key])||0)>0))return false;
+  d.inventory=d.inventory||{};
+  Object.keys(it).forEach(k=>{ b[k]=(parseInt(b[k])||0)+it[k]; d.inventory[k]=(parseInt(d.inventory[k])||0)+it[k]; });
+  const owed={}; SKUS.forEach(s=>owed[s.key]=parseInt(b[s.key])||0);
+  L.push({id:'bmh_v76_oct16',ts:new Date().toISOString(),date:'2026-10-16',type:'borrow',items:{...it},owed,
+    note:"Took from Mom's (v76)",src:'app'});
+  auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:"Borrowed from Batman (Mom's) Oct 16 (v76): 32oz 108, 16oz 60, 8oz 24 into the garage."});
+  return true;
 }
 // v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.
 function foxFoundOctPack(d){

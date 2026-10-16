@@ -67,4 +67,28 @@ R.section('5. Full load from a blank board');
   const inv=JSON.stringify(d.inventory); ctx.applyOneTimeUpdates(d);
   chk('5d. third load changes nothing',JSON.stringify(d.inventory),inv); }
 
+R.section('6. Borrowed more from Batman (Mom\'s) Oct 16');
+{ const {d}=world(); d.batmanBorrow={'32oz':10,'16oz':5,'8oz':20,'2oz':0,c5s:0,c5l:0};
+  const inv=row(d.inventory);
+  chk('6a. done',ctx.bmBorrowOct16(d),true);
+  chk('6b. owed up 108/60/24',row(d.batmanBorrow),[118,65,44,0,0,0]);
+  chk('6c. garage up 108/60/24',row(d.inventory),inv.map((v,i)=>v+[108,60,24,0,0,0][i]));
+  const e=d.settings.batmanLog.find(x=>x.id==='bmh_v76_oct16');
+  chk('6d. one History entry, dated Oct 16, undoable',[!!e,e&&e.date,e&&e.type,e&&e.src,d.settings.batmanLog.length],[true,'2026-10-16','borrow','app',1]);
+  chk('6e. owed-after recorded',row(e.owed),[118,65,44,0,0,0]);
+  ctx.bmBorrowOct16(d);
+  chk('6f. only once',[row(d.batmanBorrow)[0],d.settings.batmanLog.length],[118,1]); }
+{ const {d}=world(); d.batmanBorrow={}; const inv=JSON.stringify(d.inventory);
+  chk('6g. empty tally (blank device): waits, nothing booked',[ctx.bmBorrowOct16(d),JSON.stringify(d.inventory)===inv],[false,true]); }
+
+R.section('7. Borrow lands before the pack on load');
+{ const {d,sh}=world({'32oz':0,'16oz':0,'8oz':30,'2oz':200,c5s:300,c5l:50});
+  d.batmanBorrow={'32oz':1}; d._applied['batman_history_seed_v75']=true;
+  d._applied['fix_future_active_v1']=true;   // ran long ago on every real device; on a blank board it un-packs future shows
+  ctx.applyOneTimeUpdates(d);
+  chk('7a. both applied',[d._applied['batman_borrow_oct16_v76'],d._applied['fox_found_oct_pack_v76']],[true,true]);
+  chk('7b. no shortfall on 32oz/16oz/8oz',/short/.test(sh.invLog.map(x=>x.changes.join(' ')).join(' ')),false);
+  chk('7c. show got the full 32oz/16oz/8oz',[sh.packedInventory['32oz'],sh.packedInventory['16oz'],sh.packedInventory['8oz']],[12,10,48]);
+  chk('7d. borrow is in History',d.settings.batmanLog.some(e=>e.id==='bmh_v76_oct16'),true); }
+
 R.done();

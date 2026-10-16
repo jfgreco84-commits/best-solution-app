@@ -103,6 +103,7 @@ R.section('3. One-time back-fill from the backups');
   d.batmanBorrow=Object.assign({},SEP30);
   d._applied['batman_to_garage_20260924']=true;   // v42 is tested in cranberry-scoreboard
   d._applied['fox_found_oct_pack_v76']=true;      // v76 packs a show from the garage; tested in fox-found-oct-pack
+  d._applied['batman_borrow_oct16_v76']=true;     // v76 Oct 16 borrow; tested in fox-found-oct-pack
   const inv=JSON.stringify(d.inventory);
   ctx.applyOneTimeUpdates(d);
   const L=d.settings.batmanLog;
@@ -126,6 +127,7 @@ R.section('3. One-time back-fill from the backups');
   const {ctx}=world();
   const cur=Object.assign({},SEP30,{c5s:1100,c5l:445,'2oz':250});
   const d={v:7,inventory:cnt({}),batmanBorrow:cur,shows:[],reps:[],prices:{},settings:{},_applied:{}};
+  d._applied['batman_borrow_oct16_v76']=true;     // v76 Oct 16 borrow; tested in fox-found-oct-pack
   ctx.applyOneTimeUpdates(d);
   const e=d.settings.batmanLog.find(x=>x.id==='bmh_seed_since_sep30');
   chk('3j. net change since Sep 30 is logged',[!!e,e&&e.type,e&&e.items.c5s,e&&e.items['2oz'],e&&sum(e.owed)],[true,'change',46,-13,sum(cur)]);
