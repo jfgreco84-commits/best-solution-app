@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v75';
+const APP_VERSION='v76';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -678,7 +678,8 @@ const MRG_SEED_RECORDS={
   'pewaukee_beach_20260626':['pewaukee beach party'],
   'shows_add_20260818':['whole bead show milwaukee pop up','wonderful world of weddings'],
   'pop_racine_20260818':['party on the pavement'],
-  'fair_to_remember_v71':['a fair to remember fall','a fair to remember christmas']
+  'fair_to_remember_v71':['a fair to remember fall','a fair to remember christmas'],
+  'chicago_womens_expo_v76':['chicago women s expo']
 };
 const MRG_SEED_MARKERS=Object.keys(MRG_SEED_RECORDS);
 
@@ -1470,6 +1471,70 @@ function applyOneTimeUpdates(d){
     }catch(e){ console.error('fair_to_remember_v71',e); }
   }
 
+  // v76 (Oct 16): Chicago Women's Expo, Sat Oct 24 + Sun Oct 25 2026, Donald
+  // E. Stephens Convention Center, Rosemont IL. 30th season, run by the
+  // Ultimate Women's Expo (Women's Expo Management, Inc.). Exhibit space
+  // $1,095 paid in full by ACH (Bluevine, ran 10/13, receipt confirmed by
+  // their accounting 10/14). Show hours Sat 10a-5p, Sun 11a-5p. Froggy works
+  // it with Alivia and Michele. A Women's Expo already on the board in
+  // October 2026 is updated in place (blanks only), never duplicated.
+  if(!d._applied['chicago_womens_expo_v76']){
+    try{
+      d.shows=d.shows||[]; d.reps=d.reps||[];
+      if(!d.reps.some(r=>r&&r.id==='rep_michele'))d.reps.push({id:'rep_michele',name:'Michele',isSelf:false,active:true,payments:[]});
+      const PID='bp_cwe_2026', HRS=[['10:00','17:00'],['11:00','17:00']];
+      const pay={id:PID,amount:1095,date:'2026-10-13',note:'Exhibit space paid in full by ACH (Bluevine) to Women\'s Expo Management, Inc. Receipt confirmed by their accounting Oct 14.'};
+      const NOTES="CHICAGO WOMEN'S EXPO (30th season). Sat Oct 24 2026 10am-5pm, Sun Oct 25 2026 11am-5pm. "
+        +"Donald E. Stephens Convention Center, 5555 N River Rd, Rosemont IL. ~70 mi each way from Waterford (approx). "
+        +"Booth $1,095 PAID in full by ACH Oct 13 (confirmed Oct 14). "
+        +"⚠️ Exhibit space does NOT include tables or chairs: bring your own, or rent from Rosemont Exposition Services (847) 696-2208, customerservice@rosemontexpo.com. "
+        +"⚠️ Setup / move-in times, badges, parking and loading dock are in the Exhibitor Set-Up Kit PDF (email from accounting@thewomensexpo.com, Oct 14). Enter them in Edit Show. "
+        +"Free guest tickets for customers: www.ChicagoWomensExpo.com/ExhibitorComp (regular $10 GA, $30 VIP). "
+        +"Free Founders LIVE TV Studio interview: book it on site / from the Set-Up Kit. No COI required (Erika, Oct 12). "
+        +"Contact: Erika Hayward (866) 618-3434 x428, erika.hayward@thewomensexpo.com. Exhibit Services x419. "
+        +"Crew: Froggy + Alivia + Michele.";
+      let sh=d.shows.find(x=>x&&!x.passed&&/women.?s expo/i.test(x.name||'')&&String(x.startDate||'').slice(0,7)==='2026-10');
+      if(!sh){
+        sh=buildPlannedShow({name:"Chicago Women's Expo",location:'Rosemont, IL',startDate:'2026-10-24',numDays:2,boothCost:1095,miles:70,boothPayments:[pay]});
+        sh.confirmed=true;
+        HRS.forEach((t,i)=>{ if(sh.days[i]){ sh.days[i].openTime=t[0]; sh.days[i].closeTime=t[1]; } });
+        sh.openTime=HRS[0][0]; sh.closeTime=HRS[0][1];
+        sh.hoursVerified=true; sh.hoursNeedConfirm=false; sh.datesNeedConfirm=false;
+        sh.notes=NOTES;
+        sh.repIds=['rep_alivia','rep_michele']; sh.repOnlyShow=false;
+        mrgPushShow(d,sh,'chicago_womens_expo_v76');
+      } else {
+        sh.confirmed=true;
+        (sh.days||[]).forEach((day,i)=>{ const t=HRS[i]; if(t&&!day.openTime&&!day.closeTime){ day.openTime=t[0]; day.closeTime=t[1]; } });
+        if(!sh.location)sh.location='Rosemont, IL';
+        if(!sh.miles)sh.miles=70;
+        if(!(parseFloat(sh.boothCost)>0))sh.boothCost=1095;
+        const bp=sh.boothPayments=sh.boothPayments||[];
+        if(!bp.some(x=>x&&(x.id===PID||Math.abs((parseFloat(x.amount)||0)-1095)<0.005)))bp.push(pay);
+        if(!Array.isArray(sh.repIds))sh.repIds=[];
+        ['rep_alivia','rep_michele'].forEach(id=>{ if(sh.repIds.indexOf(id)<0)sh.repIds.push(id); });
+        if(!/exhibitorcomp/i.test(sh.notes||''))sh.notes=(sh.notes?sh.notes+' ':'')+NOTES;
+      }
+      d._applied['chicago_womens_expo_v76']=true;
+    }catch(e){ console.error('chicago_womens_expo_v76',e); }
+  }
+
+  // v76 (Oct 16): A Fair to Remember, Fall (Oct 23-24) is worked by TJ.
+  // Froggy is at the Chicago Women's Expo that Saturday. TJ goes on the crew
+  // and the show becomes crew-run. Waits until the show is on the board.
+  if(!d._applied['ftr_fall_tj_v76']){
+    try{
+      const sh=(d.shows||[]).find(x=>x&&!x.passed&&/fair to remember/i.test(x.name||'')&&String(x.startDate||'').slice(0,7)==='2026-10');
+      if(sh){
+        if(!Array.isArray(sh.repIds))sh.repIds=[];
+        if(sh.repIds.indexOf('rep_tj')<0)sh.repIds.push('rep_tj');
+        sh.repOnlyShow=true;
+        if(!/TJ works this show/.test(sh.notes||''))sh.notes=(sh.notes?sh.notes+' ':'')+"CREW: TJ works this show (Froggy is at the Chicago Women's Expo in Rosemont Sat Oct 24).";
+        d._applied['ftr_fall_tj_v76']=true;
+      }
+    }catch(e){ console.error('ftr_fall_tj_v76',e); }
+  }
+
   // v73: Burgoo Fest 2026 restock repair. Froggy, Oct 11 morning: restocked
   // 2oz and C5 Small from the stock at the show, 33 of each to booth 1 (F37)
   // and 24 of each to booth 2 (Jamie's Outpost), entered it, and it "did not
@@ -1499,6 +1564,28 @@ function applyOneTimeUpdates(d){
   if(!d._applied['batman_history_seed_v75']){
     try{ if(bmSeedHistory(d))d._applied['batman_history_seed_v75']=true; }
     catch(e){ console.error('batman_history_seed_v75',e); }
+  }
+
+  // v76: borrowed more from Batman (Mom's), Oct 16 2026: 32oz 108, 16oz 60,
+  // 8oz 24. Same as + Borrowed More: owed up, garage up, one History entry.
+  // Runs before the Fox & Found pack below so the garage holds the stock.
+  // Waits for a device whose Batman tally holds bottles (like v75), so a blank
+  // device before cloud sync does not book it.
+  if(!d._applied['batman_borrow_oct16_v76']){
+    try{ if(bmBorrowOct16(d))d._applied['batman_borrow_oct16_v76']=true; }
+    catch(e){ console.error('batman_borrow_oct16_v76',e); }
+  }
+
+  // v76: Fox & Found North Aurora, Sat Oct 17 2026. Froggy is sending Isaiah
+  // to work it alone with this from the garage (19 travel sets = 1 C5-S +
+  // 1 2oz each, so they are counted into those two sizes):
+  //   32oz 12 · 16oz 10 · 8oz 48 · 2oz 80+19 · C5-S 140+19 · C5-L 24
+  // Does exactly what Pack for Show does (garage down, packed, opening count,
+  // prices frozen, show started) and puts Isaiah on it as a crew-run show.
+  // Never packs twice: a show that is already packed or started is left alone.
+  if(!d._applied['fox_found_oct_pack_v76']){
+    try{ if(foxFoundOctPack(d).done)d._applied['fox_found_oct_pack_v76']=true; }
+    catch(e){ console.error('fox_found_oct_pack_v76',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -5977,6 +6064,47 @@ function burgooRestockFix(d){
   invLogPush(sh,{ts,di:R,date:days[R].date,type:'🔧 Restock repair (v73)',changes:log.length?log:['Restock already correct: '+b1.name+' 33/33, '+b2.name+' 24/24 (2oz / C5-S). Nothing changed.'],by:'owner'});
   auditState(d).log.push({ts,showId:sh.id,show:sh.name,msg:'Burgoo restock repair (v73): '+(log.length?log.join(' · '):'already correct, nothing changed')});
   return {done:true,day:R,log};
+}
+// v76: see the batman_borrow_oct16_v76 note in applyOneTimeUpdates.
+function bmBorrowOct16(d){
+  const it={'32oz':108,'16oz':60,'8oz':24}, L=bmLogOf(d);
+  if(L.some(e=>e&&e.id==='bmh_v76_oct16'))return true;
+  const b=(d.batmanBorrow&&typeof d.batmanBorrow==='object')?d.batmanBorrow:null;
+  if(!b||!SKUS.some(s=>(parseInt(b[s.key])||0)>0))return false;
+  d.inventory=d.inventory||{};
+  Object.keys(it).forEach(k=>{ b[k]=(parseInt(b[k])||0)+it[k]; d.inventory[k]=(parseInt(d.inventory[k])||0)+it[k]; });
+  const owed={}; SKUS.forEach(s=>owed[s.key]=parseInt(b[s.key])||0);
+  L.push({id:'bmh_v76_oct16',ts:new Date().toISOString(),date:'2026-10-16',type:'borrow',items:{...it},owed,
+    note:"Took from Mom's (v76)",src:'app'});
+  auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:"Borrowed from Batman (Mom's) Oct 16 (v76): 32oz 108, 16oz 60, 8oz 24 into the garage."});
+  return true;
+}
+// v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.
+function foxFoundOctPack(d){
+  const PACK={'32oz':12,'16oz':10,'8oz':48,'2oz':80+19,c5s:140+19,c5l:24};
+  const shows=(d.shows||[]).filter(sh=>sh&&!sh.passed&&sh.startDate==='2026-10-17'&&/fox|north aurora/i.test(sh.name||''));
+  const sh=shows.find(x=>(x.name||'').toLowerCase()==='fox & found — north aurora (oct)')||shows[0];
+  if(!sh)return {done:false,reason:'show not on this device yet'};
+  if(sh.status!=='planned'||sh.packedInventory)return {done:true,skipped:true,reason:'already packed or started'};
+  const n=v=>parseInt(v)||0, pk={}, log=[], short=[];
+  d.inventory=d.inventory||{};
+  SKUS.forEach(s=>{ const q=PACK[s.key]||0, have=n(d.inventory[s.key]); pk[s.key]=q;
+    if(have<q)short.push(s.short+' needed '+q+', garage showed '+have);
+    d.inventory[s.key]=Math.max(0,have-q);
+    log.push(s.short+' '+q+' (garage '+have+'→'+d.inventory[s.key]+')'); });
+  sh.status='active'; sh.packedInventory={...pk};
+  if(!truckMode(sh)&&sh.days&&sh.days[0])sh.days[0].morningCount={...pk};
+  if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(d.prices||{}));
+  if(!Array.isArray(sh.repIds))sh.repIds=[];
+  if(sh.repIds.indexOf('rep_isaiah')<0)sh.repIds.push('rep_isaiah');
+  sh.repOnlyShow=true;
+  const total=SKUS.reduce((t,s)=>t+pk[s.key],0);
+  const note='Packed from the garage Oct 16 (v76): '+SKUS.map(s=>s.short+' '+pk[s.key]).join(' · ')+' = '+total+' units. Includes 19 travel sets (1 C5-S + 1 2oz each). Isaiah working it.';
+  sh.notes=(sh.notes?sh.notes+' ':'')+note;
+  const ts=new Date().toISOString();
+  invLogPush(sh,{ts,di:0,date:(sh.days&&sh.days[0]&&sh.days[0].date)||'',type:'🎒 Packed from garage (v76)',changes:log.concat(short.length?['⚠️ Garage count was short, set to 0: '+short.join('; ')]:[],['Crew: Isaiah (crew-run)']),by:'owner'});
+  auditState(d).log.push({ts,showId:sh.id,show:sh.name,type:'pack',msg:'Fox & Found Oct packed for Isaiah (v76): '+total+' units from the garage'+(short.length?'; garage was short on '+short.join('; '):'')+'.'});
+  return {done:true,pk,short};
 }
 // ===================================================
 // v72 — PREVIOUS YEARS: what this same show did in earlier years

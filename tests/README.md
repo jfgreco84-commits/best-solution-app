@@ -19,6 +19,8 @@ node tests/previous-years.test.js
 node tests/burgoo-restock-fix.test.js
 node tests/inventory-alert.test.js
 node tests/batman-history.test.js
+node tests/fox-found-oct-pack.test.js
+node tests/womens-expo.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 

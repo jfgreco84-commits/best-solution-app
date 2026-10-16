@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
+**NEWEST: [v76 Fox & Found Oct packed for Isaiah, Oct 16 2026](2026-10-16-v76-fox-found-oct-pack.md)** (352 units from the garage incl. 19 travel sets, Isaiah crew-run; plus 192 bottles borrowed from Batman Oct 16; Chicago Women's Expo Oct 24-25 added)
 
-**Previous: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
+**Previous: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
+
+**Before that: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
 
 **Before that: [v73 Burgoo restock repair, Oct 11 2026](2026-10-11-v73-burgoo-restock-fix.md)** (Day 2 restock 33/33 F37, 24/24 Jamie's Outpost, set right on load)
 

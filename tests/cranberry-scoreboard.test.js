@@ -122,6 +122,8 @@ R.section('4. Batman: borrowing puts bottles in the garage again');
   const {ctx}=world();
   // first load: every older migration settles, Batman tally is still empty
   const d=state(ctx);
+  d._applied['fox_found_oct_pack_v76']=true;   // v76 packs a show from the garage; tested in fox-found-oct-pack
+  d._applied['batman_borrow_oct16_v76']=true;  // v76 Oct 16 borrow; tested in fox-found-oct-pack
   ctx.applyOneTimeUpdates(d);
   chk('4a. no borrow yet: stays pending',!!d._applied['batman_to_garage_20260924'],false);
   d.inventory=cnt({'8oz':100,'2oz':100,c5l:100});
