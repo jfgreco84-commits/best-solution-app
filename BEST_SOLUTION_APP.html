@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v75';
+const APP_VERSION='v76';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -1499,6 +1499,18 @@ function applyOneTimeUpdates(d){
   if(!d._applied['batman_history_seed_v75']){
     try{ if(bmSeedHistory(d))d._applied['batman_history_seed_v75']=true; }
     catch(e){ console.error('batman_history_seed_v75',e); }
+  }
+
+  // v76: Fox & Found North Aurora, Sat Oct 17 2026. Froggy is sending Isaiah
+  // to work it alone with this from the garage (19 travel sets = 1 C5-S +
+  // 1 2oz each, so they are counted into those two sizes):
+  //   32oz 12 · 16oz 10 · 8oz 48 · 2oz 80+19 · C5-S 140+19 · C5-L 24
+  // Does exactly what Pack for Show does (garage down, packed, opening count,
+  // prices frozen, show started) and puts Isaiah on it as a crew-run show.
+  // Never packs twice: a show that is already packed or started is left alone.
+  if(!d._applied['fox_found_oct_pack_v76']){
+    try{ if(foxFoundOctPack(d).done)d._applied['fox_found_oct_pack_v76']=true; }
+    catch(e){ console.error('fox_found_oct_pack_v76',e); }
   }
 
   // v39: garage deliveries land on the opening count, not on restock.
@@ -5977,6 +5989,33 @@ function burgooRestockFix(d){
   invLogPush(sh,{ts,di:R,date:days[R].date,type:'🔧 Restock repair (v73)',changes:log.length?log:['Restock already correct: '+b1.name+' 33/33, '+b2.name+' 24/24 (2oz / C5-S). Nothing changed.'],by:'owner'});
   auditState(d).log.push({ts,showId:sh.id,show:sh.name,msg:'Burgoo restock repair (v73): '+(log.length?log.join(' · '):'already correct, nothing changed')});
   return {done:true,day:R,log};
+}
+// v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.
+function foxFoundOctPack(d){
+  const PACK={'32oz':12,'16oz':10,'8oz':48,'2oz':80+19,c5s:140+19,c5l:24};
+  const shows=(d.shows||[]).filter(sh=>sh&&!sh.passed&&sh.startDate==='2026-10-17'&&/fox|north aurora/i.test(sh.name||''));
+  const sh=shows.find(x=>(x.name||'').toLowerCase()==='fox & found — north aurora (oct)')||shows[0];
+  if(!sh)return {done:false,reason:'show not on this device yet'};
+  if(sh.status!=='planned'||sh.packedInventory)return {done:true,skipped:true,reason:'already packed or started'};
+  const n=v=>parseInt(v)||0, pk={}, log=[], short=[];
+  d.inventory=d.inventory||{};
+  SKUS.forEach(s=>{ const q=PACK[s.key]||0, have=n(d.inventory[s.key]); pk[s.key]=q;
+    if(have<q)short.push(s.short+' needed '+q+', garage showed '+have);
+    d.inventory[s.key]=Math.max(0,have-q);
+    log.push(s.short+' '+q+' (garage '+have+'→'+d.inventory[s.key]+')'); });
+  sh.status='active'; sh.packedInventory={...pk};
+  if(!truckMode(sh)&&sh.days&&sh.days[0])sh.days[0].morningCount={...pk};
+  if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(d.prices||{}));
+  if(!Array.isArray(sh.repIds))sh.repIds=[];
+  if(sh.repIds.indexOf('rep_isaiah')<0)sh.repIds.push('rep_isaiah');
+  sh.repOnlyShow=true;
+  const total=SKUS.reduce((t,s)=>t+pk[s.key],0);
+  const note='Packed from the garage Oct 16 (v76): '+SKUS.map(s=>s.short+' '+pk[s.key]).join(' · ')+' = '+total+' units. Includes 19 travel sets (1 C5-S + 1 2oz each). Isaiah working it.';
+  sh.notes=(sh.notes?sh.notes+' ':'')+note;
+  const ts=new Date().toISOString();
+  invLogPush(sh,{ts,di:0,date:(sh.days&&sh.days[0]&&sh.days[0].date)||'',type:'🎒 Packed from garage (v76)',changes:log.concat(short.length?['⚠️ Garage count was short, set to 0: '+short.join('; ')]:[],['Crew: Isaiah (crew-run)']),by:'owner'});
+  auditState(d).log.push({ts,showId:sh.id,show:sh.name,type:'pack',msg:'Fox & Found Oct packed for Isaiah (v76): '+total+' units from the garage'+(short.length?'; garage was short on '+short.join('; '):'')+'.'});
+  return {done:true,pk,short};
 }
 // ===================================================
 // v72 — PREVIOUS YEARS: what this same show did in earlier years

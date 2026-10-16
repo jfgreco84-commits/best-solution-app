@@ -102,6 +102,7 @@ R.section('3. One-time back-fill from the backups');
 
   d.batmanBorrow=Object.assign({},SEP30);
   d._applied['batman_to_garage_20260924']=true;   // v42 is tested in cranberry-scoreboard
+  d._applied['fox_found_oct_pack_v76']=true;      // v76 packs a show from the garage; tested in fox-found-oct-pack
   const inv=JSON.stringify(d.inventory);
   ctx.applyOneTimeUpdates(d);
   const L=d.settings.batmanLog;
