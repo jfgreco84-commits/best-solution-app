@@ -1,0 +1,99 @@
+// v77 — expense audit: paper towels, shelf liner, lunch, no candy, gas, booth + miles fill.
+// SYNTHETIC FIXTURES ONLY.
+//
+//   node tests/expense-audit.test.js
+'use strict';
+const {boot,reporter}=require('./harness.js');
+const R=reporter();
+const chk=R.check;
+const {ctx,run}=boot();
+const r2=n=>Math.round(n*100)/100;
+const blank=()=>({v:7,inventory:{},shows:[],reps:[],prices:{},settings:{},_applied:{}});
+const full=()=>{ const d=blank(); ctx.applyOneTimeUpdates(d); return d; };
+const mk=(o)=>Object.assign(ctx.buildPlannedShow({name:'Test Show',location:'Racine, WI',startDate:'2027-03-06',numDays:1}),o||{});
+
+R.section('1. Paper towels: 2 rolls per person per day');
+{ const d=full(); ctx.S=d; d.settings.paperPackPrice=18; // $3 a roll
+  d.reps=[{id:'rep_self',name:'Froggy',isSelf:true,active:true},{id:'rep_a',name:'A',active:true},{id:'rep_b',name:'B',active:false}];
+  const solo=mk(); chk('1a. Froggy alone, 1 day = 2 rolls',ctx.showPaperRolls(solo),2);
+  const two=mk({repIds:['rep_a']}); chk('1b. 2-person booth, 1 day = 4 rolls',ctx.showPaperRolls(two),4);
+  const cran=mk({numDays:3,repIds:['rep_a','rep_b']}); chk('1c. 3 people x 3 days = 18 rolls (inactive rep still worked it)',ctx.showPaperRolls(cran),18);
+  chk('1d. cost = rolls x pack/6',ctx.showPaperCost(cran),54);
+  const crew=mk({repIds:['rep_a'],repOnlyShow:true}); chk('1e. crew-run show: Froggy not counted',ctx.showPaperRolls(crew),2);
+  const self=mk({repIds:['rep_self']}); chk('1f. Froggy listed on the crew is not counted twice',ctx.showPaperRolls(self),2); }
+
+R.section('2. Shelf liner, lunch, no candy');
+{ const d=full(); ctx.S=d;
+  const sh=mk({numDays:2});
+  chk('2a. liner = 2 rolls @ $12.49',ctx.showLinerCost(sh),24.98);
+  chk('2b. lunch = $20 x 2 days',ctx.showLunchCost(sh),40);
+  sh.showExpenses=[{id:'f',cat:'food',amount:30}];
+  chk('2c. real food logged: no auto lunch',ctx.showLunchCost(sh),0);
+  chk('2d. no candy function left',typeof ctx.candyPerShow,'undefined');
+  chk('2e. candy gone from supplies, paper + liner added',[d.supplies.some(x=>/candy/i.test(x.name)),d.supplies.some(x=>x.id==='sup_paper'),d.supplies.some(x=>x.id==='sup_liner')],[false,true,true]);
+  chk('2f. settings defaults',[d.settings.paperPackPrice,d.settings.linerRollCost,d.settings.lunchPerDay,'candyPerShow' in d.settings],[17.5,12.49,20,false]); }
+
+R.section('3. Missed / passed shows carry no overhead');
+{ const d=full(); ctx.S=d;
+  const past=mk({startDate:'2025-01-04'}); chk('3a. missed show',[ctx.showPaperCost(past),ctx.showLinerCost(past),ctx.showLunchCost(past)],[0,0,0]);
+  const p=mk({passed:true}); chk('3b. passed show',[ctx.showPaperCost(p),ctx.showLinerCost(p),ctx.showLunchCost(p)],[0,0,0]); }
+
+R.section('4. calcShow books it, the receipt and P&L add up');
+{ const d=full(); ctx.S=d; d.reps=[{id:'rep_self',name:'Froggy',isSelf:true,active:true}];
+  const sh=mk({status:'completed',startDate:'2026-10-03',miles:20,numDays:1}); d.shows.push(sh);
+  const t=ctx.calcShow(sh);
+  chk('4a. lunch in calcShow',t.lunch,20);
+  chk('4b. supplyCost = paper + liner',r2(t.supplyCost),r2(ctx.showPaperCost(sh)+ctx.showLinerCost(sh)));
+  const V=ctx.bxView(d), v=V.calcShow(sh);
+  chk('4c. snapshot engine agrees on expenses',r2(v.expenses),r2(t.expenses));
+  chk('4d. snapshot engine agrees on lunch + supplies',[v.lunch,r2(v.supplyCost)],[t.lunch,r2(t.supplyCost)]);
+  const html=ctx.showExpenseRowsHTML(sh);
+  chk('4e. receipt names lunch and paper rolls, no candy',[/Lunch/.test(html),/paper rolls/.test(html),/candy/i.test(html)],[true,true,false]); }
+
+R.section('5. Gas');
+{ const d=full(); ctx.S=d;
+  const sh=mk({miles:100,totalMiles:300,gasPrice:4,mpg:20});
+  chk('5a. estimate uses totalMiles when set',r2(ctx.showGas(sh)),60);
+  sh.showExpenses=[{id:'g',cat:'fuel',amount:75}];
+  const be=ctx.calcBreakEven(sh);
+  chk('5b. break-even: fuel receipt is the gas, estimate not added on top',[be.parts.gas,be.parts.showExp],[0,75]);
+  const be2=ctx.calcBreakEven(mk({miles:35,gasPrice:4,mpg:17.5,numDays:1}));
+  chk('5c. no receipt: estimate used',r2(be2.parts.gas),16);
+  chk('5d. default gas moved off $3.50',d.settings.gasPrice,4.2); }
+
+R.section('6. One-time fill on a full board');
+{ const d=full();
+  const f=(re,dt)=>d.shows.find(s=>re.test(s.name)&&s.startDate===dt);
+  chk('6a. Rustic Fox Carol Stream Aug/Sep/Oct: $60 booth, paid',[ '2026-08-02','2026-09-06','2026-10-04'].map(dt=>{const s=f(/rustic fox/i,dt);return [s.boothCost,ctx.boothPaid?s.boothPayments.reduce((t,p)=>t+p.amount,0):0];}),[[60,60],[60,60],[60,60]]);
+  const fx=f(/fox & found/i,'2026-10-17');
+  chk('6b. Fox & Found Oct 17: $60 owed, confirmed',[fx.boothCost,fx.boothPayments.length,/confirmed by Froggy/.test(fx.notes)],[60,0,true]);
+  const may=f(/rustic fox/i,'2026-05-03');
+  chk('6c. pre-contract Rustic Fox (May): no booth, passed with a reason',[may.boothCost,may.passed,/contract/.test(may.passedReason)],[0,true,true]);
+  chk('6c2. all eight pre-contract markets passed',d.shows.filter(s=>/rustic fox|fox & found/i.test(s.name)&&s.startDate<'2026-10-01'&&s.passed).length,8);
+  const sm=f(/st\.? martin/i,'2026-09-06');
+  chk('6c3. St. Martins $245 paid',[sm.boothCost,sm.boothPayments.reduce((t,p)=>t+p.amount,0)],[245,245]);
+  chk('6c4. holiday markets passed except Sip & Sleigh Carol Stream',d.shows.filter(s=>/sip & sleigh|kris kringle/i.test(s.name)).map(s=>[s.name,!!s.passed]),
+    [['Sip & Sleigh — Carol Stream',false],['Sip & Sleigh — North Aurora',true],['Kris Kringle — Carol Stream',true],['Kris Kringle — North Aurora',true]]);
+  chk('6d. blank miles filled',['Polish Fest','Waukesha County Fair','McHenry County Fair','Burgoo','Baraboo'].map(n=>d.shows.find(s=>s.name.indexOf(n)>=0).miles),[32,22,45,150,110]);
+  chk('6e. Maxwell Street 14 mi',d.shows.filter(s=>/maxwell/i.test(s.name)).every(s=>s.miles===14),true);
+  chk('6f. finished show frozen at its month gas price',f(/rustic fox/i,'2026-08-02').gasPrice,4.05);
+  chk('6g. upcoming show keeps the default',d.shows.find(s=>/women.?s expo/i.test(s.name)).gasPrice==null,true);
+  ctx.applyOneTimeUpdates(d); // other seeds finish on the second load
+  const keep=JSON.stringify(d.shows);
+  delete d._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d);
+  chk('6h. rerun changes nothing, no double payment',JSON.stringify(d.shows),keep); }
+
+R.section('7. Never overwrites what is there');
+{ const d=full(); const sh=d.shows.find(s=>/rustic fox/i.test(s.name)&&s.startDate==='2026-09-06');
+  const d2=blank(); d2._applied={}; ctx.applyOneTimeUpdates(d2);
+  const own=d2.shows.find(s=>/rustic fox/i.test(s.name)&&s.startDate==='2026-09-06');
+  own.boothCost=75; own.boothPayments=[]; own.miles=88; own.gasPrice=3.99;
+  delete d2._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d2);
+  chk('7a. booth, miles, gas price kept',[own.boothCost,own.boothPayments.length,own.miles,own.gasPrice],[75,0,88,3.99]);
+  const d3=blank(); d3.settings.gasPrice=3.89; ctx.applyOneTimeUpdates(d3);
+  chk('7b. a gas price Froggy set himself is kept',d3.settings.gasPrice,3.89);
+  const d4=blank(); d4.shows=[]; d4._applied={}; Object.keys(ctx.MRG_SEED_RECORDS).forEach(k=>d4._applied[k]=true);
+  ctx.applyOneTimeUpdates(d4);
+  chk('7c. no shows yet: waits',!!d4._applied['expense_audit_v77'],false); }
+
+R.done();

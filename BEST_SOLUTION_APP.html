@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v76';
+const APP_VERSION='v77';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -521,7 +521,8 @@ const DEFAULT_SUPPLIES=[
   {id:'sup_cards',     name:'Business Cards',      qty:0,low:50,unit:'ea'},
   {id:'sup_flyers',    name:'Flyers',              qty:0,low:20,unit:'ea'},
   {id:'sup_hsani',     name:'Hand Sanitizer',      qty:0,low:1, unit:'bottle'},
-  {id:'sup_candy',     name:'Candy/Mints',         qty:0,low:1, unit:'bag'},
+  {id:'sup_paper',     name:'Paper Towels (Bounty)',qty:0,low:6, unit:'roll'},
+  {id:'sup_liner',     name:'Shelf Liner',         qty:0,low:2, unit:'roll'},
   {id:'sup_change',    name:'Change Bag (Cash)',   qty:0,low:1, unit:'ea'}
 ];
 const INIT={
@@ -1588,6 +1589,7 @@ function applyOneTimeUpdates(d){
     catch(e){ console.error('fox_found_oct_pack_v76',e); }
   }
 
+
   // v39: garage deliveries land on the opening count, not on restock.
   if(!d._applied['garage_in_v39']){
     try{ migrateGarageRowsV39(d); }catch(e){ console.error('garage_in_v39',e); }
@@ -2474,6 +2476,19 @@ function applyOneTimeUpdates(d){
     if(!sh.repPayMeta)sh.repPayMeta={};
   });
 
+  // v77 (runs after every seed so it sees the whole board): expense audit (Froggy, Oct 17 2026). New overhead settings (no candy,
+  // Bounty pack price, shelf liner roll, $20 lunch), gas at the Oct 2026 WI
+  // price with past shows frozen at the price of their month, blank booth
+  // fees and blank one-way miles filled. Only blanks are filled. Waits for a
+  // device that holds shows so a blank device before cloud sync books nothing.
+  if(!d._applied['expense_audit_v77']){
+    try{ if(expenseAuditV77(d).done)d._applied['expense_audit_v77']=true; }
+    catch(e){ console.error('expense_audit_v77',e); }
+  }
+
+  // v77: blank miles + gas price of finished shows, every load (see v77FillBlanks)
+  try{ v77FillBlanks(d); }catch(e){ console.error('v77FillBlanks',e); }
+
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
   // NOT marker gated, so a document arriving from an older build, an older
   // backup or the cloud is put into the invoice shape whether or not it
@@ -3339,8 +3354,10 @@ function calcShow(sh){
   exp+=gasAuto;
   exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   exp+=(sh.lodging||0);
-  const supplyCost=(typeof showSupplyCost==='function')?showSupplyCost(sh):0; // auto bags + manual supplies (0 until costs entered)
+  const supplyCost=(typeof showSupplyCost==='function')?showSupplyCost(sh):0; // auto bags + paper towels + shelf liner + manual supplies
   exp+=supplyCost;
+  const lunch=(typeof showLunchCost==='function')?showLunchCost(sh):0; // v77: $20 a show day unless food was logged
+  exp+=lunch;
   // Rep pay — per-day amounts entered daily (legacy per-show payouts still honored); owner's comp = net profit
   const repPay=showRepPayTotal(sh);
   exp+=repPay;
@@ -3357,7 +3374,7 @@ function calcShow(sh){
   const salesTax=ctr>0?(Math.round(showCardSales(sh)*ctr/(1+ctr)*100)/100):0;
   const profit=gross-salesTax-cogs-exp;
   const taxRes=Math.max(0,profit)*showTaxRate(sh); // tax reserve = % of NET PROFIT (not gross, not card sales)
-  return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,cardFees,salesTax,gasAuto,booth,potential,profit,taxRes};
+  return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,lunch,cardFees,salesTax,gasAuto,booth,potential,profit,taxRes};
 }
 function showCardTaxRate(sh){ return (sh&&sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?(parseFloat(sh.cardTaxRate)||0):((S.settings&&S.settings.cardTax!=null)?(parseFloat(S.settings.cardTax)||0):0); }
 // Every dollar inside calcShow().expenses, itemised. Booth rent is line one.
@@ -3374,7 +3391,8 @@ function showExpenseRowsHTML(sh){
     ['⛽ Gas / food / parking logged on days',dayExp,''],
     ['🏨 Lodging',(sh.lodging||0),sh.lodgingNote?_esc(sh.lodgingNote):''],
     ['💸 Other show expenses',otherExp,(sh.showExpenses||[]).length?((sh.showExpenses||[]).length+' item'+((sh.showExpenses||[]).length>1?'s':'')):''],
-    ['🧴 Supplies (bags, candy, paper)',t.supplyCost,''],
+    ['🧴 Supplies (bags, paper towels, shelf liner)',t.supplyCost,showOverheadOn(sh)?(showPaperRolls(sh)+' paper rolls + '+LINER_ROLLS_PER_SHOW+' liner'):''],
+    ['🥪 Lunch',t.lunch||0,(t.lunch>0)?(showOverheadDays(sh)+' day'+(showOverheadDays(sh)>1?'s':'')+' @ '+fmt(lunchPerDay())):''],
     ['💵 Rep day pay',t.repPay,''],
     ['🧍 Worker payouts',t.workerPay,''],
     ['💳 Card processing fees',t.cardFees,t.cardFees>0?(((S.settings.sqFee||0)*100).toFixed(1)+'% of card sales'):'']
@@ -4802,9 +4820,9 @@ function showGasPrice(sh){ return (sh.gasPrice!=null && sh.gasPrice!=='') ? (par
 function showGas(sh){
   if(sh.gasOverride!=null && sh.gasOverride!=='') return parseFloat(sh.gasOverride)||0;
   const mpg=showMpg(sh)||17.5, gp=showGasPrice(sh);
-  return (sh.miles||0)*2*showRoundTrips(sh)/mpg*gp;
+  return showMiles(sh)/mpg*gp; // v77: same miles the screen shows (totalMiles when the route is not a simple back-and-forth)
 }
-function showMiles(sh){ const t=parseFloat(sh&&sh.totalMiles); if(isFinite(t)&&t>0)return t; return (sh.miles||0)*2*showRoundTrips(sh); } // v55: totalMiles = the owner's real route when it is not a simple back-and-forth
+function showMiles(sh){ const t=parseFloat(sh&&sh.totalMiles); if(isFinite(t)&&t>0)return t; return (parseFloat(sh.miles)||0)*2*showRoundTrips(sh); } // v55: totalMiles = the owner's real route when it is not a simple back-and-forth
 function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax||0.28); }
 // Card/Square sales = taxable base. Counts only card-type payments (Square + Debit), NOT cash/Venmo/Zelle/etc.
 function showCardSales(sh){
@@ -4820,12 +4838,33 @@ function showAutoSupplyUnits(sh){ const sold=(typeof showUnitsSold==='function')
 // Bags = $0.20 each (any size). 5x7 holds 2× 2oz (½ bag per 2oz); 6x9 holds 8oz polish + 8oz C5 (1 per 8oz);
 // 8x12 holds 16oz OR 32oz polish + 8oz C5 (1 each). The C5 rides inside the polish bag, so it adds no bag.
 function bagUnitCost(){ return (S.settings&&S.settings.bagCost!=null&&S.settings.bagCost!=='')?(parseFloat(S.settings.bagCost)||0):0.20; }
-function candyPerShow(){ return (S.settings&&S.settings.candyPerShow!=null&&S.settings.candyPerShow!=='')?(parseFloat(S.settings.candyPerShow)||0):10; }
-function paperPerShow(){ return (S.settings&&S.settings.paperPerShow!=null&&S.settings.paperPerShow!=='')?(parseFloat(S.settings.paperPerShow)||0):20; }
+// v77 overhead rules (Froggy, Oct 17 2026). No candy any more.
+//   Paper towels: 2 rolls per person per show day (hard rule). A 2-person booth
+//   used 4 rolls a day at Cranberry. Priced from a 6-roll Bounty pack.
+//   Shelf liner: 2 rolls every show.
+//   Lunch: $20 every show day, unless real food was logged on the show.
+const PAPER_ROLLS_PER_PERSON_DAY=2, PAPER_ROLLS_PER_PACK=6, LINER_ROLLS_PER_SHOW=2;
+function _stNum(k,dflt){ return (S.settings&&S.settings[k]!=null&&S.settings[k]!=='')?(parseFloat(S.settings[k])||0):dflt; }
+function paperPackPrice(){ return _stNum('paperPackPrice',17.50); } // Bounty Select-A-Size, 6 double rolls, Oct 2026 average
+function paperRollCost(){ return paperPackPrice()/PAPER_ROLLS_PER_PACK; }
+function linerRollCost(){ return _stNum('linerRollCost',12.49); } // Duck Select Grip EasyLiner 20in x 18ft
+function lunchPerDay(){ return _stNum('lunchPerDay',20); }
+function showOverheadOn(sh){ return !((typeof isMissed==='function'&&isMissed(sh))||(typeof isPassed==='function'&&isPassed(sh))); }
+function showOverheadDays(sh){ return Math.max(1,parseInt(sh&&sh.numDays,10)||((sh&&sh.days)||[]).length||1); }
+// Everyone working the table: the crew on the show (active or not, it is history) + Froggy unless crew-run.
+function showPaperCrew(sh){ const ids=new Set((sh&&sh.repIds)||[]);
+  const n=[...ids].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return !r||!r.isSelf; }).length;
+  return Math.max(1,n+((sh&&sh.repOnlyShow)?0:1)); }
+function showPaperRolls(sh){ return showOverheadOn(sh)?PAPER_ROLLS_PER_PERSON_DAY*showPaperCrew(sh)*showOverheadDays(sh):0; }
+function showPaperCost(sh){ return Math.round(showPaperRolls(sh)*paperRollCost()*100)/100; }
+function showLinerCost(sh){ return showOverheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*linerRollCost()*100)/100:0; }
+function showFoodLogged(sh){ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+  (sh.days||[]).forEach(d=>{ if(d&&d.expenses)t+=parseFloat(d.expenses.food)||0; }); return t; }
+function showLunchCost(sh){ if(!showOverheadOn(sh)||showFoodLogged(sh)>0)return 0; return showOverheadDays(sh)*lunchPerDay(); }
 function showBagCount(sh){ const u=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; if(!u)return 0;
   return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0); } // C5 rides in the polish bag
 function showBagCost(sh){ return showBagCount(sh)*bagUnitCost(); }
-function showFlatOverhead(sh){ return ((typeof isMissed==='function'&&isMissed(sh))||(typeof isPassed==='function'&&isPassed(sh)))?0:(candyPerShow()+paperPerShow()); } // candy + paper towels, flat per show (not on missed shows)
+function showFlatOverhead(sh){ return showPaperCost(sh)+showLinerCost(sh); } // paper towels + shelf liner (not on missed / passed shows). Lunch is booked as food, see showLunchCost.
 function showSupplyCost(sh){
   let cost=0; const auto=showAutoSupplyUnits(sh);
   (S.supplies||[]).forEach(sup=>{ const q=auto[sup.name]||0; if(q>0)cost+=q*(parseFloat(sup.cost)||0); });
@@ -4979,9 +5018,13 @@ function saveEditCosts(id){
 function calcBreakEven(sh){
   const mpg=S.settings.mpg||17.5;
   const gp=S.settings.gasPrice||3.50;
-  const gas=showGas(sh);
-  const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
-  const flatOverhead=(typeof showFlatOverhead==='function')?showFlatOverhead(sh):0; // candy + paper towels
+  // v77: a logged Fuel receipt IS the gas (it is already inside showExp), so the estimate only fills in when none is logged.
+  let loggedGas=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  (sh.days||[]).forEach(d=>{ if(d&&d.expenses)loggedGas+=parseFloat(d.expenses.gas)||0; });
+  const gas=loggedGas>0?0:showGas(sh);
+  let dayExp=0; (sh.days||[]).forEach(d=>{ if(d&&d.expenses)dayExp+=Object.values(d.expenses).reduce((a,b)=>a+(parseFloat(b)||0),0); });
+  const showExp=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0)+dayExp;
+  const flatOverhead=((typeof showFlatOverhead==='function')?showFlatOverhead(sh):0)+((typeof showLunchCost==='function')?showLunchCost(sh):0); // paper towels + shelf liner + lunch
   const workerPay=(typeof showWorkerPayouts==='function')?showWorkerPayouts(sh):0; // flat/hourly/manual workers are fixed labor
   // Rep day pay is flat labor too (no % of sales anymore) — whatever's been entered counts as a fixed cost.
   const repPay=(typeof showRepPayTotal==='function')?showRepPayTotal(sh):0;
@@ -5019,7 +5062,7 @@ function breakEvenHTML(sh,opts){
     ['Gas',p.gas],
     ['Lodging',p.lodging],
     ['Other show expenses',p.showExp],
-    ['Candy + paper',p.flatOverhead],
+    ['Paper towels, liner + lunch',p.flatOverhead],
     ['Crew pay',(p.repPay||0)+(p.workerPay||0)]
   ].filter(x=>(x[1]||0)>0.005);
   const chips=bits.map(x=>`<span class="chip" style="font-size:10px">${x[0]}: <strong style="color:var(--gold)">${fmt(x[1])}</strong></span>`).join('')
@@ -5257,11 +5300,11 @@ function rPnL(){
 
   // Expense breakdown, v48: built from calcShow's own parts (+ future-show
   // deposits + business purchases) so the lines add up to Total Expenses.
-  let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0,gasTotal=0,supplyTotal=0,repTotal=0,workerTotal=0,feeTotal=0;
+  let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0,gasTotal=0,supplyTotal=0,lunchTotal=0,repTotal=0,workerTotal=0,feeTotal=0;
   S.shows.forEach(sh=>{
     if(sh.status==='completed'||sh.status==='active'){
       const t=calcShow(sh);
-      boothTotal+=t.booth; gasTotal+=t.gasAuto; supplyTotal+=t.supplyCost; repTotal+=t.repPay; workerTotal+=t.workerPay; feeTotal+=t.cardFees;
+      boothTotal+=t.booth; gasTotal+=t.gasAuto; supplyTotal+=t.supplyCost; lunchTotal+=t.lunch||0; repTotal+=t.repPay; workerTotal+=t.workerPay; feeTotal+=t.cardFees;
       showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
       lodgingTotal+=sh.lodging||0;
       (sh.days||[]).forEach(d=>{if(d.expenses)Object.keys(d.expenses).forEach(k=>{ const v=parseFloat(d.expenses[k])||0; if(k==='gas')gasTotal+=v; else dayExpTotal+=v; });});
@@ -5301,12 +5344,13 @@ function rPnL(){
     <div class="sr"><span class="srl">Booth / Vendor Fees</span><span class="srv red">-${fmt(boothTotal)}</span></div>
     <div class="sr"><span class="srl">Gas + Lodging</span><span class="srv red">-${fmt(gasTotal+lodgingTotal)}</span></div>
     <div class="sr"><span class="srl">Show + Day Expenses (food, parking, etc.)</span><span class="srv red">-${fmt(showExpTotal+dayExpTotal)}</span></div>
-    <div class="sr"><span class="srl">Show Supplies (bags, candy, paper)</span><span class="srv red">-${fmt(supplyTotal)}</span></div>
+    <div class="sr"><span class="srl">Show Supplies (bags, paper towels, shelf liner)</span><span class="srv red">-${fmt(supplyTotal)}</span></div>
+    ${lunchTotal>0?`<div class="sr"><span class="srl">Lunch ($${lunchPerDay()} a show day, no food logged)</span><span class="srv red">-${fmt(lunchTotal)}</span></div>`:''}
     <div class="sr"><span class="srl">Rep Pay</span><span class="srv red">-${fmt(repTotal)}</span></div>
     ${workerTotal>0?`<div class="sr"><span class="srl">Worker Payouts</span><span class="srv red">-${fmt(workerTotal)}</span></div>`:''}
     <div class="sr"><span class="srl">Card Processing Fees</span><span class="srv red">-${fmt(feeTotal)}</span></div>
     <div class="sr" style="border-bottom:none"><span class="srl">Business Purchases (equipment, software, insurance)</span><span class="srv red">-${fmt(globalSupply)}</span></div>
-    ${Math.abs(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+repTotal+workerTotal+feeTotal+globalSupply-expenseTotal)>0.01?`<div class="wb red" style="font-size:11px;margin-top:6px">⚠️ These lines are ${fmt(expenseTotal-(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+repTotal+workerTotal+feeTotal+globalSupply))} off Total Expenses. Tell Claude.</div>`:''}
+    ${Math.abs(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+lunchTotal+repTotal+workerTotal+feeTotal+globalSupply-expenseTotal)>0.01?`<div class="wb red" style="font-size:11px;margin-top:6px">⚠️ These lines are ${fmt(expenseTotal-(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+lunchTotal+repTotal+workerTotal+feeTotal+globalSupply))} off Total Expenses. Tell Claude.</div>`:''}
     ${ytd.salesTax>0?`<div class="sr" style="border-bottom:none"><span class="srl b">🧾 Sales Tax OWED TO STATE (card sales)</span><span class="srv red b">-${fmt(ytd.salesTax)}</span></div>`:''}
   </div>
   ${(()=>{
@@ -5833,10 +5877,10 @@ function exportAccountantPkg(){
   rows.push(['IRS mileage deduction @ $'+(S.settings.irsRate||0.70)+'/mi',(y.miles*(S.settings.irsRate||0.70)).toFixed(2)]);
   rows.push([]);
   rows.push(['PER SHOW']);
-  rows.push(['Show','Start Date','Status','Collected','Sales Tax Owed','COGS','Booth (paid basis)','Gas (auto)','Card Fees','Rep Pay','Worker Pay','Supplies','Profit','Tax Reserve','Miles']);
+  rows.push(['Show','Start Date','Status','Collected','Sales Tax Owed','COGS','Booth (paid basis)','Gas (auto)','Card Fees','Rep Pay','Worker Pay','Supplies','Lunch','Profit','Tax Reserve','Miles']);
   (S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{
     const t=calcShow(sh);
-    rows.push([sh.name,sh.startDate||'',sh.status,t.gross.toFixed(2),(t.salesTax||0).toFixed(2),t.cogs.toFixed(2),(t.booth||sh.boothCost||0).toFixed(2),(t.gasAuto||0).toFixed(2),(t.cardFees||0).toFixed(2),t.repPay.toFixed(2),t.workerPay.toFixed(2),(t.supplyCost||0).toFixed(2),t.profit.toFixed(2),t.taxRes.toFixed(2),Math.round(showMiles(sh))]);
+    rows.push([sh.name,sh.startDate||'',sh.status,t.gross.toFixed(2),(t.salesTax||0).toFixed(2),t.cogs.toFixed(2),(t.booth||sh.boothCost||0).toFixed(2),(t.gasAuto||0).toFixed(2),(t.cardFees||0).toFixed(2),t.repPay.toFixed(2),t.workerPay.toFixed(2),(t.supplyCost||0).toFixed(2),(t.lunch||0).toFixed(2),t.profit.toFixed(2),t.taxRes.toFixed(2),Math.round(showMiles(sh))]);
   });
   rows.push([]);
   rows.push(['BUSINESS EXPENSES (year-round ledger, not per-show)']);
@@ -6008,7 +6052,7 @@ function printShowReport(shId){
         '<tr><td>Gas</td><td class="r">'+_money(p.gas||0)+'</td></tr>'+
         '<tr><td>Lodging</td><td class="r">'+_money(p.lodging||0)+'</td></tr>'+
         '<tr><td>Other show expenses</td><td class="r">'+_money(p.showExp||0)+'</td></tr>'+
-        '<tr><td>Candy + paper</td><td class="r">'+_money(p.flatOverhead||0)+'</td></tr>'+
+        '<tr><td>Paper towels, liner + lunch</td><td class="r">'+_money(p.flatOverhead||0)+'</td></tr>'+
         '<tr><td>Crew pay</td><td class="r">'+_money((p.repPay||0)+(p.workerPay||0))+'</td></tr>'+
         '<tr class="tot"><td>Fixed costs</td><td class="r">'+_money(be.fixedCosts)+'</td></tr></table>'; })());
 }
@@ -6078,6 +6122,86 @@ function bmBorrowOct16(d){
     note:"Took from Mom's (v76)",src:'app'});
   auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:"Borrowed from Batman (Mom's) Oct 16 (v76): 32oz 108, 16oz 60, 8oz 24 into the garage."});
   return true;
+}
+// v77: see the expense_audit_v77 note in applyOneTimeUpdates.
+// Gas: AAA Wisconsin regular averages for 2026 (Apr 24 $3.83, Sep 17 $4.34,
+// Oct 9 $4.15, Oct 16 $4.25); months without a published figure are the
+// nearest readings. Miles: one way from Waterford, WI.
+const V77_GAS_BY_MONTH={'2026-05':3.85,'2026-06':3.95,'2026-07':4.03,'2026-08':4.05,'2026-09':4.30,'2026-10':4.20};
+const V77_GAS_NOW=4.20;
+const V77_MILES=[[/polish ?fest/i,32],[/maxwell/i,14],[/waukesha county fair/i,22],[/mchenry county fair/i,45],
+  [/burgoo/i,150],[/baraboo/i,110],[/cranberry/i,180],[/st\.? ?martin/i,22],[/party on the pavement/i,24],
+  [/last fling/i,30],[/rustic fox|carol stream/i,91],[/fox ?& ?found|north aurora/i,77]];
+const V77_MILES_BY_TOWN=[[/mukwonago/i,14],[/waukesha/i,22],[/woodstock|mchenry/i,45],[/utica/i,150],[/baraboo/i,110],
+  [/warrens/i,180],[/franklin/i,22],[/racine/i,24],[/antioch/i,30],[/west allis/i,24],[/west bend/i,38],[/pewaukee/i,32],
+  [/plymouth/i,62],[/rosemont/i,70],[/carol stream/i,91],[/north aurora/i,77],[/caledonia/i,20],[/milwaukee/i,30]];
+// Rustic Fox 2026 season: $60 a Sunday market (invoice "total 60 USD", Jul 30;
+// Carol Stream paid 2 of 3 by Jul 31, Oct 4 confirmed paid Sep 30). The Oct 17
+// North Aurora invoice was sent Sep 30; its amount is assumed to be the same $60.
+const V77_BOOTH=[
+  {re:/rustic fox|carol stream/i,date:'2026-08-02',cost:60,paid:true,note:'Rustic Fox 2026 season, $60 a market (invoice)'},
+  {re:/rustic fox|carol stream/i,date:'2026-09-06',cost:60,paid:true,note:'Rustic Fox 2026 season, $60 a market (invoice)'},
+  {re:/rustic fox|carol stream/i,date:'2026-10-04',cost:60,paid:true,note:'Rustic Fox 2026 season, $60 a market; Nicole confirmed paid Sep 30'},
+  {re:/fox ?& ?found|north aurora/i,date:'2026-10-17',cost:60,paid:false,note:'Rustic Fox final invoice for Oct 17 (sent Sep 30), $60 confirmed by Froggy Oct 17'},
+  {re:/st\.? ?martin/i,date:'2026-09-06',cost:245,paid:true,note:'St. Martins Fair booth $245, per Froggy Oct 17'}
+];
+// Not worked, per Froggy Oct 17: the Rustic Fox / Fox & Found markets before the
+// Jul 31 season contract, and the holiday markets (no holiday markets this year
+// except the one at Carol Stream, which stays on the board).
+const V77_PASS=[
+  [/rustic fox|carol stream/i,'2026-05-03'],[/rustic fox|carol stream/i,'2026-06-07'],[/rustic fox|carol stream/i,'2026-07-05'],
+  [/fox ?& ?found|north aurora/i,'2026-05-23'],[/fox ?& ?found|north aurora/i,'2026-06-20'],[/fox ?& ?found|north aurora/i,'2026-07-18'],
+  [/fox ?& ?found|north aurora/i,'2026-08-15'],[/fox ?& ?found|north aurora/i,'2026-09-19'],
+  [/sip ?& ?sleigh.*north aurora/i,null],[/kris kringle/i,null]];
+function expenseAuditV77(d){
+  const shows=(d&&d.shows)||[]; if(!shows.length)return {done:false};
+  const st=d.settings=d.settings||{}, log=[];
+  const today=_todayKey(), r2=n=>Math.round(n*100)/100;
+  // 1. overhead settings: no candy
+  delete st.candyPerShow; delete st.paperPerShow;
+  if(st.paperPackPrice==null||st.paperPackPrice==='')st.paperPackPrice=17.50;
+  if(st.linerRollCost==null||st.linerRollCost==='')st.linerRollCost=12.49;
+  if(st.lunchPerDay==null||st.lunchPerDay==='')st.lunchPerDay=20;
+  if(Array.isArray(d.supplies)){
+    d.supplies=d.supplies.filter(x=>!(x&&(x.id==='sup_candy'||/candy/i.test(x.name||''))));
+    if(!d.supplies.some(x=>x&&x.id==='sup_paper'))d.supplies.push({id:'sup_paper',name:'Paper Towels (Bounty)',qty:0,low:6,unit:'roll'});
+    if(!d.supplies.some(x=>x&&x.id==='sup_liner'))d.supplies.push({id:'sup_liner',name:'Shelf Liner',qty:0,low:2,unit:'roll'});
+  }
+  // 2. gas: past shows are frozen at their month's price (v77FillBlanks) before the default moves
+  log.push.apply(log,v77FillBlanks(d));
+  const oldGas=parseFloat(st.gasPrice);
+  if(!isFinite(oldGas)||oldGas<=0||oldGas===3.5){ st.gasPrice=V77_GAS_NOW; log.push('gas default $'+(isFinite(oldGas)?oldGas.toFixed(2):'—')+' → $'+V77_GAS_NOW.toFixed(2)); }
+  // 3. blank booth fees
+  V77_BOOTH.forEach(b=>{ const sh=shows.find(x=>x&&x.passed!==true&&x.startDate===b.date&&b.re.test(x.name||'')); if(!sh)return;
+    if((parseFloat(sh.boothCost)||0)>0||(sh.boothPayments||[]).length)return;
+    sh.boothCost=b.cost;
+    if(b.paid){ sh.boothPayments=[{id:'bp_v77_'+b.date,amount:b.cost,date:b.date,method:'',note:'v77: '+b.note}]; }
+    sh.notes=(sh.notes?sh.notes+' ':'')+'Booth $'+b.cost+' (v77): '+b.note+'.';
+    log.push(sh.name+' booth $'+b.cost+(b.paid?' paid':' owed'));
+    invLogPush(sh,{ts:new Date().toISOString(),type:'🏬 booth fee filled (v77)',changes:['$'+b.cost+(b.paid?' paid':' owed')+' · '+b.note],by:'owner'}); });
+  // 4. not worked: passed, never deleted (refused on a show that is active or completed)
+  V77_PASS.forEach(([re,date])=>{ shows.filter(x=>x&&!isPassed(x)&&re.test(x.name||'')&&(date?x.startDate===date:String(x.startDate||'').startsWith('2026')))
+    .forEach(x=>{ const why=date?'Before the Rustic Fox 2026 season contract (Jul 31), not worked':'No holiday markets this year except the one at Carol Stream';
+      if(pndMarkPassed(x,why,'','v77'))log.push(x.name+' passed'); }); });
+  if(st.audit&&Array.isArray(st.audit.log))st.audit.log.push({ts:new Date().toISOString(),type:'expense_audit_v77',msg:log.join(' · ')});
+  return {done:true,log};
+}
+// Shape driven, runs on every load (a show re-seeded or restored later gets
+// the same treatment): a finished show with no gas price of its own is frozen
+// at its month's WI average, and a show with no one-way miles gets them from
+// the name or the town. Fills blanks only, never overwrites.
+function v77FillBlanks(d){
+  const out=[], today=_todayKey();
+  ((d&&d.shows)||[]).forEach(sh=>{ if(!sh||sh.passed===true)return;
+    if(!((parseFloat(sh.miles)||0)>0)){
+      const hit=V77_MILES.find(x=>x[0].test(sh.name||''))||V77_MILES_BY_TOWN.find(x=>x[0].test(sh.location||''));
+      if(hit){ sh.miles=hit[1]; out.push(sh.name+' '+hit[1]+' mi'); } }
+    const end=showEndKey(sh)||sh.startDate||'';
+    if(end&&end<today&&(sh.gasPrice==null||sh.gasPrice==='')){
+      const gp=V77_GAS_BY_MONTH[String(sh.startDate||'').slice(0,7)];
+      if(gp){ sh.gasPrice=gp; out.push(sh.name+' gas $'+gp.toFixed(2)); } }
+  });
+  return out;
 }
 // v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.
 function foxFoundOctPack(d){
@@ -6407,14 +6531,13 @@ function rShow(){
     const autoRows=autoNames.map(name=>{const sup=(S.supplies||[]).find(x=>x.name===name);const c=sup?(parseFloat(sup.cost)||0):0;return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${name} × ${auto[name]}</span><span style="color:var(--muted)">${fmt(auto[name]*c)}</span></div>`;}).join('');
     const manRows=(sh.supplyUse||[]).map(u=>{const sup=(S.supplies||[]).find(x=>x.name===u.name);const c=sup?(parseFloat(sup.cost)||0):(parseFloat(u.cost)||0);return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${u.name} × ${u.qty}</span><span style="color:var(--muted)">${fmt((parseFloat(u.qty)||0)*c)}</span></div>`;}).join('');
     const bagN=showBagCount(sh); const bagC=showBagCost(sh);
-    const flatOn=!(typeof isMissed==='function'&&isMissed(sh));
-    const candyC=flatOn?candyPerShow():0; const paperC=flatOn?paperPerShow():0;
+    const paperC=showPaperCost(sh), linerC=showLinerCost(sh), paperN=showPaperRolls(sh);
     return `<div class="card" style="margin-top:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🧴 Supplies Used</div><button class="btn btn-xs btn-ghost" onclick="openSupplyUse('${sh.id}')">✏️ Edit</button></div>
-      ${(bagN||candyC||paperC)?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Bags &amp; overhead</div>
+      ${(bagN||linerC||paperC)?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Bags &amp; overhead</div>
         ${bagN?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Lace bags × ${bagN} <span style="color:var(--muted)">@ ${fmt(bagUnitCost())}</span></span><span style="color:var(--muted)">${fmt(bagC)}</span></div>`:''}
-        ${candyC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Candy (flat)</span><span style="color:var(--muted)">${fmt(candyC)}</span></div>`:''}
-        ${paperC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Paper towels (flat)</span><span style="color:var(--muted)">${fmt(paperC)}</span></div>`:''}`:''}
+        ${paperC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Paper towels × ${paperN} rolls <span style="color:var(--muted)">(2 per person per day: ${showPaperCrew(sh)} × ${showOverheadDays(sh)}d @ ${fmt(paperRollCost())})</span></span><span style="color:var(--muted)">${fmt(paperC)}</span></div>`:''}
+        ${linerC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Shelf liner × ${LINER_ROLLS_PER_SHOW} rolls <span style="color:var(--muted)">@ ${fmt(linerRollCost())}</span></span><span style="color:var(--muted)">${fmt(linerC)}</span></div>`:''}`:''}
       ${autoRows?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Auto give-aways (from sales)</div>${autoRows}`:''}
       ${manRows?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Manual</div>${manRows}`:''}
       ${sc>0?`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`:'<div style="font-size:12px;color:var(--muted)">No supply cost yet.</div>'}
@@ -8968,9 +9091,10 @@ function rSettings(){
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧴 SHOW SUPPLY COSTS</div>
   <div class="fg"><label class="fl">Lace bag cost ($ each)</label><input class="fi" type="number" id="st_bag" value="${bagUnitCost()}" step="0.01" min="0" onchange="setSt('bagCost',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Candy per show ($)</label><input class="fi" type="number" id="st_candy" value="${candyPerShow()}" step="1" min="0" onchange="setSt('candyPerShow',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Paper towels per show ($)</label><input class="fi" type="number" id="st_paper" value="${paperPerShow()}" step="1" min="0" onchange="setSt('paperPerShow',parseFloat(this.value))"></div>
-  <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag (2 per 5×7), 8oz/16oz/32oz = 1 bag each (C5 rides along in the polish bag). Candy + paper towels are flat per show. All auto-added to each show's expenses &amp; break-even.</div>
+  <div class="fg"><label class="fl">Bounty paper towels, 6-roll pack ($)</label><input class="fi" type="number" id="st_paper" value="${paperPackPrice()}" step="0.01" min="0" onchange="setSt('paperPackPrice',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Shelf liner, per roll ($)</label><input class="fi" type="number" id="st_liner" value="${linerRollCost()}" step="0.01" min="0" onchange="setSt('linerRollCost',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Lunch per show day ($)</label><input class="fi" type="number" id="st_lunch" value="${lunchPerDay()}" step="1" min="0" onchange="setSt('lunchPerDay',parseFloat(this.value))"></div>
+  <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag (2 per 5×7), 8oz/16oz/32oz = 1 bag each (C5 rides along in the polish bag). <b>Paper towels: 2 rolls per person per day</b> (a 2-person booth uses 4 rolls a day). <b>Shelf liner: 2 rolls every show.</b> <b>Lunch: every show day</b>, skipped on a show where real food was logged. No candy. All auto-added to each show's expenses &amp; break-even.</div>
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
@@ -9682,9 +9806,9 @@ function bxView(st){
   V.roundTrips=sh=>(sh.roundTrips!=null&&sh.roundTrips!=='')?N(sh.roundTrips):(sh.numDays||1);
   V.mpg=sh=>(sh.mpg!=null&&sh.mpg!=='')?N(sh.mpg):V.setting('mpg',17.5);
   V.gasPrice=sh=>(sh.gasPrice!=null&&sh.gasPrice!=='')?N(sh.gasPrice):V.setting('gasPrice',3.50);
-  V.miles=sh=>N(sh.miles)*2*V.roundTrips(sh);
+  V.miles=sh=>{ const t=N(sh.totalMiles); return t>0?t:N(sh.miles)*2*V.roundTrips(sh); };
   V.gas=sh=>{ if(sh.gasOverride!=null&&sh.gasOverride!=='')return N(sh.gasOverride);
-    const m=V.mpg(sh)||17.5; return N(sh.miles)*2*V.roundTrips(sh)/m*V.gasPrice(sh); };
+    const m=V.mpg(sh)||17.5; return V.miles(sh)/m*V.gasPrice(sh); };
   V.taxRate=sh=>(sh.taxRate!=null&&sh.taxRate!=='')?N(sh.taxRate):V.setting('tax',0.28);
   V.cardTaxRate=sh=>(sh&&sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?N(sh.cardTaxRate):V.setting('cardTax',0);
   V.cardSales=sh=>{ let t=0; (sh.days||[]).forEach(d=>{ if(d.payments)PMTS.forEach(p=>{
@@ -9698,11 +9822,18 @@ function bxView(st){
     return d.toISOString().split('T')[0]; };
   V.isMissed=sh=>sh.status!=='completed'&&sh.status!=='active'&&V.showEndKey(sh)<bxTodayKey();
   V.bagUnitCost=()=>V.setting('bagCost',0.20);
-  V.candyPerShow=()=>V.setting('candyPerShow',10);
-  V.paperPerShow=()=>V.setting('paperPerShow',20);
+  V.overheadOn=sh=>!V.isMissed(sh)&&!(sh&&sh.passed===true);
+  V.overheadDays=sh=>Math.max(1,parseInt(sh&&sh.numDays,10)||((sh&&sh.days)||[]).length||1);
+  V.paperCrew=sh=>{ const ids=[...new Set((sh&&sh.repIds)||[])].filter(id=>{ const r=(A.reps||[]).find(x=>x.id===id); return !r||!r.isSelf; });
+    return Math.max(1,ids.length+((sh&&sh.repOnlyShow)?0:1)); };
+  V.paperCost=sh=>V.overheadOn(sh)?Math.round(PAPER_ROLLS_PER_PERSON_DAY*V.paperCrew(sh)*V.overheadDays(sh)*V.setting('paperPackPrice',17.50)/PAPER_ROLLS_PER_PACK*100)/100:0;
+  V.linerCost=sh=>V.overheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*V.setting('linerRollCost',12.49)*100)/100:0;
+  V.foodLogged=sh=>{ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+N(e.amount),0);
+    (sh.days||[]).forEach(d=>{ if(d&&d.expenses)t+=N(d.expenses.food); }); return t; };
+  V.lunch=sh=>(!V.overheadOn(sh)||V.foodLogged(sh)>0)?0:V.overheadDays(sh)*V.setting('lunchPerDay',20);
   V.bagCount=sh=>{ const u=V.unitsSold(sh);
     return Math.ceil(N(u['2oz'])/2)+N(u['8oz'])+N(u['16oz'])+N(u['32oz']); };
-  V.flatOverhead=sh=>V.isMissed(sh)?0:(V.candyPerShow()+V.paperPerShow());
+  V.flatOverhead=sh=>V.paperCost(sh)+V.linerCost(sh);
   V.autoSupplyUnits=sh=>{ const sold=V.unitsSold(sh), out={};
     (A.supplies||[]).forEach(sup=>{ if(sup.autoSizes&&sup.autoSizes.length){ let q=0;
       sup.autoSizes.forEach(k=>q+=N(sold[k])); if(q>0)out[sup.name]=(out[sup.name]||0)+q; } }); return out; };
@@ -9748,6 +9879,7 @@ function bxView(st){
     exp+=(sh.showExpenses||[]).reduce((t,e)=>t+N(e.amount),0);
     exp+=N(sh.lodging);
     const supplyCost=V.supplyCost(sh); exp+=supplyCost;
+    const lunch=V.lunch(sh); exp+=lunch;
     const repPay=V.repPayTotal(sh); exp+=repPay;
     const workerPay=V.workerTotal(sh); exp+=workerPay;
     const cardFees=Math.round(V.cardSales(sh)*V.setting('sqFee',0)*100)/100; exp+=cardFees;
@@ -9756,7 +9888,7 @@ function bxView(st){
     const salesTax=ctr>0?(Math.round(V.cardSales(sh)*ctr/(1+ctr)*100)/100):0;
     const profit=gross-salesTax-cogs-exp;
     const taxRes=Math.max(0,profit)*V.taxRate(sh);
-    return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,cardFees,salesTax,gasAuto,booth,potential,profit,taxRes};
+    return{gross,cogs,expenses:exp,repPay,workerPay,supplyCost,lunch,cardFees,salesTax,gasAuto,booth,potential,profit,taxRes};
   };
   return V;
 }
@@ -10038,7 +10170,8 @@ function bxCsvFiles(st,meta){
     (sh.days||[]).forEach(d=>Object.keys(d.expenses||{}).forEach(k=>{ const v=bxNum(d.expenses[k]);
       if(v)r.push(['day',sh.id,sh.name,d.date||'',k,v.toFixed(2),'']); }));
     if(bxNum(sh.lodging))r.push(['show',sh.id,sh.name,sh.startDate||'','lodging',bxNum(sh.lodging).toFixed(2),'']);
-    const sc=V.supplyCost(sh); if(sc)r.push(['auto',sh.id,sh.name,sh.startDate||'','supplies+bags+overhead',sc.toFixed(2),'computed from snapshot settings']);
+    const sc=V.supplyCost(sh); if(sc)r.push(['auto',sh.id,sh.name,sh.startDate||'','supplies+bags+paper towels+shelf liner',sc.toFixed(2),'computed from snapshot settings']);
+    const ln=V.lunch(sh); if(ln)r.push(['auto',sh.id,sh.name,sh.startDate||'','lunch',ln.toFixed(2),'$/day x show days, no food logged']);
     const c=V.calcShow(sh); if(c.gasAuto)r.push(['auto',sh.id,sh.name,sh.startDate||'','gas (estimated)',c.gasAuto.toFixed(2),'auto-added, no gas hand-logged']);
     if(c.cardFees)r.push(['auto',sh.id,sh.name,sh.startDate||'','card processing fees',c.cardFees.toFixed(2),'rate '+V.setting('sqFee',0)]);
   });

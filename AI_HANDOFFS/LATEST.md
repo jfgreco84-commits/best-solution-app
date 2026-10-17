@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v76 Fox & Found Oct packed for Isaiah, Oct 16 2026](2026-10-16-v76-fox-found-oct-pack.md)** (352 units from the garage incl. 19 travel sets, Isaiah crew-run; plus 192 bottles borrowed from Batman Oct 16; Chicago Women's Expo Oct 24-25 added)
+**NEWEST: [v77 expense audit, Oct 17 2026](2026-10-17-v77-expense-audit.md)** (paper towels 2 rolls/person/day, 2 shelf liner rolls/show, $20 lunch/day, no candy, gas $4.20 with past shows frozen by month, break-even gas double count fixed, Rustic Fox booths $60, blank miles filled)
 
-**Previous: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
+**Previous: [v76 Fox & Found Oct packed for Isaiah, Oct 16 2026](2026-10-16-v76-fox-found-oct-pack.md)** (352 units from the garage incl. 19 travel sets, Isaiah crew-run; plus 192 bottles borrowed from Batman Oct 16; Chicago Women's Expo Oct 24-25 added)
+
+**Before that: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
 
 **Before that: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
 
