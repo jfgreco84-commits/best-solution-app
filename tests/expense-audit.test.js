@@ -72,8 +72,7 @@ R.section('6. One-time fill on a full board');
   chk('6c2. all eight pre-contract markets passed',d.shows.filter(s=>/rustic fox|fox & found/i.test(s.name)&&s.startDate<'2026-10-01'&&s.passed).length,8);
   const sm=f(/st\.? martin/i,'2026-09-06');
   chk('6c3. St. Martins $245 paid',[sm.boothCost,sm.boothPayments.reduce((t,p)=>t+p.amount,0)],[245,245]);
-  chk('6c4. holiday markets passed except Sip & Sleigh Carol Stream',d.shows.filter(s=>/sip & sleigh|kris kringle/i.test(s.name)).map(s=>[s.name,!!s.passed]),
-    [['Sip & Sleigh — Carol Stream',false],['Sip & Sleigh — North Aurora',true],['Kris Kringle — Carol Stream',true],['Kris Kringle — North Aurora',true]]);
+  chk('6c4. every Sip & Sleigh / Kris Kringle placeholder passed',d.shows.filter(s=>/sip & sleigh|kris kringle/i.test(s.name)).every(s=>s.passed),true);
   chk('6d. blank miles filled',['Polish Fest','Waukesha County Fair','McHenry County Fair','Burgoo','Baraboo'].map(n=>d.shows.find(s=>s.name.indexOf(n)>=0).miles),[32,22,45,150,110]);
   chk('6e. Maxwell Street 14 mi',d.shows.filter(s=>/maxwell/i.test(s.name)).every(s=>s.miles===14),true);
   chk('6f. finished show frozen at its month gas price',f(/rustic fox/i,'2026-08-02').gasPrice,4.05);
@@ -95,5 +94,22 @@ R.section('7. Never overwrites what is there');
   const d4=blank(); d4.shows=[]; d4._applied={}; Object.keys(ctx.MRG_SEED_RECORDS).forEach(k=>d4._applied[k]=true);
   ctx.applyOneTimeUpdates(d4);
   chk('7c. no shows yet: waits',!!d4._applied['expense_audit_v77'],false); }
+
+R.section('8. The Social Market Co. shows');
+{ const d=full(); const g=re=>d.shows.filter(s=>re.test(s.name));
+  const want=[['Harvest & Handmade Market','2026-09-12',78],['A Girls Day Out Market','2026-09-13',68],['Merry Makers Expo','2026-11-08',103],
+    ['Holly Jolly Christmas Market','2026-11-14',78],['Shop Small Sunday Market','2026-11-22',68],['Small Business Saturday Market','2026-11-28',78],
+    ['Winter Wonderland Market','2026-12-06',68],['Bridal Expo — The Ten Hotel','2027-01-17',178],["Galentine's Day Market",'2027-02-07',118]];
+  chk('8a. all nine on the board, booth = what was paid, nothing owed',want.map(w=>{ const s=d.shows.find(x=>x.name===w[0]&&x.startDate===w[1]);
+    return s?[s.boothCost,s.boothPayments.reduce((t,p)=>t+p.amount,0)]:null; }),want.map(w=>[w[2],w[2]]));
+  chk('8b. hours that are not 12-4',[g(/small business saturday/i)[0].days[0].openTime,g(/galentine/i)[0].days[0].openTime],['11:00','10:00']);
+  ctx.applyOneTimeUpdates(d); delete d._applied['social_market_v77']; ctx.applyOneTimeUpdates(d);
+  chk('8c. reload never duplicates a show or a payment',[g(/holly jolly/i).length,g(/holly jolly/i)[0].boothPayments.length],[1,1]);
+  const d2=blank(); d2.shows.push(Object.assign(ctx.buildPlannedShow({name:'Holly Jolly Xmas Market',startDate:'2026-11-14',numDays:1}),{boothPayments:[{id:'mine',amount:75,date:'2026-08-21'}]}));
+  ctx.applyOneTimeUpdates(d2);
+  chk('8d. one he typed in himself: name kept, $75 payment not doubled',[d2.shows.filter(s=>/holly jolly/i.test(s.name)).length,d2.shows.filter(s=>/holly jolly/i.test(s.name)).map(s=>[s.name,s.boothPayments.length])],[1,[['Holly Jolly Xmas Market',1]]]);
+  const rf=ctx.buildPlannedShow({name:'The Rustic Fox Holiday Market (Holiday Weekend)',location:'The Rustic Fox, 1790 Towne Center Drive, North Aurora, IL 60542',startDate:'2026-11-07',numDays:1});
+  ctx.v77FillBlanks({shows:[rf]});
+  chk('8e. Rustic Fox holiday market in North Aurora gets 77 mi, not Carol Stream 91',rf.miles,77); }
 
 R.done();

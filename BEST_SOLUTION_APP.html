@@ -680,7 +680,10 @@ const MRG_SEED_RECORDS={
   'shows_add_20260818':['whole bead show milwaukee pop up','wonderful world of weddings'],
   'pop_racine_20260818':['party on the pavement'],
   'fair_to_remember_v71':['a fair to remember fall','a fair to remember christmas'],
-  'chicago_womens_expo_v76':['chicago women s expo']
+  'chicago_womens_expo_v76':['chicago women s expo'],
+  'social_market_v77':['harvest handmade market','a girls day out market','merry makers expo',
+    'holly jolly christmas market','shop small sunday market','small business saturday market',
+    'winter wonderland market','bridal expo the ten hotel','galentine s day market']
 };
 const MRG_SEED_MARKERS=Object.keys(MRG_SEED_RECORDS);
 
@@ -1518,6 +1521,17 @@ function applyOneTimeUpdates(d){
       }
       d._applied['chicago_womens_expo_v76']=true;
     }catch(e){ console.error('chicago_womens_expo_v76',e); }
+  }
+
+  // v77: The Social Market Co. Events (Caelin Porter) shows Froggy booked and
+  // paid on Aug 21-24 2026 (Square, Visa ...9790). Each fee is booth + $3 Square
+  // processing, so the booth cost is what was paid and nothing is owed. The Last
+  // Fling (Aug 30) and Mistletoe & Martinis (Nov 27) are already on the board
+  // from the Aug 26 show update and are not touched here. A show already on the
+  // board under the same date and a matching name is filled in place (blanks only).
+  if(!d._applied['social_market_v77']){
+    try{ socialMarketV77(d); d._applied['social_market_v77']=true; }
+    catch(e){ console.error('social_market_v77',e); }
   }
 
   // v76 (Oct 16): A Fair to Remember, Fall (Oct 23-24) is worked by TJ.
@@ -6129,7 +6143,7 @@ function bmBorrowOct16(d){
 // nearest readings. Miles: one way from Waterford, WI.
 const V77_GAS_BY_MONTH={'2026-05':3.85,'2026-06':3.95,'2026-07':4.03,'2026-08':4.05,'2026-09':4.30,'2026-10':4.20};
 const V77_GAS_NOW=4.20;
-const V77_MILES=[[/polish ?fest/i,32],[/maxwell/i,14],[/waukesha county fair/i,22],[/mchenry county fair/i,45],
+const V77_MILES=[[/north aurora/i,77],[/polish ?fest/i,32],[/maxwell/i,14],[/waukesha county fair/i,22],[/mchenry county fair/i,45],
   [/burgoo/i,150],[/baraboo/i,110],[/cranberry/i,180],[/st\.? ?martin/i,22],[/party on the pavement/i,24],
   [/last fling/i,30],[/rustic fox|carol stream/i,91],[/fox ?& ?found|north aurora/i,77]];
 const V77_MILES_BY_TOWN=[[/mukwonago/i,14],[/waukesha/i,22],[/woodstock|mchenry/i,45],[/utica/i,150],[/baraboo/i,110],
@@ -6146,13 +6160,15 @@ const V77_BOOTH=[
   {re:/st\.? ?martin/i,date:'2026-09-06',cost:245,paid:true,note:'St. Martins Fair booth $245, per Froggy Oct 17'}
 ];
 // Not worked, per Froggy Oct 17: the Rustic Fox / Fox & Found markets before the
-// Jul 31 season contract, and the holiday markets (no holiday markets this year
-// except the one at Carol Stream, which stays on the board).
+// Jul 31 season contract, and the old Sip & Sleigh / Kris Kringle placeholders.
+// The one Rustic Fox holiday market this year is "The Rustic Fox Holiday Market
+// (Holiday Weekend)", Sat Nov 7, North Aurora, $100 paid (Aug 26 show update);
+// per Nicole's Aug 10 email there are no Carol Stream holiday pop-ups in 2026.
 const V77_PASS=[
   [/rustic fox|carol stream/i,'2026-05-03'],[/rustic fox|carol stream/i,'2026-06-07'],[/rustic fox|carol stream/i,'2026-07-05'],
   [/fox ?& ?found|north aurora/i,'2026-05-23'],[/fox ?& ?found|north aurora/i,'2026-06-20'],[/fox ?& ?found|north aurora/i,'2026-07-18'],
   [/fox ?& ?found|north aurora/i,'2026-08-15'],[/fox ?& ?found|north aurora/i,'2026-09-19'],
-  [/sip ?& ?sleigh.*north aurora/i,null],[/kris kringle/i,null]];
+  [/sip ?(&|and) ?sleigh/i,null],[/kris kringle/i,null]];
 function expenseAuditV77(d){
   const shows=(d&&d.shows)||[]; if(!shows.length)return {done:false};
   const st=d.settings=d.settings||{}, log=[];
@@ -6181,7 +6197,7 @@ function expenseAuditV77(d){
     invLogPush(sh,{ts:new Date().toISOString(),type:'🏬 booth fee filled (v77)',changes:['$'+b.cost+(b.paid?' paid':' owed')+' · '+b.note],by:'owner'}); });
   // 4. not worked: passed, never deleted (refused on a show that is active or completed)
   V77_PASS.forEach(([re,date])=>{ shows.filter(x=>x&&!isPassed(x)&&re.test(x.name||'')&&(date?x.startDate===date:String(x.startDate||'').startsWith('2026')))
-    .forEach(x=>{ const why=date?'Before the Rustic Fox 2026 season contract (Jul 31), not worked':'No holiday markets this year except the one at Carol Stream';
+    .forEach(x=>{ const why=date?'Before the Rustic Fox 2026 season contract (Jul 31), not worked':'No Sip & Sleigh / Kris Kringle in 2026. The one Rustic Fox holiday market is Nov 7 in North Aurora';
       if(pndMarkPassed(x,why,'','v77'))log.push(x.name+' passed'); }); });
   if(st.audit&&Array.isArray(st.audit.log))st.audit.log.push({ts:new Date().toISOString(),type:'expense_audit_v77',msg:log.join(' · ')});
   return {done:true,log};
@@ -6194,12 +6210,60 @@ function v77FillBlanks(d){
   const out=[], today=_todayKey();
   ((d&&d.shows)||[]).forEach(sh=>{ if(!sh||sh.passed===true)return;
     if(!((parseFloat(sh.miles)||0)>0)){
-      const hit=V77_MILES.find(x=>x[0].test(sh.name||''))||V77_MILES_BY_TOWN.find(x=>x[0].test(sh.location||''));
+      const hit=V77_MILES.find(x=>x[0].test((sh.name||'')+' | '+(sh.location||'')))||V77_MILES_BY_TOWN.find(x=>x[0].test(sh.location||''));
       if(hit){ sh.miles=hit[1]; out.push(sh.name+' '+hit[1]+' mi'); } }
     const end=showEndKey(sh)||sh.startDate||'';
     if(end&&end<today&&(sh.gasPrice==null||sh.gasPrice==='')){
       const gp=V77_GAS_BY_MONTH[String(sh.startDate||'').slice(0,7)];
       if(gp){ sh.gasPrice=gp; out.push(sh.name+' gas $'+gp.toFixed(2)); } }
+  });
+  return out;
+}
+// v77: The Social Market Co. Events shows, from the acceptance emails and the
+// Square receipts (each receipt's line item names its event).
+const SMC_V77=[
+  {name:'Harvest & Handmade Market',re:/harvest/i,date:'2026-09-12',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001922',paidOn:'2026-08-21',
+    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided.'},
+  {name:'A Girls Day Out Market',re:/girl.?s day out/i,date:'2026-09-13',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001927',paidOn:'2026-08-21',
+    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor. Bring your own 6-8 ft table, 2 chairs provided.'},
+  {name:'Merry Makers Expo',re:/merry makers/i,date:'2026-11-08',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:100,paid:103,inv:'001933',paidOn:'2026-08-21',
+    note:'2nd Annual. 6161 W Grand Ave, Gurnee IL. Setup 10am-12pm.'},
+  {name:'Holly Jolly Christmas Market',re:/holly jolly/i,date:'2026-11-14',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001931',paidOn:'2026-08-21',
+    note:'3002 IL-120, McHenry IL 60051. Setup time not stated yet.'},
+  {name:'Shop Small Sunday Market',re:/shop small sunday/i,date:'2026-11-22',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001925',paidOn:'2026-08-21',
+    note:'40150 N IL-59, Antioch IL 60002. Indoor. Setup time shared closer to the date.'},
+  {name:'Small Business Saturday Market',re:/small business saturday/i,date:'2026-11-28',open:'11:00',close:'15:00',loc:'The Loft at Ethereal, Woodstock, IL',miles:45,fee:75,paid:78,inv:'001929',paidOn:'2026-08-21',
+    note:'140 Cass St, Woodstock IL 60098 (Woodstock Square). Hours 11am-3pm. 8x8 indoor.'},
+  {name:'Winter Wonderland Market',re:/winter wonderland/i,date:'2026-12-06',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001936',paidOn:'2026-08-21',
+    note:'40150 N IL-59, Antioch IL 60002. Setup 10am-12pm. Indoor, one 6 ft table included.'},
+  {name:'Bridal Expo — The Ten Hotel',re:/bridal expo/i,date:'2027-01-17',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:175,paid:178,inv:'001930',paidOn:'2026-08-21',
+    note:'2nd Annual. Grand Ballroom, 6161 W Grand Ave, Gurnee IL. Premium pre-function space. A $25 Vendor Spotlight was offered as a separate invoice; none was found.'},
+  {name:"Galentine's Day Market",re:/galentine/i,date:'2027-02-07',open:'10:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:115,paid:118,inv:'001941',paidOn:'2026-08-24',
+    note:'2nd Annual. 6161 W Grand Ave, Gurnee IL. Hours 10am-4pm, setup from 8am. Ballroom corner 8x8 + 2 chairs, bring your own table (hotel rents one for $25). Late fee was waived.'}
+];
+function socialMarketV77(d){
+  d.shows=d.shows||[]; const out=[];
+  SMC_V77.forEach(x=>{
+    const pay={id:'bp_smc_'+x.inv,amount:x.paid,date:x.paidOn,note:'Square invoice #'+x.inv+' (booth $'+x.fee+' + $3 Square processing), paid Visa ...9790'};
+    const notes=x.name.toUpperCase()+' (The Social Market Co. Events, Caelin Porter 224-419-1975). '+x.note+' Booth $'+x.fee+' + $3 Square fee = $'+x.paid+' PAID '+x.paidOn+', invoice #'+x.inv+'.';
+    let sh=d.shows.find(s=>s&&s.startDate===x.date&&x.re.test(s.name||''));
+    if(!sh){
+      sh=buildPlannedShow({name:x.name,location:x.loc,startDate:x.date,numDays:1,boothCost:x.paid,miles:x.miles,boothPayments:[pay]});
+      sh.confirmed=true;
+      if(sh.days[0]){ sh.days[0].openTime=x.open; sh.days[0].closeTime=x.close; }
+      sh.openTime=x.open; sh.closeTime=x.close; sh.hoursVerified=true; sh.hoursNeedConfirm=false; sh.datesNeedConfirm=false;
+      sh.notes=notes; mrgPushShow(d,sh,'social_market_v77'); out.push(x.name+' added');
+    } else {
+      sh.confirmed=true;
+      if(!sh.location)sh.location=x.loc;
+      if(!(parseFloat(sh.miles)>0))sh.miles=x.miles;
+      if(!(parseFloat(sh.boothCost)>0))sh.boothCost=x.paid;
+      const bp=sh.boothPayments=sh.boothPayments||[];
+      if(!bp.some(p=>p&&(p.id===pay.id||Math.abs((parseFloat(p.amount)||0)-x.paid)<0.005||Math.abs((parseFloat(p.amount)||0)-x.fee)<0.005)))bp.push(pay);
+      (sh.days||[]).forEach((day,i)=>{ if(i===0&&!day.openTime&&!day.closeTime){ day.openTime=x.open; day.closeTime=x.close; } });
+      if((sh.notes||'').indexOf('#'+x.inv)<0)sh.notes=(sh.notes?sh.notes+' ':'')+notes;
+      out.push(x.name+' updated');
+    }
   });
   return out;
 }

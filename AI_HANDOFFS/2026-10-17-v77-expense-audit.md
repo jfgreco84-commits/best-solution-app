@@ -60,12 +60,38 @@ its own line on the expense receipt, break-even, P&L tab and P&L CSV.
 - **Burgoo: drove home every night**, so 150 x 2 x 2 days = 600 mi stays.
 - **Pre-contract markets passed** (never deleted, Restore any time): Rustic Fox Carol Stream May 3, Jun 7, Jul 5;
   Fox & Found N. Aurora May 23, Jun 20, Jul 18, Aug 15, Sep 19.
-- **No holiday markets this year except one at Carol Stream.** Sip & Sleigh N. Aurora, Kris Kringle Carol Stream
-  and Kris Kringle N. Aurora are passed. **Sip & Sleigh Carol Stream stays** on the board, booth $0.
+- **Holiday markets:** every Sip & Sleigh / Kris Kringle placeholder is passed. The one Rustic Fox holiday
+  market this year is already on the board from the Aug 26 show update: **The Rustic Fox Holiday Market
+  (Holiday Weekend), Sat Nov 7, North Aurora, $100 paid** (receipt 2165). Froggy called it Carol Stream; Nicole's
+  Aug 10 email says no Carol Stream holiday pop-ups in 2026. Its blank miles now fill as 77 (North Aurora), not 91.
 
-**Open:** the only Rustic Fox holiday email in Gmail (Aug 10, "Pop Up Applications Open") says the 2026
-holiday pop-up is a one-day Saturday market in **North Aurora**, and that none will be held at Carol Stream.
-No acceptance or invoice for a holiday market was found. Froggy needs to confirm the date, town and booth fee.
+## THE SOCIAL MARKET CO. SHOWS (`social_market_v77`, registered in MRG_SEED_RECORDS)
+
+From the acceptance emails and the Square receipts (each receipt's line item names its event). Each invoice is
+booth + $3 Square processing; booth cost = what was paid, nothing owed. Paid Visa ...9790.
+
+| Show | Date | Hours | Venue | Paid | Invoice |
+|---|---|---|---|---|---|
+| Harvest & Handmade Market | Sat 9/12 | 12-4 | McHenry VFW Post 4600 | $78 | #001922 |
+| A Girls Day Out Market | Sun 9/13 | 12-4 | Valley Ridge GC, Antioch | $68 | #001927 |
+| Merry Makers Expo | Sun 11/8 | 12-4 | The Ten Hotel, Gurnee | $103 | #001933 |
+| Holly Jolly Christmas Market | Sat 11/14 | 12-4 | McHenry VFW Post 4600 | $78 | #001931 |
+| Shop Small Sunday Market | Sun 11/22 | 12-4 | Valley Ridge GC, Antioch | $68 | #001925 |
+| Small Business Saturday Market | Sat 11/28 | 11-3 | The Loft at Ethereal, Woodstock | $78 | #001929 |
+| Winter Wonderland Market | Sun 12/6 | 12-4 | Valley Ridge GC, Antioch | $68 | #001936 |
+| Bridal Expo — The Ten Hotel | Sun 1/17/27 | 12-4 | The Ten Hotel, Gurnee | $178 | #001930 |
+| Galentine's Day Market | Sun 2/7/27 | 10-4 | The Ten Hotel, Gurnee | $118 | #001941 |
+
+Not touched: The Last Fling (8/30, #001921 $68) and Mistletoe & Martinis (11/27) are already on the board from
+the Aug 26 update. Miles one way from Waterford (approx): McHenry 40, Antioch 30, Gurnee 42, Woodstock 45.
+
+**Open:**
+- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out** go on as MISSED (no sales logged). Sep 12-13 is also
+  Maxwell Street Days Sep. If they were worked, enter the counts and money; if not, the booth money is still spent.
+- **Mistletoe & Martinis:** the board says $100 paid by phone (Master Show Sheet). Gmail shows a $125
+  Non-Member Corner Booth registration billed by the Chain O'Lakes Chamber and no payment confirmation; Froggy's
+  Oct 10 email asking if it is paid has no reply. Left as is.
+- **Bridal Expo $25 Vendor Spotlight:** offered as a separate invoice; none found.
 
 ## VERIFIED
 
