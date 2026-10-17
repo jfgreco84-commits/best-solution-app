@@ -53,14 +53,19 @@ its own line on the expense receipt, break-even, P&L tab and P&L CSV.
   freeze are shape-driven (`v77FillBlanks`, every load) so a re-seeded or restored show gets them too.
 - Supply list: Candy/Mints out, Paper Towels (Bounty) + Shelf Liner in.
 
-## NOT FILLED (needs Froggy)
+## FROGGY'S ANSWERS (Oct 17, same PR)
 
-- **St. Martins Fair, Sep 6**: booth $0 (2025 was $245). No receipt found in Gmail.
-- **Sip & Sleigh (Nov 7, Nov 20) and Kris Kringle (Dec 4, Dec 12)**: booth $0, not booked yet.
-  2025 rates: S&S Carol Stream $200, S&S N. Aurora $400, Kris Kringle $200.
-- **Rustic Fox / Fox & Found May to Sep (before the Jul 31 contract)**: left at $0. Mark them passed if not worked.
-- **Burgoo** is set as drive-home-daily (600 mi). If you stayed over, tap 🏨 Hotel stay in Edit Show.
-- **Fox & Found Oct 17**: confirm the invoice is $60.
+- **St. Martins Fair, Sep 6: booth $245, paid.**
+- **Fox & Found Oct 17: $60 confirmed** (still owed in the app until paid).
+- **Burgoo: drove home every night**, so 150 x 2 x 2 days = 600 mi stays.
+- **Pre-contract markets passed** (never deleted, Restore any time): Rustic Fox Carol Stream May 3, Jun 7, Jul 5;
+  Fox & Found N. Aurora May 23, Jun 20, Jul 18, Aug 15, Sep 19.
+- **No holiday markets this year except one at Carol Stream.** Sip & Sleigh N. Aurora, Kris Kringle Carol Stream
+  and Kris Kringle N. Aurora are passed. **Sip & Sleigh Carol Stream stays** on the board, booth $0.
+
+**Open:** the only Rustic Fox holiday email in Gmail (Aug 10, "Pop Up Applications Open") says the 2026
+holiday pop-up is a one-day Saturday market in **North Aurora**, and that none will be held at Carol Stream.
+No acceptance or invoice for a holiday market was found. Froggy needs to confirm the date, town and booth fee.
 
 ## VERIFIED
 

@@ -66,8 +66,14 @@ R.section('6. One-time fill on a full board');
   const f=(re,dt)=>d.shows.find(s=>re.test(s.name)&&s.startDate===dt);
   chk('6a. Rustic Fox Carol Stream Aug/Sep/Oct: $60 booth, paid',[ '2026-08-02','2026-09-06','2026-10-04'].map(dt=>{const s=f(/rustic fox/i,dt);return [s.boothCost,ctx.boothPaid?s.boothPayments.reduce((t,p)=>t+p.amount,0):0];}),[[60,60],[60,60],[60,60]]);
   const fx=f(/fox & found/i,'2026-10-17');
-  chk('6b. Fox & Found Oct 17: $60 owed, flagged to check',[fx.boothCost,fx.boothPayments.length,/check the invoice/.test(fx.notes)],[60,0,true]);
-  chk('6c. pre-contract Rustic Fox (May) left blank',f(/rustic fox/i,'2026-05-03').boothCost,0);
+  chk('6b. Fox & Found Oct 17: $60 owed, confirmed',[fx.boothCost,fx.boothPayments.length,/confirmed by Froggy/.test(fx.notes)],[60,0,true]);
+  const may=f(/rustic fox/i,'2026-05-03');
+  chk('6c. pre-contract Rustic Fox (May): no booth, passed with a reason',[may.boothCost,may.passed,/contract/.test(may.passedReason)],[0,true,true]);
+  chk('6c2. all eight pre-contract markets passed',d.shows.filter(s=>/rustic fox|fox & found/i.test(s.name)&&s.startDate<'2026-10-01'&&s.passed).length,8);
+  const sm=f(/st\.? martin/i,'2026-09-06');
+  chk('6c3. St. Martins $245 paid',[sm.boothCost,sm.boothPayments.reduce((t,p)=>t+p.amount,0)],[245,245]);
+  chk('6c4. holiday markets passed except Sip & Sleigh Carol Stream',d.shows.filter(s=>/sip & sleigh|kris kringle/i.test(s.name)).map(s=>[s.name,!!s.passed]),
+    [['Sip & Sleigh — Carol Stream',false],['Sip & Sleigh — North Aurora',true],['Kris Kringle — Carol Stream',true],['Kris Kringle — North Aurora',true]]);
   chk('6d. blank miles filled',['Polish Fest','Waukesha County Fair','McHenry County Fair','Burgoo','Baraboo'].map(n=>d.shows.find(s=>s.name.indexOf(n)>=0).miles),[32,22,45,150,110]);
   chk('6e. Maxwell Street 14 mi',d.shows.filter(s=>/maxwell/i.test(s.name)).every(s=>s.miles===14),true);
   chk('6f. finished show frozen at its month gas price',f(/rustic fox/i,'2026-08-02').gasPrice,4.05);

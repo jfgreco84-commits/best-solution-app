@@ -6142,8 +6142,17 @@ const V77_BOOTH=[
   {re:/rustic fox|carol stream/i,date:'2026-08-02',cost:60,paid:true,note:'Rustic Fox 2026 season, $60 a market (invoice)'},
   {re:/rustic fox|carol stream/i,date:'2026-09-06',cost:60,paid:true,note:'Rustic Fox 2026 season, $60 a market (invoice)'},
   {re:/rustic fox|carol stream/i,date:'2026-10-04',cost:60,paid:true,note:'Rustic Fox 2026 season, $60 a market; Nicole confirmed paid Sep 30'},
-  {re:/fox ?& ?found|north aurora/i,date:'2026-10-17',cost:60,paid:false,note:'Rustic Fox final invoice for Oct 17 (sent Sep 30); $60 assumed from the season rate, check the invoice'}
+  {re:/fox ?& ?found|north aurora/i,date:'2026-10-17',cost:60,paid:false,note:'Rustic Fox final invoice for Oct 17 (sent Sep 30), $60 confirmed by Froggy Oct 17'},
+  {re:/st\.? ?martin/i,date:'2026-09-06',cost:245,paid:true,note:'St. Martins Fair booth $245, per Froggy Oct 17'}
 ];
+// Not worked, per Froggy Oct 17: the Rustic Fox / Fox & Found markets before the
+// Jul 31 season contract, and the holiday markets (no holiday markets this year
+// except the one at Carol Stream, which stays on the board).
+const V77_PASS=[
+  [/rustic fox|carol stream/i,'2026-05-03'],[/rustic fox|carol stream/i,'2026-06-07'],[/rustic fox|carol stream/i,'2026-07-05'],
+  [/fox ?& ?found|north aurora/i,'2026-05-23'],[/fox ?& ?found|north aurora/i,'2026-06-20'],[/fox ?& ?found|north aurora/i,'2026-07-18'],
+  [/fox ?& ?found|north aurora/i,'2026-08-15'],[/fox ?& ?found|north aurora/i,'2026-09-19'],
+  [/sip ?& ?sleigh.*north aurora/i,null],[/kris kringle/i,null]];
 function expenseAuditV77(d){
   const shows=(d&&d.shows)||[]; if(!shows.length)return {done:false};
   const st=d.settings=d.settings||{}, log=[];
@@ -6170,6 +6179,10 @@ function expenseAuditV77(d){
     sh.notes=(sh.notes?sh.notes+' ':'')+'Booth $'+b.cost+' (v77): '+b.note+'.';
     log.push(sh.name+' booth $'+b.cost+(b.paid?' paid':' owed'));
     invLogPush(sh,{ts:new Date().toISOString(),type:'🏬 booth fee filled (v77)',changes:['$'+b.cost+(b.paid?' paid':' owed')+' · '+b.note],by:'owner'}); });
+  // 4. not worked: passed, never deleted (refused on a show that is active or completed)
+  V77_PASS.forEach(([re,date])=>{ shows.filter(x=>x&&!isPassed(x)&&re.test(x.name||'')&&(date?x.startDate===date:String(x.startDate||'').startsWith('2026')))
+    .forEach(x=>{ const why=date?'Before the Rustic Fox 2026 season contract (Jul 31), not worked':'No holiday markets this year except the one at Carol Stream';
+      if(pndMarkPassed(x,why,'','v77'))log.push(x.name+' passed'); }); });
   if(st.audit&&Array.isArray(st.audit.log))st.audit.log.push({ts:new Date().toISOString(),type:'expense_audit_v77',msg:log.join(' · ')});
   return {done:true,log};
 }
