@@ -265,8 +265,6 @@
   <button class="nb" id="nb-stock" onclick="go('stock')"><span class="ni">📦</span>STOCK</button>
   <button class="nb" id="nb-shows" onclick="go('shows')"><span class="ni">🎪</span>SHOWS</button>
   <button class="nb" id="nb-reps" onclick="go('reps')"><span class="ni">👥</span>REPS</button>
-  <button class="nb" id="nb-calendar" onclick="go('calendar')"><span class="ni">📅</span>CAL</button>
-  <button class="nb" id="nb-supplies" onclick="go('supplies')"><span class="ni">🧴</span>SUPPLY</button>
   <button class="nb" id="nb-pnl" onclick="go('pnl')"><span class="ni">💰</span>P&amp;L</button>
   <button class="nb" id="nb-settings" onclick="go('settings')"><span class="ni">⚙️</span>SETUP</button>
 </div>
@@ -297,7 +295,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v78';
+const APP_VERSION='v79';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -2566,7 +2564,7 @@ function renderCur(){
 function updateSupplyBadge(){
   const sup=S.supplies||[];
   const lowCnt=sup.filter(s=>s.qty<=s.low&&s.low>0).length;
-  const nb=$$('nb-supplies');if(!nb)return;
+  const nb=$$('nb-stock');if(!nb)return; // v79: Supplies lives inside Stock
   const existing=nb.querySelector('.nb-badge');
   if(lowCnt>0){
     if(existing)existing.textContent=lowCnt;
@@ -3621,7 +3619,7 @@ function calcYTD(){
     const t=calcShow(sh);gross+=t.gross;cogs+=t.cogs;expenses+=t.expenses;cardFeesSum+=t.cardFees||0;salesTaxSum+=t.salesTax||0;
     taxResSum+=t.taxRes;
     miles+=showMiles(sh);
-    gas+=showGas(sh);
+    gas+=t.gasAuto; (sh.days||[]).forEach(d=>{ if(d&&d.expenses)gas+=parseFloat(d.expenses.gas)||0; }); gas+=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((a,e)=>a+(parseFloat(e.amount)||0),0); // v79: the gas each show actually booked
     (sh.days||[]).forEach(d=>{
       if(d.morningCount&&d.eveningCount){const sold=daySold(d);SKUS.forEach(s=>units[s.key]+=(sold[s.key]||0));}
       if(d.payments)PMTS.forEach(p=>pmtTotals[p.key]+=(parseFloat(d.payments[p.key])||0));
@@ -3636,6 +3634,9 @@ function calcYTD(){
   // Other expenses: supplies, equipment, misc — logged separately
   const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   expenses+=otherSpend;
+  // v79: online sales (mailed from the garage) are business income too: money in, bottle cost, postage.
+  const ol=(typeof olTotals==='function')?olTotals():{amount:0,cost:0,postage:0,units:0,orders:0};
+  gross+=ol.amount; cogs+=ol.cost; expenses+=ol.postage;
   // Total rep pay earned across all shows
   const totalRepPay=(S.shows||[]).reduce((t,sh)=>t+showRepPayTotal(sh),0);
   // (rep pay already included in expenses via calcShow/boothPaid paths above)
@@ -3644,7 +3645,7 @@ function calcYTD(){
   const taxRes=Math.max(0,profit)*((S.settings&&S.settings.tax!=null)?S.settings.tax:0.28);
   const keep=Math.max(0,profit-taxRes);
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
-  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum};
+  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum,online:ol};
 }
 function _dupGuard(){ const n=Date.now(); if(window.__lastSave&&n-window.__lastSave<900)return true; window.__lastSave=n; return false; }
 function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
@@ -3745,6 +3746,7 @@ function go(pg,shId,dayIdx){
   if(dayIdx!==undefined)curDay=dayIdx;
   $$('pg-'+pg).classList.add('on');
   const nb=$$('nb-'+pg);if(nb)nb.classList.add('on');
+  const _parent={calendar:'shows',supplies:'stock'}[pg]; if(_parent){ const pn=$$('nb-'+_parent); if(pn)pn.classList.add('on'); } // v79: 6 tabs
   if(pg==='section'){const nbh=$$('nb-home');if(nbh)nbh.classList.add('on');}
   if(pg==='show'){
     $$('hdrR').innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('shows')">← Back</button>`;
@@ -3804,10 +3806,10 @@ function rHome(){
   // Yearly overhead shown SEPARATELY (not mixed into show profit)
   const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active').reduce((t,sh)=>t+boothPaid(sh),0); // v48: a running show's booth is already in its own P&L
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
-  const taxRes=completedTax;
-  const cleanKeep=Math.max(0,completedNet-taxRes);
-  const keepPct=completedNet>0?Math.round((cleanKeep/completedNet)*100):0;
-  const taxPct=completedNet>0?Math.round((taxRes/completedNet)*100):0;
+  // v79: ONE profit number. Home, P&L tab and exports all use the year's figures (calcYTD), overhead included.
+  const yearNet=ytd.profit, taxRes=ytd.taxRes, cleanKeep=ytd.keep;
+  const keepPct=yearNet>0?Math.round((cleanKeep/yearNet)*100):0;
+  const taxPct=yearNet>0?Math.round((taxRes/yearNet)*100):0;
   const mileDeduct=ytd.miles*S.settings.irsRate;
   // Workload (per-show hoursPerDay, default 8)
   const plannedDays=[...upcomingShows,...activeShows].reduce((t,sh)=>t+(sh.numDays||1),0);
@@ -3925,7 +3927,7 @@ function rHome(){
     html+=`<div class="card gb" style="text-align:center;margin-bottom:8px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:1px">2026 so far — yours to keep</div>
       <div style="font-size:40px;font-weight:900;color:${cleanKeep>=0?'var(--green)':'var(--red)'};line-height:1.15">${fmt(cleanKeep)}</div>
-      <div style="font-size:11px;color:var(--muted)">after COGS, fees, gas, sales tax, and the ${Math.round(S.settings.tax*100)}% tax reserve · overhead ${fmt(overhead)} tracked separately</div>
+      <div style="font-size:11px;color:var(--muted)">after everything (product, booths, gas, supplies, crew, business purchases, sales tax) and the ${Math.round(S.settings.tax*100)}% tax reserve · same number as the P&amp;L tab</div>
       ${prevNet>0?`<div style="margin-top:8px"><div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--card2)"><div style="background:var(--green);width:${pct}%"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px"><span>${pct}% of 2025 (${fmt(prevNet)})</span><span>${cleanKeep>=prevNet?'🏆 BEAT LAST YEAR!':fmt(Math.max(0,prevNet-cleanKeep))+' to go'}</span></div></div>`:''}
     </div>`;
   })();
@@ -3936,12 +3938,12 @@ function rHome(){
     <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Gross ÷ shows w/ sales</div></div>
   </div>
   <div class="g3" style="margin-bottom:8px">
-    <div class="sbox ${completedNet>=0?'grb':'rb'}"><div class="sl">COMPLETED SHOWS NET</div><div class="sv sm ${completedNet>=0?'g':'r'}">${fmt(completedNet)}</div><div class="ss">Sum of show profits</div></div>
-    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(ytd.taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of net profit</div></div>
-    <div class="sbox ${cleanKeep>=0?'grb':'rb'}"><div class="sl">CLEAN P</div><div class="sv sm ${cleanKeep>=0?'g':'r'}">${fmt(cleanKeep)}</div><div class="ss">Net − tax reserve</div></div>
+    <div class="sbox ${yearNet>=0?'grb':'rb'}"><div class="sl">NET PROFIT (YEAR)</div><div class="sv sm ${yearNet>=0?'g':'r'}">${fmt(yearNet)}</div><div class="ss">Same as P&amp;L tab</div></div>
+    <div class="sbox rb"><div class="sl">TAX RESERVE</div><div class="sv sm r">${fmt(taxRes)}</div><div class="ss">${Math.round(S.settings.tax*100)}% of net profit</div></div>
+    <div class="sbox ${cleanKeep>=0?'grb':'rb'}"><div class="sl">YOU KEEP</div><div class="sv sm ${cleanKeep>=0?'g':'r'}">${fmt(cleanKeep)}</div><div class="ss">Net − tax reserve</div></div>
   </div>
   <div class="g3" style="margin-bottom:8px">
-    <div class="sbox"><div class="sl">BUSINESS OVERHEAD</div><div class="sv sm w">${fmt(overhead)}</div><div class="ss">Supplies + deposits</div></div>
+    <div class="sbox"><div class="sl">BUSINESS OVERHEAD</div><div class="sv sm w">${fmt(overhead)}</div><div class="ss">Purchases + deposits (already in profit)</div></div>
     <div class="sbox"><div class="sl">AVG / SHOW PROFIT</div><div class="sv sm ${avgShowProfit>=0?'g':'r'}">${fmt(avgShowProfit)}</div><div class="ss">Completed only</div></div>
     <div class="sbox"><div class="sl">TOTAL COGS</div><div class="sv sm w">${fmt(ytd.cogs)}</div><div class="ss">Product cost</div></div>
   </div>`;
@@ -3995,10 +3997,10 @@ function homeCtx(){
   const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0;
   const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active').reduce((t,sh)=>t+boothPaid(sh),0); // v48: a running show's booth is already in its own P&L
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
-  const taxRes=completedTax;
-  const cleanKeep=Math.max(0,completedNet-taxRes);
-  const keepPct=completedNet>0?Math.round((cleanKeep/completedNet)*100):0;
-  const taxPct=completedNet>0?Math.round((taxRes/completedNet)*100):0;
+  // v79: ONE profit number. Home, P&L tab and exports all use the year's figures (calcYTD), overhead included.
+  const yearNet=ytd.profit, taxRes=ytd.taxRes, cleanKeep=ytd.keep;
+  const keepPct=yearNet>0?Math.round((cleanKeep/yearNet)*100):0;
+  const taxPct=yearNet>0?Math.round((taxRes/yearNet)*100):0;
   const mileDeduct=ytd.miles*S.settings.irsRate;
   const plannedDays=[...upcomingShows,...activeShows].reduce((t,sh)=>t+(sh.numDays||1),0);
   const completedDays=done.reduce((t,sh)=>t+(sh.numDays||1),0);
@@ -4014,7 +4016,7 @@ function homeCtx(){
   done.forEach(sh=>{const t=calcShow(sh); if(t.gross>bgVal){bgVal=t.gross;bestGross=sh;} if(t.profit>bpVal){bpVal=t.profit;bestProfit=sh;}});
   const pmtGrand=PMTS.reduce((t,p)=>t+(ytd.pmtTotals[p.key]||0),0);
   const lowStock=SKUS.filter(s=>(S.inventory[s.key]||0)<5);
-  return {ytd,invCost,invRetail,invUnits,activeShows,done,upcomingShows,missedShows,plannedCount,completedNet,completedTax,avgShowProfit,sellShows,avgShowGross,upcomingDeposits,overhead,taxRes,cleanKeep,keepPct,taxPct,mileDeduct,plannedDays,completedDays,plannedHours,completedHours,bookedCount,bookedShowDays,totalStaffedHours,myHoursTotal,bestGross,bestProfit,pmtGrand,lowStock};
+  return {ytd,yearNet,invCost,invRetail,invUnits,activeShows,done,upcomingShows,missedShows,plannedCount,completedNet,completedTax,avgShowProfit,sellShows,avgShowGross,upcomingDeposits,overhead,taxRes,cleanKeep,keepPct,taxPct,mileDeduct,plannedDays,completedDays,plannedHours,completedHours,bookedCount,bookedShowDays,totalStaffedHours,myHoursTotal,bestGross,bestProfit,pmtGrand,lowStock};
 }
 
 function secCollected(){
@@ -4109,7 +4111,7 @@ function secSplit(C){
       <span>Keep: ${C.keepPct}%</span>
       <span>Tax: ${C.taxPct}%</span>
     </div>
-    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px">Completed-show net <strong>${fmt(C.completedNet)}</strong> − tax <strong>${fmt(C.taxRes)}</strong> = clean keep. Business overhead <strong>${fmt(C.overhead)}</strong> (supplies + upcoming deposits) is tracked separately.</div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px">Year net profit <strong>${fmt(C.yearNet)}</strong> − tax <strong>${fmt(C.taxRes)}</strong> = what you keep. Same numbers as the P&amp;L tab; business purchases and upcoming deposits (<strong>${fmt(C.overhead)}</strong>) are already inside.</div>
   </div>`;
 }
 function secPayments(C){
@@ -4501,7 +4503,7 @@ function rStock(){
   const units=SKUS.reduce((t,s)=>t+(inv[s.key]||0),0);
   const tabBtn=(k,icon,label)=>`<button class="btn ${view===k?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="setStockView('${k}')">${icon} ${label}</button>`;
   const viewTitle=view==='garage'?'🏠 In The Garage':view==='shows'?'🎪 Out At Shows':'🌐 Everything (Garage + Shows)';
-  pg('stock').innerHTML=`
+  pg('stock').innerHTML=viewToggleHTML(['stock','📦 Inventory'],['supplies','🧴 Supplies'+(supplyLowCount()?' ('+supplyLowCount()+' low)':'')],'stock')+`
   <div class="sec-row"><div class="sec-title">📦 Inventory</div><button class="btn btn-gold btn-sm" onclick="showRestock()">+ Restock</button></div>
   <div style="display:flex;gap:6px;margin-bottom:10px">
     ${tabBtn('garage','🏠','Garage')}
@@ -4672,7 +4674,7 @@ function rShows(){
   const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':(showsTab==='passed'?'passed':'upcoming'));
   let list=tab==='completed'?completed:(tab==='missed'?missed:(tab==='passed'?passed:upcoming));
   let pf=null,B=null;
-  let h=`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
+  let h=viewToggleHTML(['shows','📋 Shows list'],['calendar','📅 Calendar'],'shows')+`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   h+=`<div style="display:flex;gap:6px;margin-bottom:12px">
     <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='upcoming';pipeFilterReset();rShows()">📅 Upcoming (${upcoming.length})</button>
     <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='completed';pipeFilterReset();rShows()">✅ Completed (${completed.length})</button>
@@ -4894,6 +4896,10 @@ function showLinerCost(sh){ return showOverheadOn(sh)?Math.round(LINER_ROLLS_PER
 function isAutoOverheadSupply(name){ return /paper towel|shelf liner/i.test(String(name||'')); }
 function showFoodLogged(sh){ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
   (sh.days||[]).forEach(d=>{ if(d&&d.expenses)t+=parseFloat(d.expenses.food)||0; }); return t; }
+// v79: gas is entered in ONE place (✏️ Edit Show: miles, or Actual Gas $). Gas typed on day screens or as a
+// Fuel receipt before v79 still counts exactly as it did: when any exists it IS the show's gas.
+function showGasLogged(sh){ let g=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+  (sh.days||[]).forEach(d=>{ if(d&&d.expenses)g+=parseFloat(d.expenses.gas)||0; }); return g; }
 function showLunchCost(sh){ if(!showOverheadOn(sh))return 0; return Math.max(0,Math.round((showOverheadDays(sh)*lunchPerDay()-showFoodLogged(sh))*100)/100); } // $20 a day; food receipts already logged count toward it
 function showBagCount(sh){ const u=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; if(!u)return 0;
   return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0); } // C5 rides in the polish bag
@@ -4970,6 +4976,7 @@ function showEditCosts(id){
   <div id="ec_travel_preview" style="font-size:12px;color:var(--gold);margin:-2px 0 10px;font-weight:700"></div>
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
   <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
+  ${showGasLogged(sh)>0?`<div style="font-size:11px;color:var(--gold);margin:-6px 0 12px">⛽ This show has ${fmt(showGasLogged(sh))} of gas receipts logged from before; those receipts are its gas.</div>`:''}
   <div class="fg"><label class="fl">🧻 Paper towel rolls used (actual)</label><input class="fi" type="number" id="ec_paper" step="1" min="0" value="${(sh.paperRolls!=null&&sh.paperRolls!=='')?sh.paperRolls:''}" placeholder="est. ${paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh)} (${paperRollsPerPersonDay()} per person per day)"></div>
   <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Hours — set each day's open &amp; close</label>
@@ -5291,7 +5298,7 @@ function showShowExpModal(id){
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:10px">ADD EXPENSE</div>
     <div class="fg"><label class="fl">Category</label>
       <select class="fi" id="se_cat">
-        ${SHOW_EXP_CATS.map(c=>`<option value="${c.key}">${c.icon} ${c.label}</option>`).join('')}
+        ${SHOW_EXP_CATS.filter(c=>c.key!=='fuel').map(c=>`<option value="${c.key}">${c.icon} ${c.label}</option>`).join('')}
       </select>
     </div>
     <div class="g2" style="gap:10px">
@@ -5371,7 +5378,7 @@ function rPnL(){
   // Top summary
   h+=`<div class="card gb" style="margin-bottom:12px">
     <div class="g2" style="gap:8px;margin-bottom:10px">
-      <div class="sbox gb"><div class="sl">Gross Revenue</div><div class="sv">${fmt(ytd.gross)}</div></div>
+      <div class="sbox gb"><div class="sl">Gross Revenue</div><div class="sv">${fmt(ytd.gross)}</div>${(ytd.online&&ytd.online.amount>0)?`<div class="ss">incl. ${fmt(ytd.online.amount)} online</div>`:''}</div>
       <div class="sbox ${ytd.profit>=0?'grb':'rb'}"><div class="sl">Net Profit</div><div class="sv ${ytd.profit>=0?'g':'r'}">${fmt(ytd.profit)}</div></div>
       <div class="sbox rb"><div class="sl">Total Expenses</div><div class="sv r sm">${fmt(expenseTotal)}</div></div>
       <div class="sbox"><div class="sl">Profit Margin</div><div class="sv w sm">${margin}%</div></div>
@@ -5385,8 +5392,9 @@ function rPnL(){
     <div class="sr"><span class="srl">Rep Pay</span><span class="srv red">-${fmt(repTotal)}</span></div>
     ${workerTotal>0?`<div class="sr"><span class="srl">Worker Payouts</span><span class="srv red">-${fmt(workerTotal)}</span></div>`:''}
     <div class="sr"><span class="srl">Card Processing Fees</span><span class="srv red">-${fmt(feeTotal)}</span></div>
+    ${(ytd.online&&ytd.online.postage>0)?`<div class="sr"><span class="srl">Online sales postage (${ytd.online.orders} order${ytd.online.orders!==1?'s':''})</span><span class="srv red">-${fmt(ytd.online.postage)}</span></div>`:''}
     <div class="sr" style="border-bottom:none"><span class="srl">Business Purchases (equipment, software, insurance)</span><span class="srv red">-${fmt(globalSupply)}</span></div>
-    ${Math.abs(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+lunchTotal+repTotal+workerTotal+feeTotal+globalSupply-expenseTotal)>0.01?`<div class="wb red" style="font-size:11px;margin-top:6px">⚠️ These lines are ${fmt(expenseTotal-(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+lunchTotal+repTotal+workerTotal+feeTotal+globalSupply))} off Total Expenses. Tell Claude.</div>`:''}
+    ${Math.abs(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+lunchTotal+repTotal+workerTotal+feeTotal+globalSupply+((ytd.online&&ytd.online.postage)||0)-expenseTotal)>0.01?`<div class="wb red" style="font-size:11px;margin-top:6px">⚠️ These lines are ${fmt(expenseTotal-(boothTotal+gasTotal+lodgingTotal+showExpTotal+dayExpTotal+supplyTotal+lunchTotal+repTotal+workerTotal+feeTotal+globalSupply+((ytd.online&&ytd.online.postage)||0)))} off Total Expenses. Tell Claude.</div>`:''}
     ${ytd.salesTax>0?`<div class="sr" style="border-bottom:none"><span class="srl b">🧾 Sales Tax OWED TO STATE (card sales)</span><span class="srv red b">-${fmt(ytd.salesTax)}</span></div>`:''}
   </div>
   ${(()=>{
@@ -5399,7 +5407,7 @@ function rPnL(){
         <div class="sbox ${totalOwed>0?'rb':'grb'}"><div class="sl">Still Owed</div><div class="sv ${totalOwed>0?'r':'g'} sm">${fmt(totalOwed)}</div></div>
       </div>
       ${owedReps.map(x=>`<div class="sr"><span class="srl">${x.rep.name}</span><div style="text-align:right"><div style="font-size:12px;color:var(--red)">Earned ${fmt(x.earned)}</div>${x.owed>0?`<div style="font-size:11px;color:var(--gold);font-weight:800">Owed ${fmt(x.owed)}</div>`:`<div style="font-size:11px;color:var(--green)">✓ Paid</div>`}</div></div>`).join('')}
-      <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="go('settings')">Manage Rep Payments → Setup Tab</button>
+      <button class="btn btn-ghost btn-sm btn-full" style="margin-top:10px" onclick="go('reps')">Manage Rep Payments → Reps Tab</button>
     </div>`;
   })()} <div style="display:none" id="pnl-after-comm"></div>`;
 
@@ -5900,10 +5908,11 @@ function exportAccountantPkg(){
   const y=calcYTD(); const rows=[];
   rows.push(['BEST SOLUTION — ACCOUNTANT PACKAGE','generated '+_todayKey()]);
   rows.push([]);
-  rows.push(['SEASON SUMMARY (completed + active shows)']);
+  rows.push(['SEASON SUMMARY (completed + active shows + online sales)']);
   rows.push(['Money collected (incl. sales tax)',y.gross.toFixed(2)]);
   rows.push(['Sales tax collected — OWED TO STATE',(y.salesTax||0).toFixed(2)]);
   rows.push(['Revenue (collected minus sales tax)',(y.gross-(y.salesTax||0)).toFixed(2)]);
+  if(y.online&&y.online.orders)rows.push(['  of which online sales (mailed from the garage)',y.online.amount.toFixed(2),y.online.orders+' orders, postage '+y.online.postage.toFixed(2)]);
   rows.push(['Cost of goods sold',y.cogs.toFixed(2)]);
   rows.push(['Card processing fees (in expenses)',(y.cardFees||0).toFixed(2)]);
   rows.push(['Total expenses (booth, gas, supplies, labor, fees, other)',y.expenses.toFixed(2)]);
@@ -5943,6 +5952,7 @@ function exportSeasonCSV(){
   // v48: the rows add up to the total. Future shows only carry what was already paid.
   const fut=seasonFutureSpend(); rows.push(['Future shows: deposits paid + logged costs','planned','','','','','','','',fut.toFixed(2),'','',(-fut).toFixed(2),'']);
   const oth=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0); rows.push(['Business purchases (Other Expenses)','','','','','','','','',oth.toFixed(2),'','',(-oth).toFixed(2),'']);
+  const ol=y.online||{orders:0}; if(ol.orders)rows.push(['Online sales ('+ol.orders+' orders, mailed from the garage)','','','','','',ol.amount.toFixed(2),'',ol.cost.toFixed(2),ol.postage.toFixed(2),'','',(ol.amount-ol.cost-ol.postage).toFixed(2),'']);
   rows.push([]); rows.push(['SEASON TOTAL','','','','','','','',y.cogs.toFixed(2),y.expenses.toFixed(2),(y.totalRepPay||0).toFixed(2),seasonWorkerPay.toFixed(2),y.profit.toFixed(2),(y.taxRes||0).toFixed(2)]);
   dlFile('best-solution-season-'+_stamp()+'.csv',_csvRows(rows));
 }
@@ -6565,7 +6575,7 @@ function rShow(){
   })()}
   </div>
   <div class="stab-pane" data-stab="money" style="display:${showTabOf(sh)==='money'?'block':'none'}">
-  ${_pd?'':payoutSheetHTML(sh)}
+  ${(_pd||!payoutSheetHTML(sh))?'':`<button class="btn btn-ghost btn-sm btn-full" style="margin-bottom:10px" onclick="setShowTab('teams');window.scrollTo(0,0)">💵 Payout Sheet is on the 🏆 Teams tab →</button>`}
   ${_pd?'':commissionCardHTML(sh)}
   <div class="card g2" style="margin-bottom:12px">
     <div><div class="sl">Gross</div><div class="sv">${fmt(t.gross)}</div></div>
@@ -6673,11 +6683,10 @@ function rShow(){
     <div class="sr"><span class="srl">Round Trips</span><span class="srv">${showRoundTrips(sh)}${(sh.roundTrips!=null&&sh.roundTrips!=='')?'':' (auto: 1/day)'}</span></div>
     <div class="sr"><span class="srl">Total Miles Driven</span><span class="srv">${fmtN(showMiles(sh))} mi</span></div>
     <div class="sr"><span class="srl">IRS Mileage Deduction</span><span class="srv green">${fmt(showMiles(sh)*S.settings.irsRate)}</span></div>
-    <div class="sr"><span class="srl">Gas Cost${(sh.gasOverride!=null&&sh.gasOverride!=='')?' (manual)':' (est.)'}</span><span class="srv">${fmt(showGas(sh))}</span></div>
+    <div class="sr"><span class="srl">⛽ Gas${showGasLogged(sh)>0?' (receipts logged)':((sh.gasOverride!=null&&sh.gasOverride!=='')?' (actual, Edit Show)':' (estimate: '+fmtN(showMiles(sh))+' mi @ '+showMpg(sh)+' mpg × $'+showGasPrice(sh).toFixed(2)+')')}</span><span class="srv">${fmt(showGasLogged(sh)>0?showGasLogged(sh):showGas(sh))}</span></div>
     <div class="sr"><span class="srl">Lodging / Hotel</span><span class="srv">${fmt(sh.lodging||0)}</span></div>
     ${t.cardFees>0?`<div class="sr"><span class="srl">Card Fees (${((S.settings.sqFee||0)*100).toFixed(1)}% of card)</span><span class="srv red">-${fmt(t.cardFees)}</span></div>`:''}
     ${t.salesTax>0?`<div class="sr"><span class="srl">Sales Tax collected (owed to state)</span><span class="srv red">-${fmt(t.salesTax)}</span></div>`:''}
-    ${t.gasAuto>0?`<div class="sr"><span class="srl">Gas (auto estimate, in profit)</span><span class="srv red">-${fmt(t.gasAuto)}</span></div>`:''}
     ${t.booth>(sh.boothCost||0)?`<div class="sr"><span class="srl">Booth overpaid vs sticker</span><span class="srv red">-${fmt(t.booth-(sh.boothCost||0))}</span></div>`:''}
     <div class="sr"><span class="srl">Tax Rate</span><span class="srv">${Math.round(showTaxRate(sh)*100)}%${(sh.taxRate!=null&&sh.taxRate!=='')?'':' (global)'}</span></div>
   </div>
@@ -7949,9 +7958,8 @@ function showSellerCardHTML(sh){
 function showExpModal(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const e=sh.days[di].expenses||{};
-  const aG=sh.miles?Math.round((sh.miles*2/(showMpg(sh)||17.5))*showGasPrice(sh)*100)/100:0; // one day's round trip, shown as a hint only
   mOpen(`<div class="mh"><div class="mt">💸 Day Expenses</div><button class="mx" onclick="mClose()">×</button></div>
-  <div class="fg"><label class="fl">Gas ${aG>0?'(est. '+fmt(aG)+')':''}</label><input class="fi" type="number" id="ex_g" value="${e.gas||''}" step="0.01" placeholder="${aG>0?'blank = the app estimates gas for the whole show':'0.00'}"></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">⛽ Gas is set once for the whole show in ✏️ Edit Show (miles, or Actual Gas $).${(parseFloat(e.gas)||0)>0?' This day has '+fmt(parseFloat(e.gas))+' of gas logged before; it still counts.':''}</div>
   <div class="fg"><label class="fl">Food / Drinks</label><input class="fi" type="number" id="ex_f" value="${e.food||0}" step="0.01" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Parking / Tolls</label><input class="fi" type="number" id="ex_p" value="${e.parking||0}" step="0.01" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Hotel</label><input class="fi" type="number" id="ex_h" value="${e.hotel||0}" step="0.01" placeholder="0.00"></div>
@@ -7960,7 +7968,7 @@ function showExpModal(shId,di){
 }
 function saveExp(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  sh.days[di].expenses={gas:parseFloat($$('ex_g').value)||0,food:parseFloat($$('ex_f').value)||0,parking:parseFloat($$('ex_p').value)||0,hotel:parseFloat($$('ex_h').value)||0,other:parseFloat($$('ex_o').value)||0};
+  sh.days[di].expenses={gas:parseFloat((sh.days[di].expenses||{}).gas)||0,food:parseFloat($$('ex_f').value)||0,parking:parseFloat($$('ex_p').value)||0,hotel:parseFloat($$('ex_h').value)||0,other:parseFloat($$('ex_o').value)||0};
   mClose();saveS();toast('Expenses saved!');
 }
 function saveDayNote(shId,di,n){const sh=S.shows.find(s=>s.id===shId);if(!sh)return;sh.days[di].notes=n;saveS();}
@@ -8712,6 +8720,10 @@ function calGoShow(shId,ds){
   mClose();
   go('show',shId,calDayIndex(sh,ds));
 }
+// v79: Shows <-> Calendar and Stock <-> Supplies are one tab each, switched at the top.
+function viewToggleHTML(a,b,cur){ const btn=(k,l)=>`<button class="btn ${cur===k?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="go('${k}')">${l}</button>`;
+  return `<div style="display:flex;gap:6px;margin-bottom:10px">${btn(a[0],a[1])}${btn(b[0],b[1])}</div>`; }
+function supplyLowCount(){ return (S.supplies||[]).filter(s=>s.qty<=s.low&&s.low>0).length; }
 function rCalendar(){
   if(!calMonth){const n=new Date();calMonth={y:n.getFullYear(),m:n.getMonth()};}
   const y=calMonth.y,m=calMonth.m;
@@ -8758,7 +8770,7 @@ function rCalendar(){
   h+=`<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:4px">Tap any coloured day to open that show on that day. Tap a red conflict day to see every show on it and pick one.</div>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin-top:12px" onclick="calToday()">Jump to This Month</button>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="exportCalICS()">Export Shows to Calendar (.ics)</button>`;
-  pg('calendar').innerHTML=h;
+  pg('calendar').innerHTML=viewToggleHTML(['shows','📋 Shows list'],['calendar','📅 Calendar'],'calendar')+h;
 }
 
 
@@ -8815,7 +8827,7 @@ function rSupplies(){
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">After adding, tap ⚙️ to set which bottle sizes give it away (auto-counts per show).</div>
     <button class="btn btn-gold btn-full" onclick="addSupItem()">+ ADD ITEM</button>
   </div>`;
-  pg('supplies').innerHTML=h;
+  pg('supplies').innerHTML=viewToggleHTML(['stock','📦 Inventory'],['supplies','🧴 Supplies'],'supplies')+h;
 }
 function openSupEdit(i){
   const s=(S.supplies||[])[i]; if(!s)return;
@@ -9177,15 +9189,18 @@ function rSettings(){
   pg('settings').innerHTML=`
   <div class="sec-title" style="margin-bottom:12px">⚙️ Settings</div>
   ${cloudCard}
-  ${pkgSettingsCard()}
-  ${bxSettingsCard()}
+  <div class="card"><div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700;margin-bottom:6px">💾 BACKUP &amp; RESTORE</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Save the whole app (shows, stock, reps, money, everything) as one file you keep somewhere safe. Restore puts it all back.</div>
+  <div class="g2" style="gap:8px">
+    <button class="btn btn-gold btn-full" onclick="downloadBackup()">💾 Backup</button>
+    <button class="btn btn-ghost btn-full" onclick="restoreBackupFile()">📂 Restore</button>
+  </div></div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TAX & FEES</div>
   <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
   <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
   <div class="fg"><label class="fl">Sales Tax % on CARD sales (currently ${(((s.cardTax||0))*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_ct" value="${(((s.cardTax||0))*100).toFixed(1)}" step="0.1" min="0" onchange="setSt('cardTax',this.value/100)"><div style="font-size:10px;color:var(--muted);margin-top:3px">Charged on Square/Debit only. Card totals you enter include this tax; the app sets the state's cut aside automatically.</div></div>
   </div>
   ${csHistoryCard()}
-  ${p2bSettingsCard()}
   <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🏷️ PRODUCT UNIT COSTS (COGS)</div>${cogsIsValid(S)?'':`<button class="btn btn-xs btn-ghost" onclick="resetCosts()">Reset</button>`}</div>
   ${cogsIsValid(S)
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">These mirror the cost period running now. They are shown for reference and are <strong>not</strong> used for calculation while the cost history above is valid. To change costs, use <strong>Change costs from a date</strong> so the change is dated and audited.</div>
@@ -9211,62 +9226,6 @@ function rSettings(){
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
   </div>
-  <div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">🎤 PASTE CLAUDE UPDATE</div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Speak to Claude on your phone, copy the command it gives you, paste it here. Updates inventory instantly — no tapping required.</div>
-  <div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:var(--muted)">
-    <strong style="color:var(--gold)">Example — say to Claude:</strong><br>
-    <em>"Give me a Best Solution inventory update command for: 32oz=80, c5s=400, c5l=50"</em><br><br>
-    <strong style="color:var(--gold)">Claude gives you:</strong><br>
-    <code style="color:var(--text)">INV:32oz=80,c5s=400,c5l=50</code><br><br>
-    Paste that below and hit Apply.
-  </div>
-  <textarea class="fi" id="claudeCmd" style="min-height:60px;font-family:monospace;font-size:14px" placeholder="Paste Claude command here... e.g. INV:32oz=80,c5s=400"></textarea>
-  <button class="btn btn-gold btn-full" style="margin-top:8px" onclick="applyClaudeCmd()">⚡ Apply Command</button>
-  <div class="divider" style="margin:14px 0;height:1px;background:var(--border)"></div>
-  <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">SYNC BETWEEN DEVICES</div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Export your data and import it on another device to keep everything in sync.</div>
-  <div class="g2" style="gap:8px">
-    <button class="btn btn-ghost btn-full" onclick="exportData()">📤 Export Data</button>
-    <button class="btn btn-ghost btn-full" onclick="importData()">📥 Import Data</button>
-  </div>
-  <div class="divider" style="margin:14px 0;height:1px;background:var(--border)"></div>
-  <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:6px">💾 BACKUP TO A FILE</div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Save your entire app (shows, inventory, reps, expenses, everything) as a file you keep somewhere safe. Restore puts it all back.</div>
-  <div class="g2" style="gap:8px">
-    <button class="btn btn-gold btn-full" onclick="downloadBackup()">💾 Download Backup File</button>
-    <button class="btn btn-ghost btn-full" onclick="restoreBackupFile()">📂 Restore from File</button>
-    <button class="btn btn-ghost btn-full" style="grid-column:1/-1" onclick="openDeviceBackups()">🛟 Device Backups (automatic copies on this phone)</button>
-    <button class="btn btn-gold btn-full" style="grid-column:1/-1" onclick="openRestoreCenter()">🛟 Emergency Restore (password)</button>
-  </div>
-  </div>
-  <div class="card" id="rep-section" style="border-color:rgba(79,195,247,0.3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700">👥 SALES REPS</div>
-      <button class="btn btn-xs" style="background:rgba(79,195,247,0.12);border:1px solid rgba(79,195,247,0.3);color:var(--blue)" onclick="openAddRep()">+ Add Rep</button>
-    </div>
-    ${(()=>{
-      const reps=(S.reps||[]).filter(r=>r.active);
-      if(!reps.length)return'<div style="font-size:12px;color:var(--muted)">No reps yet.</div>';
-      return reps.map(r=>{
-        const earned=repEarned(r.id);
-        const paid=repPaid(r.id);
-        const owed=Math.max(0,earned-paid);
-        return`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div>
-            <div style="font-weight:800;font-size:13px">${r.name}${r.isSelf?' 👑 (You)':''}</div>
-            ${earned>0?`<div style="font-size:11px;color:var(--muted)">Earned ${fmt(earned)} · Paid ${fmt(paid)}${owed>0?' · <span style="color:var(--gold);font-weight:800">Owes '+fmt(owed)+'</span>':'<span style="color:var(--green)"> ✓</span>'}</div>`:'<div style="font-size:11px;color:var(--muted)">No shows yet</div>'}
-          </div>
-          <div style="display:flex;gap:6px">
-            ${!r.isSelf&&owed>0?`<button class="btn btn-xs btn-green" onclick="openLogRepPmt('${r.id}')">💰 Pay</button>`:''}
-            <button class="btn btn-xs btn-ghost" onclick="openEditRep('${r.id}')">Edit</button>
-          </div>
-        </div>`;
-      }).join('');
-    })()}
-    ${allRepsOwed().length>0?`<div style="margin-top:10px;padding:8px;background:var(--redbg);border-radius:6px;font-size:12px;color:var(--red);font-weight:700;text-align:center">
-      Total Outstanding: ${fmt(allRepsOwed().reduce((t,x)=>t+x.owed,0))}
-    </div>`:''}
-  </div>
   <div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">📊 REPORTS & EXPORT</div>
   <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Download spreadsheets (CSV) or print a PDF for taxes & records.</div>
   <div class="g2" style="gap:8px;margin-bottom:8px">
@@ -9277,65 +9236,26 @@ function rSettings(){
     <button class="btn btn-gold btn-full" onclick="printFullReport()">🖨️ Full Report (PDF)</button>
   </div>
   <div style="font-size:11px;color:var(--muted)">Tip: open any show and tap Export for a single-show CSV or PDF.</div></div>
+  <details class="card" style="border-color:var(--border)"><summary style="font-size:12px;color:var(--muted);font-weight:800;cursor:pointer">🛠️ Advanced (only when Claude asks)</summary>
+  <div style="margin-top:10px">
+  ${pkgSettingsCard()}
+  ${bxSettingsCard()}
+  ${p2bSettingsCard()}
+  <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">More backup tools</div>
+  <div class="g2" style="gap:8px">
+    <button class="btn btn-ghost btn-full" style="grid-column:1/-1" onclick="openDeviceBackups()">🛟 Device Backups (automatic copies on this phone)</button>
+    <button class="btn btn-ghost btn-full" style="grid-column:1/-1" onclick="openRestoreCenter()">🛟 Emergency Restore (password)</button>
+    <button class="btn btn-ghost btn-full" onclick="exportData()">📤 Export Data</button>
+    <button class="btn btn-ghost btn-full" onclick="importData()">📥 Import Data</button>
+  </div></div>
   <div class="card rb"><div style="font-size:10px;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:10px">DANGER ZONE</div>
   <button class="btn btn-red btn-full" onclick="confirmReset()">🗑️ Reset All Data</button></div>
+  </div></details>
   <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--muted)">Best Solution App · Dot Dynasty LLC · ${APP_VERSION}<br>${_cloudUser?('☁️ Synced — '+(_cloudUser.email||'signed in')):'Saved on this device · sign in above to sync'}</div>
   <div style="height:10px"></div>`;
 }
 function setSt(k,v){S.settings[k]=v;saveS();toast('Saved!');}
 function setP(k,v){if(!S.prices)S.prices={};S.prices[k]=v;saveS();}
-function applyClaudeCmd(){
-  const raw=($$('claudeCmd').value||'').trim().toUpperCase();
-  if(!raw){toast('Nothing to apply!');return;}
-  try{
-    // INVENTORY UPDATE: INV:32oz=80,c5s=400
-    if(raw.startsWith('INV:')){
-      const parts=raw.replace('INV:','').split(',');
-      let updated=0;
-      parts.forEach(p=>{
-        const [k,v]=p.split('=');
-        const key=k.trim().toLowerCase();
-        const val=parseInt(v);
-        const sku=SKUS.find(s=>s.key===key||s.short.toLowerCase()===key||s.name.toLowerCase().includes(key));
-        if(sku&&!isNaN(val)){S.inventory[sku.key]=Math.max(0,val);updated++;}
-      });
-      if(updated>0){$$('claudeCmd').value='';saveS();toast('✅ Updated '+updated+' inventory items!');go('stock');}
-      else{toast('No valid items found. Check the format.');}
-      return;
-    }
-    // ADD INVENTORY: ADD:32oz=10,c5s=50
-    if(raw.startsWith('ADD:')){
-      const parts=raw.replace('ADD:','').split(',');
-      let updated=0;
-      parts.forEach(p=>{
-        const [k,v]=p.split('=');
-        const key=k.trim().toLowerCase();
-        const val=parseInt(v);
-        const sku=SKUS.find(s=>s.key===key||s.short.toLowerCase()===key||s.name.toLowerCase().includes(key));
-        if(sku&&!isNaN(val)){S.inventory[sku.key]=(S.inventory[sku.key]||0)+val;updated++;}
-      });
-      if(updated>0){$$('claudeCmd').value='';saveS();toast('✅ Added stock to '+updated+' items!');go('stock');}
-      else{toast('No valid items found. Check the format.');}
-      return;
-    }
-    // SUBTRACT INVENTORY: SOLD:32oz=5,c5s=10
-    if(raw.startsWith('SOLD:')){
-      const parts=raw.replace('SOLD:','').split(',');
-      let updated=0;
-      parts.forEach(p=>{
-        const [k,v]=p.split('=');
-        const key=k.trim().toLowerCase();
-        const val=parseInt(v);
-        const sku=SKUS.find(s=>s.key===key||s.short.toLowerCase()===key||s.name.toLowerCase().includes(key));
-        if(sku&&!isNaN(val)){S.inventory[sku.key]=Math.max(0,(S.inventory[sku.key]||0)-val);updated++;}
-      });
-      if(updated>0){$$('claudeCmd').value='';saveS();toast('✅ Removed sold items from '+updated+' SKUs!');go('stock');}
-      else{toast('No valid items found. Check the format.');}
-      return;
-    }
-    toast('Unknown command. Start with INV:, ADD:, or SOLD:');
-  }catch(e){toast('Command error: '+e.message);}
-}
 function confirmReset(){if(confirm('RESET ALL DATA? Cannot be undone.')){localStorage.removeItem('dd_bs_v7');S=JSON.parse(JSON.stringify(INIT));saveS();toast('Reset!');go('home');}}
 function exportData(){
   try{

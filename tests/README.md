@@ -22,6 +22,7 @@ node tests/batman-history.test.js
 node tests/fox-found-oct-pack.test.js
 node tests/womens-expo.test.js
 node tests/expense-audit.test.js
+node tests/simplify-v79.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 
