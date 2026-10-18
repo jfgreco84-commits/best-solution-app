@@ -295,7 +295,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v82';
+const APP_VERSION='v83';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -3429,7 +3429,7 @@ function showExpenseRowsHTML(sh){
     ['⛽ Gas / food / parking logged on days',dayExp,''],
     ['🏨 Lodging',(sh.lodging||0),sh.lodgingNote?_esc(sh.lodgingNote):''],
     ['💸 Other show expenses',otherExp,(sh.showExpenses||[]).length?((sh.showExpenses||[]).length+' item'+((sh.showExpenses||[]).length>1?'s':'')):''],
-    ['🧴 Supplies (bags, paper towels, shelf liner)',t.supplyCost,showOverheadOn(sh)?(showPaperRolls(sh)+' paper rolls'+(showPaperActual(sh)!=null?' (actual)':' (est.)')+' + ½ liner roll'):''],
+    ['🧴 Supplies (bags, paper towels, shelf liner)',t.supplyCost,showOverheadOn(sh)?(showPaperRolls(sh)+' paper rolls'+(showPaperActual(sh)!=null?' (actual)':' (est.)')+(supplyFromPurchases()?' (bags + liner count as Business Purchases)':' + ½ liner roll')):''],
     ['🥪 Lunch',t.lunch||0,(t.lunch>0)?(showOverheadDays(sh)+' day'+(showOverheadDays(sh)>1?'s':'')+' @ '+fmt(lunchPerDay())+(showFoodLogged(sh)>0?(' less '+fmt(showFoodLogged(sh))+' food logged'):'')):''],
     ['💵 Rep day pay',t.repPay,''],
     ['🧍 Worker payouts',t.workerPay,''],
@@ -4921,7 +4921,12 @@ function showPaperCrew(sh){ const ids=new Set((sh&&sh.repIds)||[]);
   return Math.max(1,n+((sh&&sh.repOnlyShow)?0:1)); }
 function showPaperRolls(sh){ if(!showOverheadOn(sh))return 0; const a=showPaperActual(sh); return a!=null?a:paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh); }
 function showPaperCost(sh){ return Math.round(showPaperRolls(sh)*paperRollCost()*100)/100; }
-function showLinerCost(sh){ return showOverheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*linerRollCost()*100)/100:0; }
+// v83 (Froggy, Oct 18): gift bags and shelf liner are bought and logged in Business Purchases
+// (organza bags, T-shirt bags, pouches, liner rolls), so charging them again on every show
+// counted them twice. They count once, as purchases. Paper towels have no purchase logged, so
+// they stay per show. Setting supplyFromPurchases:false brings the per-show charge back.
+function supplyFromPurchases(){ return !(S.settings&&S.settings.supplyFromPurchases===false); }
+function showLinerCost(sh){ if(supplyFromPurchases())return 0; return showOverheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*linerRollCost()*100)/100:0; }
 // Paper towels and shelf liner are costed automatically (paper count / liner rule), so a manual "used" row for them never adds again.
 function isAutoOverheadSupply(name){ return /paper towel|shelf liner/i.test(String(name||'')); }
 function showFoodLogged(sh){ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
@@ -4930,10 +4935,10 @@ function showFoodLogged(sh){ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='f
 // Fuel receipt before v79 still counts exactly as it did: when any exists it IS the show's gas.
 function showGasLogged(sh){ let g=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
   (sh.days||[]).forEach(d=>{ if(d&&d.expenses)g+=parseFloat(d.expenses.gas)||0; }); return g; }
-function showLunchCost(sh){ if(!showOverheadOn(sh))return 0; return Math.max(0,Math.round((showOverheadDays(sh)*lunchPerDay()-showFoodLogged(sh))*100)/100); } // $20 a day; food receipts already logged count toward it
+function showLunchCost(sh){ if(!showOverheadOn(sh))return 0; if(sh.repOnlyShow)return 0; /* v83: you were not there, so no lunch of yours (food receipts on the show still count on their own) */ return Math.max(0,Math.round((showOverheadDays(sh)*lunchPerDay()-showFoodLogged(sh))*100)/100); } // $20 a day; food receipts already logged count toward it
 function showBagCount(sh){ const u=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; if(!u)return 0;
   return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0); } // C5 rides in the polish bag
-function showBagCost(sh){ return showBagCount(sh)*bagUnitCost(); }
+function showBagCost(sh){ return supplyFromPurchases()?0:showBagCount(sh)*bagUnitCost(); }
 function showFlatOverhead(sh){ return showPaperCost(sh)+showLinerCost(sh); } // paper towels + shelf liner (not on missed / passed shows). Lunch is booked as food, see showLunchCost.
 function showSupplyCost(sh){
   let cost=0; const auto=showAutoSupplyUnits(sh);
@@ -9349,7 +9354,7 @@ function rSettings(){
   <div class="fg"><label class="fl">Paper towel estimate: rolls per person per show day</label><input class="fi" type="number" id="st_paperpp" value="${paperRollsPerPersonDay()}" step="0.25" min="0" onchange="setSt('paperRollsPerPersonDay',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">Shelf liner, per roll ($)</label><input class="fi" type="number" id="st_liner" value="${linerRollCost()}" step="0.01" min="0" onchange="setSt('linerRollCost',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">Lunch per show day ($)</label><input class="fi" type="number" id="st_lunch" value="${lunchPerDay()}" step="1" min="0" onchange="setSt('lunchPerDay',parseFloat(this.value))"></div>
-  <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag (2 per 5×7), 8oz/16oz/32oz = 1 bag each (C5 rides along in the polish bag). <b>Paper towels:</b> enter the real roll count on each show (✏️ Edit Show); until you do, the estimate above is used. <b>Shelf liner: 2 rolls every 4 shows</b> (reused). <b>Lunch: every show day</b>, even food from home; food receipts logged on a show count toward it, never on top. No candy. All auto-added to each show's expenses &amp; break-even.</div>
+  <div style="font-size:11px;color:var(--muted)"><b>Bags and shelf liner count when you buy them</b> (log the order in Business Purchases), not again per show. <b>Paper towels:</b> enter the real roll count on each show (✏️ Edit Show); until you do, the estimate above is used. <b>Lunch: every show day</b>, even food from home; food receipts logged on a show count toward it, never on top. No candy. All auto-added to each show's expenses &amp; break-even.</div>
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
@@ -9989,10 +9994,11 @@ function bxView(st){
   V.paperRolls=sh=>{ const n=parseFloat(sh&&sh.paperRolls); if(sh&&sh.paperRolls!=null&&sh.paperRolls!==''&&isFinite(n)&&n>=0)return n;
     return V.setting('paperRollsPerPersonDay',1)*V.paperCrew(sh)*V.overheadDays(sh); };
   V.paperCost=sh=>V.overheadOn(sh)?Math.round(V.paperRolls(sh)*V.setting('paperPackPrice',17.50)/PAPER_ROLLS_PER_PACK*100)/100:0;
-  V.linerCost=sh=>V.overheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*V.setting('linerRollCost',12.49)*100)/100:0;
+  V.fromPurch=()=>set.supplyFromPurchases!==false;
+  V.linerCost=sh=>V.fromPurch()?0:V.overheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*V.setting('linerRollCost',12.49)*100)/100:0;
   V.foodLogged=sh=>{ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+N(e.amount),0);
     (sh.days||[]).forEach(d=>{ if(d&&d.expenses)t+=N(d.expenses.food); }); return t; };
-  V.lunch=sh=>!V.overheadOn(sh)?0:Math.max(0,Math.round((V.overheadDays(sh)*V.setting('lunchPerDay',20)-V.foodLogged(sh))*100)/100);
+  V.lunch=sh=>(!V.overheadOn(sh)||sh.repOnlyShow)?0:Math.max(0,Math.round((V.overheadDays(sh)*V.setting('lunchPerDay',20)-V.foodLogged(sh))*100)/100);
   V.bagCount=sh=>{ const u=V.unitsSold(sh);
     return Math.ceil(N(u['2oz'])/2)+N(u['8oz'])+N(u['16oz'])+N(u['32oz']); };
   V.flatOverhead=sh=>V.paperCost(sh)+V.linerCost(sh);
@@ -10003,7 +10009,7 @@ function bxView(st){
     (A.supplies||[]).forEach(sup=>{ const q=auto[sup.name]||0; if(q>0)c+=q*N(sup.cost); });
     (sh.supplyUse||[]).forEach(u=>{ if(isAutoOverheadSupply(u.name))return; const sup=(A.supplies||[]).find(s=>s.name===u.name);
       c+=N(u.qty)*(sup?N(sup.cost):N(u.cost)); });
-    return c+V.bagCount(sh)*V.bagUnitCost()+V.flatOverhead(sh); };
+    return c+(V.fromPurch()?0:V.bagCount(sh)*V.bagUnitCost())+V.flatOverhead(sh); };
 
   V.repDayPay=(d,id)=>N((d&&d.repPay)?d.repPay[id]:null);
   V.repShowDayPay=(sh,id)=>(sh.days||[]).reduce((t,d)=>t+V.repDayPay(d,id),0);
