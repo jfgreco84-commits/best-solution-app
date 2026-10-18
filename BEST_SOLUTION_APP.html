@@ -297,7 +297,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v77';
+const APP_VERSION='v78';
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -2500,6 +2500,18 @@ function applyOneTimeUpdates(d){
     catch(e){ console.error('expense_audit_v77',e); }
   }
 
+  // v78 (Froggy, Oct 18): real paper towel counts. Cranberry Fest 2026 used 16
+  // rolls, Burgoo 2026 used 4. Set only where no count was entered yet.
+  if(!d._applied['paper_actuals_v78']){
+    try{
+      const shows=(d.shows||[]);
+      [[/cranberry/i,'2026-09',16],[/burgoo/i,'2026-10',4]].forEach(([re,ym,n])=>{
+        shows.filter(x=>x&&re.test(x.name||'')&&String(x.startDate||'').startsWith(ym)).forEach(x=>{
+          if(x.paperRolls==null||x.paperRolls===''){ x.paperRolls=n; invLogPush(x,{ts:new Date().toISOString(),type:'🧻 paper towels (v78)',changes:[n+' rolls used (Froggy)'],by:'owner'}); } }); });
+      if(shows.length)d._applied['paper_actuals_v78']=true;
+    }catch(e){ console.error('paper_actuals_v78',e); }
+  }
+
   // v77: blank miles + gas price of finished shows, every load (see v77FillBlanks)
   try{ v77FillBlanks(d); }catch(e){ console.error('v77FillBlanks',e); }
 
@@ -3405,7 +3417,7 @@ function showExpenseRowsHTML(sh){
     ['⛽ Gas / food / parking logged on days',dayExp,''],
     ['🏨 Lodging',(sh.lodging||0),sh.lodgingNote?_esc(sh.lodgingNote):''],
     ['💸 Other show expenses',otherExp,(sh.showExpenses||[]).length?((sh.showExpenses||[]).length+' item'+((sh.showExpenses||[]).length>1?'s':'')):''],
-    ['🧴 Supplies (bags, paper towels, shelf liner)',t.supplyCost,showOverheadOn(sh)?(showPaperRolls(sh)+' paper rolls + '+LINER_ROLLS_PER_SHOW+' liner'):''],
+    ['🧴 Supplies (bags, paper towels, shelf liner)',t.supplyCost,showOverheadOn(sh)?(showPaperRolls(sh)+' paper rolls'+(showPaperActual(sh)!=null?' (actual)':' (est.)')+' + ½ liner roll'):''],
     ['🥪 Lunch',t.lunch||0,(t.lunch>0)?(showOverheadDays(sh)+' day'+(showOverheadDays(sh)>1?'s':'')+' @ '+fmt(lunchPerDay())):''],
     ['💵 Rep day pay',t.repPay,''],
     ['🧍 Worker payouts',t.workerPay,''],
@@ -4852,15 +4864,19 @@ function showAutoSupplyUnits(sh){ const sold=(typeof showUnitsSold==='function')
 // Bags = $0.20 each (any size). 5x7 holds 2× 2oz (½ bag per 2oz); 6x9 holds 8oz polish + 8oz C5 (1 per 8oz);
 // 8x12 holds 16oz OR 32oz polish + 8oz C5 (1 each). The C5 rides inside the polish bag, so it adds no bag.
 function bagUnitCost(){ return (S.settings&&S.settings.bagCost!=null&&S.settings.bagCost!=='')?(parseFloat(S.settings.bagCost)||0):0.20; }
-// v77 overhead rules (Froggy, Oct 17 2026). No candy any more.
-//   Paper towels: 2 rolls per person per show day (hard rule). A 2-person booth
-//   used 4 rolls a day at Cranberry. Priced from a 6-roll Bounty pack.
-//   Shelf liner: 2 rolls every show.
-//   Lunch: $20 every show day, unless real food was logged on the show.
-const PAPER_ROLLS_PER_PERSON_DAY=2, PAPER_ROLLS_PER_PACK=6, LINER_ROLLS_PER_SHOW=2;
+// Overhead rules (Froggy). No candy any more.
+//   Paper towels (v78, Oct 18): it fluctuates (16 rolls at Cranberry 2026, 4 at
+//   Burgoo), so a show's real count (sh.paperRolls) wins; otherwise estimate
+//   rolls per person per show day (Setup, default 1). Priced from a Bounty 6-pack.
+//   Shelf liner (v78): reused, 2 rolls every 4 shows = half a roll per show.
+//   Lunch: $20 every show day (food from home is still money spent), unless real
+//   food receipts were logged on the show, which already are the food.
+const PAPER_ROLLS_PER_PACK=6, LINER_ROLLS_PER_SHOW=0.5;
 function _stNum(k,dflt){ return (S.settings&&S.settings[k]!=null&&S.settings[k]!=='')?(parseFloat(S.settings[k])||0):dflt; }
 function paperPackPrice(){ return _stNum('paperPackPrice',17.50); } // Bounty Select-A-Size, 6 double rolls, Oct 2026 average
 function paperRollCost(){ return paperPackPrice()/PAPER_ROLLS_PER_PACK; }
+function paperRollsPerPersonDay(){ return _stNum('paperRollsPerPersonDay',1); }
+function showPaperActual(sh){ const n=parseFloat(sh&&sh.paperRolls); return (sh&&sh.paperRolls!=null&&sh.paperRolls!==''&&isFinite(n)&&n>=0)?n:null; }
 function linerRollCost(){ return _stNum('linerRollCost',12.49); } // Duck Select Grip EasyLiner 20in x 18ft
 function lunchPerDay(){ return _stNum('lunchPerDay',20); }
 function showOverheadOn(sh){ return !((typeof isMissed==='function'&&isMissed(sh))||(typeof isPassed==='function'&&isPassed(sh))); }
@@ -4869,7 +4885,7 @@ function showOverheadDays(sh){ return Math.max(1,parseInt(sh&&sh.numDays,10)||((
 function showPaperCrew(sh){ const ids=new Set((sh&&sh.repIds)||[]);
   const n=[...ids].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return !r||!r.isSelf; }).length;
   return Math.max(1,n+((sh&&sh.repOnlyShow)?0:1)); }
-function showPaperRolls(sh){ return showOverheadOn(sh)?PAPER_ROLLS_PER_PERSON_DAY*showPaperCrew(sh)*showOverheadDays(sh):0; }
+function showPaperRolls(sh){ if(!showOverheadOn(sh))return 0; const a=showPaperActual(sh); return a!=null?a:paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh); }
 function showPaperCost(sh){ return Math.round(showPaperRolls(sh)*paperRollCost()*100)/100; }
 function showLinerCost(sh){ return showOverheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*linerRollCost()*100)/100:0; }
 function showFoodLogged(sh){ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
@@ -4950,6 +4966,7 @@ function showEditCosts(id){
   <div id="ec_travel_preview" style="font-size:12px;color:var(--gold);margin:-2px 0 10px;font-weight:700"></div>
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
   <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
+  <div class="fg"><label class="fl">🧻 Paper towel rolls used (actual)</label><input class="fi" type="number" id="ec_paper" step="1" min="0" value="${(sh.paperRolls!=null&&sh.paperRolls!=='')?sh.paperRolls:''}" placeholder="est. ${paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh)} (${paperRollsPerPersonDay()} per person per day)"></div>
   <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Hours — set each day's open &amp; close</label>
     ${Array.from({length:sh.numDays||1},(_,i)=>{
@@ -5014,6 +5031,7 @@ function saveEditCosts(id){
   const mpgv=v('ec_mpg'); sh.mpg = mpgv===''?null:(parseFloat(mpgv)||0);
   const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
   sh.lodging=parseFloat(v('ec_lodging'))||0;
+  const pr=v('ec_paper'); sh.paperRolls = pr===''?null:Math.max(0,parseFloat(pr)||0);
   // per-day open/close (inputs exist for each rendered day; only write to days that still exist)
   for(let i=0; $$('ec_open_'+i); i++){ const o=v('ec_open_'+i), c=v('ec_close_'+i); if(sh.days&&sh.days[i]){ sh.days[i].openTime=o||null; sh.days[i].closeTime=c||null; } }
   if(sh.days&&sh.days[0]){ sh.openTime=sh.days[0].openTime||null; sh.closeTime=sh.days[0].closeTime||null; } // keep show-level = day 1 for back-compat
@@ -6613,8 +6631,8 @@ function rShow(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🧴 Supplies Used</div><button class="btn btn-xs btn-ghost" onclick="openSupplyUse('${sh.id}')">✏️ Edit</button></div>
       ${(bagN||linerC||paperC)?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Bags &amp; overhead</div>
         ${bagN?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Lace bags × ${bagN} <span style="color:var(--muted)">@ ${fmt(bagUnitCost())}</span></span><span style="color:var(--muted)">${fmt(bagC)}</span></div>`:''}
-        ${paperC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Paper towels × ${paperN} rolls <span style="color:var(--muted)">(2 per person per day: ${showPaperCrew(sh)} × ${showOverheadDays(sh)}d @ ${fmt(paperRollCost())})</span></span><span style="color:var(--muted)">${fmt(paperC)}</span></div>`:''}
-        ${linerC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Shelf liner × ${LINER_ROLLS_PER_SHOW} rolls <span style="color:var(--muted)">@ ${fmt(linerRollCost())}</span></span><span style="color:var(--muted)">${fmt(linerC)}</span></div>`:''}`:''}
+        ${paperC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Paper towels × ${paperN} rolls <span style="color:var(--muted)">(${showPaperActual(sh)!=null?'actual count':(paperRollsPerPersonDay()+' per person per day est.: '+showPaperCrew(sh)+' × '+showOverheadDays(sh)+'d')} @ ${fmt(paperRollCost())})</span></span><span style="color:var(--muted)">${fmt(paperC)}</span></div>`:''}
+        ${linerC?`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>Shelf liner <span style="color:var(--muted)">(2 rolls every 4 shows @ ${fmt(linerRollCost())})</span></span><span style="color:var(--muted)">${fmt(linerC)}</span></div>`:''}`:''}
       ${autoRows?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Auto give-aways (from sales)</div>${autoRows}`:''}
       ${manRows?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin:6px 0 2px">Manual</div>${manRows}`:''}
       ${sc>0?`<div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><span>Supply cost (in expenses)</span><span style="color:var(--red)">-${fmt(sc)}</span></div>`:'<div style="font-size:12px;color:var(--muted)">No supply cost yet.</div>'}
@@ -9169,9 +9187,10 @@ function rSettings(){
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧴 SHOW SUPPLY COSTS</div>
   <div class="fg"><label class="fl">Lace bag cost ($ each)</label><input class="fi" type="number" id="st_bag" value="${bagUnitCost()}" step="0.01" min="0" onchange="setSt('bagCost',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">Bounty paper towels, 6-roll pack ($)</label><input class="fi" type="number" id="st_paper" value="${paperPackPrice()}" step="0.01" min="0" onchange="setSt('paperPackPrice',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Paper towel estimate: rolls per person per show day</label><input class="fi" type="number" id="st_paperpp" value="${paperRollsPerPersonDay()}" step="0.25" min="0" onchange="setSt('paperRollsPerPersonDay',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">Shelf liner, per roll ($)</label><input class="fi" type="number" id="st_liner" value="${linerRollCost()}" step="0.01" min="0" onchange="setSt('linerRollCost',parseFloat(this.value))"></div>
   <div class="fg"><label class="fl">Lunch per show day ($)</label><input class="fi" type="number" id="st_lunch" value="${lunchPerDay()}" step="1" min="0" onchange="setSt('lunchPerDay',parseFloat(this.value))"></div>
-  <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag (2 per 5×7), 8oz/16oz/32oz = 1 bag each (C5 rides along in the polish bag). <b>Paper towels: 2 rolls per person per day</b> (a 2-person booth uses 4 rolls a day). <b>Shelf liner: 2 rolls every show.</b> <b>Lunch: every show day</b>, skipped on a show where real food was logged. No candy. All auto-added to each show's expenses &amp; break-even.</div>
+  <div style="font-size:11px;color:var(--muted)">Bags auto-count from bottles sold: 2oz = ½ bag (2 per 5×7), 8oz/16oz/32oz = 1 bag each (C5 rides along in the polish bag). <b>Paper towels:</b> enter the real roll count on each show (✏️ Edit Show); until you do, the estimate above is used. <b>Shelf liner: 2 rolls every 4 shows</b> (reused). <b>Lunch: every show day</b>, even food from home; skipped only on a show where food receipts are logged. No candy. All auto-added to each show's expenses &amp; break-even.</div>
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
@@ -9903,7 +9922,9 @@ function bxView(st){
   V.overheadDays=sh=>Math.max(1,parseInt(sh&&sh.numDays,10)||((sh&&sh.days)||[]).length||1);
   V.paperCrew=sh=>{ const ids=[...new Set((sh&&sh.repIds)||[])].filter(id=>{ const r=(A.reps||[]).find(x=>x.id===id); return !r||!r.isSelf; });
     return Math.max(1,ids.length+((sh&&sh.repOnlyShow)?0:1)); };
-  V.paperCost=sh=>V.overheadOn(sh)?Math.round(PAPER_ROLLS_PER_PERSON_DAY*V.paperCrew(sh)*V.overheadDays(sh)*V.setting('paperPackPrice',17.50)/PAPER_ROLLS_PER_PACK*100)/100:0;
+  V.paperRolls=sh=>{ const n=parseFloat(sh&&sh.paperRolls); if(sh&&sh.paperRolls!=null&&sh.paperRolls!==''&&isFinite(n)&&n>=0)return n;
+    return V.setting('paperRollsPerPersonDay',1)*V.paperCrew(sh)*V.overheadDays(sh); };
+  V.paperCost=sh=>V.overheadOn(sh)?Math.round(V.paperRolls(sh)*V.setting('paperPackPrice',17.50)/PAPER_ROLLS_PER_PACK*100)/100:0;
   V.linerCost=sh=>V.overheadOn(sh)?Math.round(LINER_ROLLS_PER_SHOW*V.setting('linerRollCost',12.49)*100)/100:0;
   V.foodLogged=sh=>{ let t=(sh.showExpenses||[]).filter(e=>e&&e.cat==='food').reduce((a,e)=>a+N(e.amount),0);
     (sh.days||[]).forEach(d=>{ if(d&&d.expenses)t+=N(d.expenses.food); }); return t; };

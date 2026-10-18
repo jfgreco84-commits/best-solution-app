@@ -15,17 +15,21 @@ const mk=(o)=>Object.assign(ctx.buildPlannedShow({name:'Test Show',location:'Rac
 R.section('1. Paper towels: 2 rolls per person per day');
 { const d=full(); ctx.S=d; d.settings.paperPackPrice=18; // $3 a roll
   d.reps=[{id:'rep_self',name:'Froggy',isSelf:true,active:true},{id:'rep_a',name:'A',active:true},{id:'rep_b',name:'B',active:false}];
-  const solo=mk(); chk('1a. Froggy alone, 1 day = 2 rolls',ctx.showPaperRolls(solo),2);
-  const two=mk({repIds:['rep_a']}); chk('1b. 2-person booth, 1 day = 4 rolls',ctx.showPaperRolls(two),4);
-  const cran=mk({numDays:3,repIds:['rep_a','rep_b']}); chk('1c. 3 people x 3 days = 18 rolls (inactive rep still worked it)',ctx.showPaperRolls(cran),18);
-  chk('1d. cost = rolls x pack/6',ctx.showPaperCost(cran),54);
-  const crew=mk({repIds:['rep_a'],repOnlyShow:true}); chk('1e. crew-run show: Froggy not counted',ctx.showPaperRolls(crew),2);
-  const self=mk({repIds:['rep_self']}); chk('1f. Froggy listed on the crew is not counted twice',ctx.showPaperRolls(self),2); }
+  const solo=mk(); chk('1a. Froggy alone, 1 day = 1 roll (estimate)',ctx.showPaperRolls(solo),1);
+  const two=mk({repIds:['rep_a']}); chk('1b. 2-person booth, 1 day = 2 rolls',ctx.showPaperRolls(two),2);
+  const cran=mk({numDays:3,repIds:['rep_a','rep_b']}); chk('1c. 3 people x 3 days = 9 rolls (inactive rep still worked it)',ctx.showPaperRolls(cran),9);
+  chk('1d. cost = rolls x pack/6',ctx.showPaperCost(cran),27);
+  const crew=mk({repIds:['rep_a'],repOnlyShow:true}); chk('1e. crew-run show: Froggy not counted',ctx.showPaperRolls(crew),1);
+  const self=mk({repIds:['rep_self']}); chk('1f. Froggy listed on the crew is not counted twice',ctx.showPaperRolls(self),1);
+  cran.paperRolls=16; chk('1g. a real count wins over the estimate',[ctx.showPaperRolls(cran),ctx.showPaperCost(cran)],[16,48]);
+  cran.paperRolls=0; chk('1h. a real count of 0 is 0',ctx.showPaperRolls(cran),0);
+  d.settings.paperRollsPerPersonDay=2; chk('1i. estimate rate comes from Setup',ctx.showPaperRolls(two),4);
+  const V=ctx.bxView(d); cran.paperRolls=16; chk('1j. snapshot engine agrees',V.paperCost(cran),48); }
 
 R.section('2. Shelf liner, lunch, no candy');
 { const d=full(); ctx.S=d;
   const sh=mk({numDays:2});
-  chk('2a. liner = 2 rolls @ $12.49',ctx.showLinerCost(sh),24.98);
+  chk('2a. liner = 2 rolls every 4 shows = half a roll @ $12.49',ctx.showLinerCost(sh),6.25);
   chk('2b. lunch = $20 x 2 days',ctx.showLunchCost(sh),40);
   sh.showExpenses=[{id:'f',cat:'food',amount:30}];
   chk('2c. real food logged: no auto lunch',ctx.showLunchCost(sh),0);
@@ -138,5 +142,11 @@ R.section('9. Mistletoe & Martinis is $125');
   chk('9a. sticker $100 -> $125, payment untouched, $25 shows as owed',[m.boothCost,m.boothPayments.length,m.boothPayments[0].amount],[125,1,100]);
   delete d._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d);
   chk('9b. rerun does not add the note twice',(m.notes.match(/Booth \$125 \(v77\)/g)||[]).length,1); }
+
+R.section('10. v78 real paper counts');
+{ const d=full(); const c=d.shows.find(s=>/cranberry/i.test(s.name)&&s.startDate.startsWith('2026-09')), b=d.shows.find(s=>/burgoo/i.test(s.name)&&s.startDate.startsWith('2026-10'));
+  chk('10a. Cranberry 16, Burgoo 4',[c.paperRolls,b.paperRolls],[16,4]);
+  b.paperRolls=6; delete d._applied['paper_actuals_v78']; ctx.applyOneTimeUpdates(d);
+  chk('10b. a count he changed is never overwritten',b.paperRolls,6); }
 
 R.done();
