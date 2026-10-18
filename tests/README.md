@@ -25,6 +25,7 @@ node tests/expense-audit.test.js
 node tests/simplify-v79.test.js
 node tests/pay-rules-v80.test.js
 node tests/show-day-safety-v81.test.js
+node tests/paid-ahead-v82.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 
