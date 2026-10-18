@@ -295,7 +295,8 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v79';
+const APP_VERSION='v80';
+const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
 
@@ -2510,6 +2511,21 @@ function applyOneTimeUpdates(d){
         const sib=shows.find(y=>y&&y!==x&&/kane county/i.test(y.name||'')&&(parseFloat(y.miles)||0)>0); if(sib)x.miles=sib.miles; });
       if(shows.length)d._applied['paper_actuals_v78']=true;
     }catch(e){ console.error('paper_actuals_v78',e); }
+  }
+
+  // v80 (Froggy, Oct 18): Isaiah is paid 40% of his own sales, everyone else 35%; a day
+  // next to the owner splits the 35%. Pay already on a show from Oct 17 on was typed by
+  // hand, so it is marked to stay as typed. Older shows are not touched.
+  if(!d._applied['pay_rules_v80']){
+    try{
+      const reps=d.reps||[], isa=reps.find(r=>r&&!r.isSelf&&(r.id==='rep_isaiah'||/^isaiah\b/i.test(r.name||'')));
+      if(isa&&isa.commRate==null)isa.commRate=0.40;
+      (d.shows||[]).filter(x=>x&&String(x.startDate||'9999')>=PAY_RULES_FROM&&!x.payFromCommission).forEach(x=>{
+        const ids=new Set(); (x.days||[]).forEach(dy=>{ Object.keys(dy&&dy.repPay||{}).forEach(k=>{ if((parseFloat(dy.repPay[k])||0)>0)ids.add(k); }); Object.keys(dy&&dy.repPayout||{}).forEach(k=>ids.add(k)); });
+        Object.keys(x.repPayout||{}).forEach(k=>ids.add(k));
+        if(ids.size){ x.repPayManual=Object.assign({},x.repPayManual||{}); ids.forEach(k=>x.repPayManual[k]=true); } });
+      if(reps.length)d._applied['pay_rules_v80']=true;
+    }catch(e){ console.error('pay_rules_v80',e); }
   }
 
   // v77: blank miles + gas price of finished shows, every load (see v77FillBlanks)
@@ -6537,7 +6553,7 @@ function rShow(){
           <div style="text-align:right;display:flex;align-items:flex-start;gap:8px">
             <div>
             ${r.isSelf?'<div style="color:var(--muted)">Owner — paid by profit</div>':`
-              ${actual>0?`<div style="color:var(--muted);font-size:10px">${hasLegacy?'Legacy per-show payout':sh.payFromCommission?'commission, '+daysPaid+' day'+(daysPaid!==1?'s':''):daysPaid+' day'+(daysPaid!==1?'s':'')+' entered'}</div>
+              ${actual>0?`<div style="color:var(--muted);font-size:10px">${hasLegacy?'Legacy per-show payout':payRulesOn(sh)?(repPayIsManual(sh,r.id)?'entered by hand, ':'auto '+Math.round(repCommRate(r.id)*100)+'%, ')+daysPaid+' day'+(daysPaid!==1?'s':''):sh.payFromCommission?'commission, '+daysPaid+' day'+(daysPaid!==1?'s':''):daysPaid+' day'+(daysPaid!==1?'s':'')+' entered'}</div>
               <div style="color:var(--red);font-weight:700">Pay: ${fmt(actual)}</div>
               ${owed>0?`<div style="color:var(--gold);font-weight:800">Owed: ${fmt(owed)}</div>`:`<div style="color:var(--green)">✓ Paid ${fmt(paid)}</div>`}`:'<div style="color:var(--muted)">No day pay yet</div>'}`}
             </div>
@@ -6960,9 +6976,22 @@ function _pmtChips(p){
    Read-only; "Use as day pay" writes it to day.repPay on request.
    --------------------------------------------------------------------- */
 function showCommRate(sh){ const r=parseFloat(sh&&sh.commissionRate); return isFinite(r)&&r>0?r:0.35; }
+// v80 pay rules (Froggy, Oct 18 2026), from the Oct 17 show on: each rep gets their own rate
+// on their own sales (Isaiah 40%, everyone else 35%). A day someone works side by side with
+// the owner, the booth's 35% is split with him (owner's share kept). Pay typed in by hand
+// always wins, and shows before PAY_RULES_FROM (top of file) keep exactly the pay they had.
+function repCommRate(id){ const r=(S.reps||[]).find(x=>x.id===id); const v=parseFloat(r&&r.commRate); return isFinite(v)&&v>0?v:0.35; }
+function payRulesNew(sh){ return !!sh&&String(sh.startDate||'9999')>=PAY_RULES_FROM; }
+function payRulesOn(sh){ return payRulesNew(sh)&&!sh.payFromCommission&&!isPassed(sh); }
+function repPayIsManual(sh,id){ return !!(sh&&sh.repPayManual&&sh.repPayManual[id]); }
+// Who worked a show with no booths: its reps, plus the owner unless it is a rep-only show.
+function tableCrew(sh){ const own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
+  const ids=[...new Set([...(sh.repIds||[]),...showRepIds(sh)])].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf; });
+  if(ownId&&(!sh.repOnlyShow||(sh.repIds||[]).indexOf(ownId)>=0))ids.unshift(ownId); return ids; }
 function commissionDay(sh,di){
   const d=(sh.days||[])[di]; if(!d)return null;
-  const rate=showCommRate(sh), own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
+  const rate=showCommRate(sh), own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id, nr=payRulesNew(sh);
+  const rateOf=id=>nr?repCommRate(id):rate, pctOf=id=>Math.round(rateOf(id)*100)+'%';
   const round=n=>Math.round(n*100)/100;
   const booths=hasBooths(sh)?showBooths(sh):[{id:null,name:'Table'}];
   const pay={}, rows=[];
@@ -6970,15 +6999,16 @@ function commissionDay(sh,di){
     const en=b.id?(dayBoothRead(d,b.id)||{}):d;
     const vol=calcPmt(en.payments||{}); const sold=b.id?boothSold(d,b.id):(d.morningCount&&d.eveningCount?daySold(d):null);
     const units=sold?SKUS.reduce((t,s)=>t+(sold[s.key]||0),0):null;
-    const crew=b.id?dayBoothCrew(sh,di,b.id):showRepIds(sh);
+    const crew=b.id?dayBoothCrew(sh,di,b.id):(nr?tableCrew(sh):showRepIds(sh));
     const comm=round(vol*rate), people=[];
     const sellers=drawerSellers(en).filter(id=>calcPmt(en.sellerPayments[id]||{})>0);
     const ownerIn=ownId&&crew.indexOf(ownId)>=0;
     let how='';
-    if(!ownerIn&&sellers.length){ how='each 35% of their own sales';
-      sellers.forEach(id=>{ const v=calcPmt(en.sellerPayments[id]||{}); people.push({id,base:v,amt:round(v*rate)}); }); }
+    if(!ownerIn&&sellers.length){ how=nr?'each on their own sales ('+sellers.map(id=>sellerName(id)+' '+pctOf(id)).join(', ')+')':'each 35% of their own sales';
+      sellers.forEach(id=>{ const v=calcPmt(en.sellerPayments[id]||{}); people.push({id,base:v,amt:round(v*rateOf(id))}); }); }
     else if(crew.length){ const n=crew.length; how=ownerIn?(n>1?'split '+n+' ways, owner share kept':'owner only'):(n>1?'split '+n+' ways':'');
-      crew.forEach(id=>{ if(id===ownId)return; people.push({id,base:round(vol/n),amt:round(comm/n)}); }); }
+      if(nr&&!ownerIn&&crew.some(id=>rateOf(id)!==rate))how=(how?how+', ':'')+crew.map(id=>sellerName(id)+' '+pctOf(id)).join(', ');
+      crew.forEach(id=>{ if(id===ownId)return; people.push({id,base:round(vol/n),amt:(ownerIn||!nr)?round(comm/n):round(vol/n*rateOf(id))}); }); }
     people.forEach(p=>{ pay[p.id]=round((pay[p.id]||0)+p.amt); });
     rows.push({boothId:b.id,name:b.name,crew,vol,units,sold,comm,people,how,paid:people.reduce((t,p)=>t+p.amt,0)});
   });
@@ -7054,12 +7084,15 @@ function applyCommissionPay(shId,di){
 // with sales, so rep pages, the P&L and the payout sheet all show real pay.
 function payRoundOf(sh,id){ const v=parseFloat(sh&&sh.payRound&&sh.payRound[id]); return isFinite(v)?v:0; }
 function commissionSyncPay(sh){
-  if(!sh||!sh.payFromCommission||!hasBooths(sh))return false;
+  if(!sh)return false; const rules=payRulesOn(sh);
+  if(!rules&&(!sh.payFromCommission||!hasBooths(sh)))return false;
   let changed=false;
   const xs=(sh.days||[]).map((d,di)=>commissionDay(sh,di));
   let lastDi=-1; xs.forEach((x,di)=>{ if(x&&x.vol>0)lastDi=di; });
   const r2=n=>Math.round(n*100)/100;
-  const wants=xs.map(x=>{ const w={}; if(x&&x.vol>0)Object.keys(x.pay).forEach(id=>{ if(x.pay[id]>0)w[id]=x.pay[id]; }); return w; });
+  const wants=xs.map(x=>{ const w={}; if(x&&x.vol>0)Object.keys(x.pay).forEach(id=>{ if(x.pay[id]>0&&!(rules&&repPayIsManual(sh,id)))w[id]=x.pay[id]; }); return w; });
+  // v80: pay typed in by hand stays exactly as typed
+  if(rules)(sh.days||[]).forEach((d,di)=>{ Object.keys(d.repPay||{}).forEach(id=>{ if(repPayIsManual(sh,id))wants[di][id]=d.repPay[id]; }); });
   // round up: on the last day with sales; round down: taken from the last day back
   if(lastDi>=0&&sh.payRound)Object.keys(sh.payRound).forEach(id=>{ let left=payRoundOf(sh,id);
     if(left>0){ wants[lastDi][id]=r2((wants[lastDi][id]||0)+left); return; }
@@ -8996,7 +9029,8 @@ function openEditRep(repId){
       <span>Active (appears in show rosters)</span>
     </label>
   </div>
-  ${!rep.isSelf?`<div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--muted)">💵 <strong style="color:var(--text)">Paid per day.</strong> No commission percentages. Enter what ${rep.name} gets for each day worked on the day screen (💵 Day Pay) or from the show's rep list.</div>`:''}
+  ${!rep.isSelf?`<div class="fg"><label class="fl">Commission (% of their own sales)</label><input class="fi" type="number" id="er_rate" step="0.5" min="0" max="100" value="${Math.round(repCommRate(rep.id)*1000)/10}" inputmode="decimal"></div>
+  <div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--muted)">💵 From Oct 17 2026 on, pay fills in by itself: <strong style="color:var(--text)">this % of ${rep.name}'s own sales</strong>, and on a day ${rep.name} works side by side with you, the booth's 35% is split with you. Pay you type in on a show always wins. Shows before Oct 17 keep the pay that was entered.</div>`:''}
   ${(()=>{
     const earned=repEarned(repId);const paid=repPaid(repId);const owed=Math.max(0,earned-paid);
     if(!earned)return'';
@@ -9015,8 +9049,14 @@ function saveEditRep(repId){
   rep.name=($$('er_name').value||rep.name).trim();
   rep.phone=($$('er_phone').value||'').trim();
   rep.active=$$('er_active').checked;
+  const _rt=parseFloat((($$('er_rate')||{}).value||'').trim()); if(!rep.isSelf&&isFinite(_rt)&&_rt>0&&_rt<=100)rep.commRate=Math.round(_rt*10)/1000;
   mClose();saveS();toast('✅ Saved!');rSettings();
 }
+// v80: pay typed by hand on a show with the pay rules is kept as typed. Clearing every
+// day for that rep hands them back to the automatic rate.
+function repPayMarkManual(sh,id){ if(!payRulesOn(sh))return;
+  if(!sh.repPayManual)sh.repPayManual={};
+  if(repShowDayPay(sh,id)>0)sh.repPayManual[id]=true; else delete sh.repPayManual[id]; }
 // ---- DAY PAY ENTRY ----
 // Two ways in, same data (day.repPay): per DAY for everyone (openDayPay, the daily workflow),
 // or per REP across all the show's days (openRepDayPay, from the show's rep list).
@@ -9032,7 +9072,9 @@ function openDayPay(shId,di){
 function saveDayPay(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
   if(!d.repPay)d.repPay={};
-  (sh.repIds||[]).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(); if(v==='')delete d.repPay[rid]; else d.repPay[rid]=parseFloat(v)||0; });
+  (sh.repIds||[]).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(), was=d.repPay[rid];
+    if(v==='')delete d.repPay[rid]; else d.repPay[rid]=parseFloat(v)||0;
+    if(Math.abs((parseFloat(was)||0)-(parseFloat(d.repPay[rid])||0))>0.004)repPayMarkManual(sh,rid); });
   mClose();saveS();toast('✅ Day pay saved · '+fmt(calcDayPay(d))+' this day');renderCur();
 }
 // Per-rep view: one input per show day, plus pay method/note and an optional payment log.
@@ -9045,7 +9087,7 @@ function openRepDayPay(shId,repId){
   const hasLegacy=(legacyOv!=null&&legacyOv!=='')&&repShowDayPay(sh,repId)<=0;
   const methodOpts=['','Cash','Square','Debit','Venmo','Zelle','Cash App','PayPal','Check','Other'].map(m=>`<option value="${m}"${meta.method===m?' selected':''}>${m||'— select —'}</option>`).join('');
   mOpen(`<div class="mh"><div class="mt">💵 Day Pay — ${rep.name}</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — flat $ per day worked. Enter each day ${rep.name} worked and what they get for it.</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — flat $ per day worked. Enter each day ${rep.name} worked and what they get for it.${payRulesOn(sh)?` <strong style="color:var(--text)">${repPayIsManual(sh,repId)?'You typed this pay, so it stays as typed.':'Filled in for you: '+Math.round(repCommRate(repId)*100)+'% of their sales, or a split 35% on a day next to you.'}</strong> Change a day and your number wins. Clear every day to go back to automatic.`:''}</div>
   ${hasLegacy?`<div style="background:var(--card2);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--muted)">This show has a <strong style="color:var(--gold)">legacy payout of ${fmt(parseFloat(legacyOv)||0)}</strong> from the old commission system. Entering day pay below replaces it.</div>`:''}
   ${(sh.days||[]).map((d,i)=>`<div class="fg"><label class="fl">${d.date||('Day '+(i+1))} ($)</label><input class="fi" type="number" id="rdp_${i}" step="0.01" min="0" value="${(d.repPay&&d.repPay[repId]!=null&&d.repPay[repId]!=='')?d.repPay[repId]:''}" placeholder="0.00" inputmode="decimal"></div>`).join('')}
   <div class="fg"><label class="fl">Payment method used to pay the rep</label><select class="fi" id="ep_method">${methodOpts}</select></div>
@@ -9057,7 +9099,10 @@ function openRepDayPay(shId,repId){
 function saveRepDayPay(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const rep=(S.reps||[]).find(r=>r.id===repId);
-  (sh.days||[]).forEach((d,i)=>{ const el=$$('rdp_'+i); if(!el)return; if(!d.repPay)d.repPay={}; const v=(el.value||'').trim(); if(v==='')delete d.repPay[repId]; else d.repPay[repId]=parseFloat(v)||0; });
+  let typed=false;
+  (sh.days||[]).forEach((d,i)=>{ const el=$$('rdp_'+i); if(!el)return; if(!d.repPay)d.repPay={}; const v=(el.value||'').trim(), was=d.repPay[repId]; if(v==='')delete d.repPay[repId]; else d.repPay[repId]=parseFloat(v)||0;
+    if(Math.abs((parseFloat(was)||0)-(parseFloat(d.repPay[repId])||0))>0.004)typed=true; });
+  if(typed)repPayMarkManual(sh,repId);
   // once day pay exists, retire any legacy per-show payout so it can't double up
   if(repShowDayPay(sh,repId)>0&&sh.repPayout)delete sh.repPayout[repId];
   if(!sh.repPayMeta)sh.repPayMeta={};
