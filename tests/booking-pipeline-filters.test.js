@@ -70,7 +70,7 @@ function world(seed){
     html:()=>page.innerHTML,
     // The show cards rShows() emitted, in order. showCard() opens with
     // `<div class="sc ` and nothing nested inside it reuses that class.
-    cards:()=>(page.innerHTML.match(/onclick="go\('show','([^']+)',0\)"/g)||[])
+    cards:()=>(page.innerHTML.match(/onclick="go\('show','([^']+)'(?:,0)?\)"/g)||[])
       .map(m=>m.match(/'show','([^']+)'/)[1]),
     pressed:()=>['paid','owe','pending'].filter(k=>
       new RegExp('id="pf-'+k+'" aria-pressed="true"').test(page.innerHTML))};
