@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v84 auditor pass, Oct 18 2026](2026-10-18-v84-auditor-pass.md)** (money checks with one-tap fixes: day sold but no money, rep-only shows charging your lunch/gas, nothing-sold shows, overpaid reps; rep payments linked to shows; tap-to-replace number boxes; money screen says short/over; running show on top)
+**NEWEST: [v85 bulletproof, Oct 18 2026](2026-10-18-v85-bulletproof.md)** (damaged data no longer opens as a blank board that overwrites the real one; full-phone saves never silent; daily auto copy; crash recovery screen with data download; no negative or 10x-typo money)
 
-**Previous: [v83 supplies counted once, Oct 18 2026](2026-10-18-v83-supplies-once.md)** (bags + liner were charged as purchases AND per show, +$406.60; no owner lunch on rep-only shows; year net $8,335.99; list of board items to fix)
+**Previous: [v84 auditor pass, Oct 18 2026](2026-10-18-v84-auditor-pass.md)** (money checks with one-tap fixes: day sold but no money, rep-only shows charging your lunch/gas, nothing-sold shows, overpaid reps; rep payments linked to shows; tap-to-replace number boxes; money screen says short/over; running show on top)
+
+**Before that: [v83 supplies counted once, Oct 18 2026](2026-10-18-v83-supplies-once.md)** (bags + liner were charged as purchases AND per show, +$406.60; no owner lunch on rep-only shows; year net $8,335.99; list of board items to fix)
 
 **Before that: [v82 paid-ahead deposits, Oct 18 2026](2026-10-18-v82-paid-ahead.md)** (deposits on upcoming shows no longer cut this season's profit, $3,070.90 on the Oct 17 board; Home bar compares net to 2025 net; year net $7,909.39)
 

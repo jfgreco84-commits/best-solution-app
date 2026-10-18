@@ -295,7 +295,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v84';
+const APP_VERSION='v85';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -559,29 +559,75 @@ function normalizeShowDates(d){
     }
   });
 }
+// v85 (Froggy: "make sure nothing can go wrong"): one damaged entry (an empty slot in the show
+// list, a missing list) used to make loading fail, and the app then started from a BLANK board that
+// the next save wrote over the real one. Now the shape is repaired first, the saved copy is kept
+// before anything touches it, and a load that still fails opens the data as saved, never blank.
+function repairShape(d){
+  const fixed=[]; if(!d||typeof d!=='object')return fixed;
+  const arr=(k)=>{ if(!Array.isArray(d[k])){ if(d[k]!=null)fixed.push(k+' was not a list'); d[k]=[]; } const n=d[k].length; d[k]=d[k].filter(x=>x&&typeof x==='object'); if(d[k].length<n)fixed.push((n-d[k].length)+' empty '+k+' entr'+(n-d[k].length>1?'ies':'y')+' removed'); };
+  ['shows','reps','otherExpenses','transfers'].forEach(arr);
+  if(!d.inventory||typeof d.inventory!=='object'){ d.inventory={}; fixed.push('garage counts were missing'); }
+  SKUS.forEach(s=>{ const v=parseInt(d.inventory[s.key]); if(!isFinite(v)){ d.inventory[s.key]=0; } });
+  if(!d.settings||typeof d.settings!=='object'){ d.settings={}; fixed.push('settings were missing'); }
+  if(!d._applied||typeof d._applied!=='object')d._applied={};
+  d.shows.forEach(sh=>{
+    if(!Array.isArray(sh.days)){ sh.days=[]; fixed.push(sh.name+': days were missing'); }
+    sh.days=sh.days.filter(x=>x&&typeof x==='object');
+    sh.days.forEach(dy=>{ if(!dy.payments||typeof dy.payments!=='object')dy.payments={}; if(dy.boothCounts&&typeof dy.boothCounts==='object')Object.keys(dy.boothCounts).forEach(k=>{ if(!dy.boothCounts[k]||typeof dy.boothCounts[k]!=='object')delete dy.boothCounts[k]; }); });
+    ['showExpenses','boothPayments','workers','repIds'].forEach(k=>{ if(!Array.isArray(sh[k]))sh[k]=[]; else sh[k]=sh[k].filter(x=>x!=null); });
+  });
+  d.reps.forEach(r=>{ if(!Array.isArray(r.payments))r.payments=[]; else r.payments=r.payments.filter(x=>x&&typeof x==='object'); });
+  return fixed;
+}
+let _loadWarning=null;
+function _keepCopy(tag,raw){ try{ localStorage.setItem('dd_bs_backup_'+tag+'_'+Date.now(),raw); }catch(e){} }
 function loadS(){
+  let raw=null; try{ raw=localStorage.getItem('dd_bs_v7'); }catch(e){}
+  if(raw){
+    let d=null; try{ d=JSON.parse(raw); }catch(e){ _keepCopy('unreadable',raw); _loadWarning='Your saved data could not be read. A copy was kept; restore it from Setup → Advanced → Device Backups, or load a backup file.'; }
+    if(d&&d.v===INIT.v){
+      try{
+        const fixed=repairShape(d);
+        if(fixed.length){ _keepCopy('prerepair',raw); console.warn('repaired',fixed); _loadWarning='Fixed on load: '+fixed.slice(0,4).join('; ')+'. Nothing else changed; the copy from before is in Device Backups.'; }
+        applyOneTimeUpdates(d); normalizeShowDates(d);
+      }catch(e){
+        // an update failed: open the data exactly as saved, keep a copy, and hold cloud sync
+        console.error('load update error',e); _keepCopy('loadfail',raw);
+        try{ d=JSON.parse(raw); repairShape(d); }catch(_){}
+        _loadWarning='An update could not finish ('+(e&&e.message||e)+'). Your data opened exactly as saved and cloud sync is paused. Send Claude a screenshot.';
+        try{ syncQuarantineSet('load failed',d); }catch(_){}
+        return d;
+      }
+      try{ localStorage.setItem('dd_bs_v7',JSON.stringify(d)); }catch(e){ console.warn('load save',e); }
+      return d;
+    }
+    if(d&&d.v!==INIT.v&&!(d.v===6||d.v==null)){ _keepCopy('version',raw); }
+  }
   try{
-    // Try v7 first
-    let r=localStorage.getItem('dd_bs_v7');
-    if(r){const d=JSON.parse(r);if(d.v===INIT.v){applyOneTimeUpdates(d);normalizeShowDates(d);localStorage.setItem('dd_bs_v7',JSON.stringify(d));return d;}}
     // Migrate from v6
-    r=localStorage.getItem('dd_bs_v6');
+    const r=localStorage.getItem('dd_bs_v6');
     if(r){
       const d=JSON.parse(r);
       d.v=7;
       d._applied=d._applied||{};
+      repairShape(d);
       (d.shows||[]).forEach(sh=>{
         if(!sh.boothPayments)sh.boothPayments=[];
         if(sh.confirmed===undefined)sh.confirmed=sh.status==='completed';
       });
       applyOneTimeUpdates(d);
       normalizeShowDates(d);
-      localStorage.setItem('dd_bs_v7',JSON.stringify(d));
+      try{ localStorage.setItem('dd_bs_v7',JSON.stringify(d)); }catch(e){}
       return d;
     }
   }catch(e){console.error('load error',e);}
   const fresh=JSON.parse(JSON.stringify(INIT));
   applyOneTimeUpdates(fresh);
+  if(raw){ // there WAS data but it could not be opened: never let a blank board replace it
+    try{ syncQuarantineSet('unreadable data kept',fresh); }catch(_){}
+    fresh._readOnlyBlank=true;
+  }
   return fresh;
 }
 
@@ -2569,12 +2615,31 @@ function buildPlannedShow(e){
   };
 }
 
+// v85: a save that fails (phone storage full) is never silent. Old automatic copies are trimmed
+// and it tries again; if it still cannot save, a red bar stays up until it can.
+function _saveLocal(){
+  const txt=JSON.stringify(S);
+  try{ localStorage.setItem('dd_bs_v7',txt); _saveFailBar(false); return true; }catch(e){}
+  try{ const all=[]; for(let i=0;i<localStorage.length;i++)all.push(localStorage.key(i));
+    all.filter(k=>/^dd_bs_(backup|pre|prechange|cloudsnap)_/.test(k||'')).sort((a,b)=>(parseInt((a.match(/(\d{10,})/)||[])[1])||0)-(parseInt((b.match(/(\d{10,})/)||[])[1])||0)).slice(0,-1).forEach(k=>localStorage.removeItem(k));
+    localStorage.setItem('dd_bs_v7',txt); _saveFailBar(false); toast('💾 Phone storage was full. Old automatic copies were cleared and your entry is saved.',5000); return true; }catch(e){}
+  _saveFailBar(true); return false;
+}
+function _saveFailBar(on){ try{ let b=document.getElementById('saveFailBar');
+  if(!on){ if(b)b.remove(); return; }
+  if(!b){ b=document.createElement('div'); b.id='saveFailBar'; b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:9999;background:#7a0000;color:#fff;padding:12px 14px;font:800 13px system-ui;text-align:center;cursor:pointer'; b.onclick=()=>{ try{ downloadBackup(); }catch(_){} }; document.body.appendChild(b); }
+  b.textContent='🛑 NOT SAVED: this phone is out of storage. Tap here to download your data now, then free up space.'; }catch(e){} }
+// One automatic copy a day, so a bad day can always be rolled back (keeps the last 3).
+function dailyCopy(){ try{ const k=_todayKey(); if(localStorage.getItem('dd_bs_lastcopy')===k)return; backupLocal(); localStorage.setItem('dd_bs_lastcopy',k); }catch(e){} }
 function saveS(){
   // v41: a closed show whose counts were fixed afterwards pulls the garage along with it.
   let moved=[]; try{ moved=auditSyncReturns(); }catch(e){ console.warn('auditSync',e); }
   moved.forEach(m=>auditLogPush({ts:new Date().toISOString(),msg:m}));
   try{ commissionSyncAll(); }catch(e){ console.warn('commissionSync',e); }
-  S._updatedAt=new Date().toISOString();localStorage.setItem('dd_bs_v7',JSON.stringify(S));renderCur();
+  S._updatedAt=new Date().toISOString();
+  if(S._readOnlyBlank){ toast('⚠️ Not saved: your real data is kept safe. Restore it from Setup → Advanced → Device Backups first.',6000); renderCur(); return; }
+  if(!_saveLocal())return;
+  dailyCopy(); renderCur();
   if(moved.length)setTimeout(()=>toast('🛡️ Audit: '+moved.join(' · '),5000),2300);
   cloudQueuePush();}
 function renderCur(){
@@ -7844,7 +7909,7 @@ function saveCount(shId,di,type,boothId){
   if(d.locked){ toast('🔒 Day is locked. Unlock it to edit.'); return; }
   boothId=boothId||null;
   if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each booth.'); return; }
-  const c={};SKUS.forEach(s=>c[s.key]=parseInt($$('c_'+s.key).value)||0);
+  const c={};SKUS.forEach(s=>c[s.key]=Math.max(0,parseInt($$('c_'+s.key).value)||0)); // v85: a stray minus sign never makes a negative count
   const tgt=boothId?dayBoothWrite(d,boothId):d;
   const before=(type==='morning'?tgt.morningCount:tgt.eveningCount)||null;
   const diffs=SKUS.filter(s=>(before?(before[s.key]||0):null)!==(c[s.key]||0)).map(s=>`${s.short}:${before?(before[s.key]||0):'—'}→${c[s.key]||0}`);
@@ -8049,6 +8114,11 @@ function saveMoney(shId,di,boothId){
   const sh=S.shows.find(x=>x.id===st.shId); if(!sh)return;
   const d=sh.days[st.di]; if(!d)return;
   if(d.locked){ toast('🔒 Day is locked. Unlock it to edit.'); return; }
+  // v85: no negative money, and a fat-finger (an extra 0) gets a second look before it lands in profit
+  PMTS.forEach(p=>{ st.flat[p.key]=Math.max(0,parseFloat(st.flat[p.key])||0); }); Object.values(st.split||{}).forEach(r=>PMTS.forEach(p=>{ if(r[p.key]!=null)r[p.key]=Math.max(0,parseFloat(r[p.key])||0); }));
+  { const _src=st.boothId?(dayBoothRead(d,st.boothId)||{}):d; let _exp=0; if(_src.morningCount&&_src.eveningCount)_exp=calcRev(st.boothId?(boothSold(d,st.boothId)||{}):daySold(_src),sh.prices||null);
+    const _tot=st.on?mmSplitTotal(st):calcPmt(st.flat);
+    if(_exp>0&&_tot>_exp*3&&_tot-_exp>300&&typeof confirm==='function'&&!confirm(fmt(_tot)+' is more than 3x what sold ('+fmt(_exp)+'). An extra zero? OK = it is right, save it. Cancel = fix it.'))return; }
   const tgtBooth=st.boothId;
   if(hasBooths(sh)&&!tgtBooth){ toast('This show has separate booths — count each drawer.'); return; }
   const tgt=tgtBooth?dayBoothWrite(d,tgtBooth):d;
@@ -8120,7 +8190,8 @@ function showExpModal(shId,di){
 }
 function saveExp(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
-  sh.days[di].expenses={gas:parseFloat((sh.days[di].expenses||{}).gas)||0,food:parseFloat($$('ex_f').value)||0,parking:parseFloat($$('ex_p').value)||0,hotel:parseFloat($$('ex_h').value)||0,other:parseFloat($$('ex_o').value)||0};
+  const _n=id=>Math.max(0,parseFloat($$(id).value)||0);
+  sh.days[di].expenses={gas:parseFloat((sh.days[di].expenses||{}).gas)||0,food:_n('ex_f'),parking:_n('ex_p'),hotel:_n('ex_h'),other:_n('ex_o')};
   mClose();saveS();toast('Expenses saved!');
 }
 function saveDayNote(shId,di,n){const sh=S.shows.find(s=>s.id===shId);if(!sh)return;sh.days[di].notes=n;saveS();}
@@ -9243,7 +9314,7 @@ function saveDayPay(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
   if(!d.repPay)d.repPay={};
   (sh.repIds||[]).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(), was=d.repPay[rid];
-    if(v==='')delete d.repPay[rid]; else d.repPay[rid]=parseFloat(v)||0;
+    if(v==='')delete d.repPay[rid]; else d.repPay[rid]=Math.max(0,parseFloat(v)||0);
     if(Math.abs((parseFloat(was)||0)-(parseFloat(d.repPay[rid])||0))>0.004)repPayMarkManual(sh,rid); });
   mClose();saveS();toast('✅ Day pay saved · '+fmt(calcDayPay(d))+' this day');renderCur();
 }
@@ -9270,7 +9341,7 @@ function saveRepDayPay(shId,repId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const rep=(S.reps||[]).find(r=>r.id===repId);
   let typed=false;
-  (sh.days||[]).forEach((d,i)=>{ const el=$$('rdp_'+i); if(!el)return; if(!d.repPay)d.repPay={}; const v=(el.value||'').trim(), was=d.repPay[repId]; if(v==='')delete d.repPay[repId]; else d.repPay[repId]=parseFloat(v)||0;
+  (sh.days||[]).forEach((d,i)=>{ const el=$$('rdp_'+i); if(!el)return; if(!d.repPay)d.repPay={}; const v=(el.value||'').trim(), was=d.repPay[repId]; if(v==='')delete d.repPay[repId]; else d.repPay[repId]=Math.max(0,parseFloat(v)||0);
     if(Math.abs((parseFloat(was)||0)-(parseFloat(d.repPay[repId])||0))>0.004)typed=true; });
   if(typed)repPayMarkManual(sh,repId);
   // once day pay exists, retire any legacy per-show payout so it can't double up
@@ -9609,6 +9680,8 @@ function restoreBackupFile(){
 // ===================================================
 // MODAL
 // ===================================================
+// v85: any surprise error shows a short message instead of a button that silently does nothing
+try{ let _lastErr=0; window.addEventListener('error',e=>{ const n=Date.now(); if(n-_lastErr<4000)return; _lastErr=n; try{ toast('⚠️ Something went wrong ('+String((e&&e.message)||'error').slice(0,80)+'). What was saved is safe. Try again.',5000); }catch(_){} }); }catch(e){}
 // v84: tap a number box and what you type replaces it (no deleting the 0 first)
 try{
   const _num=t=>t&&t.tagName==='INPUT'&&(t.type==='number'||t.inputMode==='decimal');
@@ -13223,12 +13296,18 @@ function pkgSettingsCard(){
 // ===================================================
 try{
   S=loadS();
-  try{ if(commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
-  go('home');
+  try{ if(!S._readOnlyBlank&&commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
+  try{ go('home'); }catch(e){ console.error('home',e); try{ go('shows'); }catch(_){ throw e; } }
+  if(_loadWarning)setTimeout(()=>toast('⚠️ '+_loadWarning,9000),600);
   cloudInit();
 }catch(e){
-  document.body.style.cssText='background:#111;color:#fff;padding:20px;font-family:monospace';
-  document.body.innerHTML='<h2 style="color:red">APP ERROR</h2><pre style="font-size:14px;color:#ff6;white-space:pre-wrap">'+e.toString()+'\n\n'+e.stack+'</pre>';
+  // v85: never a dead screen. Your data stays on the phone; this screen gets it out and lets you retry.
+  document.body.style.cssText='background:#111;color:#fff;padding:20px;font-family:system-ui';
+  document.body.innerHTML='<h2 style="color:#FFD700">⚠️ The app hit a snag opening</h2><p style="font-size:15px">Your data is still saved on this phone. Nothing was erased.</p>'
+    +'<button id="rcDl" style="display:block;width:100%;padding:14px;margin:10px 0;font-size:16px;font-weight:800;border-radius:10px;border:0;background:#FFD700">⬇️ Download my data (safe copy)</button>'
+    +'<button onclick="location.reload()" style="display:block;width:100%;padding:14px;margin:10px 0;font-size:16px;font-weight:800;border-radius:10px;border:1px solid #555;background:#222;color:#fff">🔄 Try again</button>'
+    +'<p style="font-size:12px;color:#aaa">Send Claude a screenshot of this:</p><pre style="font-size:11px;color:#ff6;white-space:pre-wrap">'+String(e&&e.message||e)+'\n'+String(e&&e.stack||'').slice(0,600)+'</pre>';
+  try{ document.getElementById('rcDl').onclick=()=>{ const raw=localStorage.getItem('dd_bs_v7')||'{}'; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([raw],{type:'application/json'})); a.download='best-solution-safe-copy-'+Date.now()+'.json'; document.body.appendChild(a); a.click(); }; }catch(_){}
 }
 </script>
 </body>
