@@ -6231,9 +6231,9 @@ function v77FillBlanks(d){
 // Square receipts (each receipt's line item names its event).
 const SMC_V77=[
   {name:'Harvest & Handmade Market',re:/harvest/i,date:'2026-09-12',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001922',paidOn:'2026-08-21',
-    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided. Worked? Unknown: Froggy is not sure, and the Sep 12 game plan only says to pack for Sunday, so it was probably skipped. No sales were logged; mark it passed or enter the counts.'},
+    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided. WORKED: Froggy worked this show and logged it in the app (Oct 18). The counts and money are not on the board that was rebuilt after the Sep 30 wipe; they are being recovered from his backups.'},
   {name:'A Girls Day Out Market',re:/girl.?s day out/i,date:'2026-09-13',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001927',paidOn:'2026-08-21',
-    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor space 20. Bring your own 6-8 ft table, 2 chairs provided. Worked? Froggy thinks so but is not sure; the Sep 13 game plan had him there. No sales were logged; enter the counts and money if you have them.'},
+    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor space 20. Bring your own 6-8 ft table, 2 chairs provided. WORKED: Froggy worked this show and logged it in the app (Oct 18). The counts and money are not on the board that was rebuilt after the Sep 30 wipe; they are being recovered from his backups.'},
   {name:'Merry Makers Expo',re:/merry makers/i,date:'2026-11-08',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:100,paid:103,inv:'001933',paidOn:'2026-08-21',
     note:'2nd Annual. 6161 W Grand Ave, Gurnee IL. Setup 10am-12pm.'},
   {name:'Holly Jolly Christmas Market',re:/holly jolly/i,date:'2026-11-14',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001931',paidOn:'2026-08-21',
@@ -6254,7 +6254,10 @@ function socialMarketV77(d){
   SMC_V77.forEach(x=>{
     const pay={id:'bp_smc_'+x.inv,amount:x.paid,date:x.paidOn,note:'Square invoice #'+x.inv+' (booth $'+x.fee+' + $3 Square processing), paid Visa ...9790'};
     const notes=x.name.toUpperCase()+' (The Social Market Co. Events, Caelin Porter 224-419-1975). '+x.note+' Booth $'+x.fee+' + $3 Square fee = $'+x.paid+' PAID '+x.paidOn+', invoice #'+x.inv+'.';
-    let sh=d.shows.find(s=>s&&s.startDate===x.date&&x.re.test(s.name||''));
+    // Same date AND (the event name, or the venue, or the organizer): a show Froggy typed in himself
+    // under another name ("Valley Ridge market", "McHenry VFW") is adopted, never duplicated.
+    const venue=/valley ridge|antioch/i.test(x.loc)?/valley ridge|antioch/i:/vfw|mchenry/i.test(x.loc)?/vfw|mchenry(?! county fair)/i:/ten hotel|gurnee/i.test(x.loc)?/ten hotel|gurnee/i:/ethereal|woodstock/i;
+    let sh=d.shows.find(s=>s&&s.startDate===x.date&&(x.re.test(s.name||'')||venue.test((s.name||'')+' '+(s.location||''))||/social market/i.test((s.name||'')+' '+(s.notes||''))));
     if(!sh){
       sh=buildPlannedShow({name:x.name,location:x.loc,startDate:x.date,numDays:1,boothCost:x.paid,miles:x.miles,boothPayments:[pay]});
       sh.confirmed=true;

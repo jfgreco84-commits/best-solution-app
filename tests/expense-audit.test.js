@@ -112,6 +112,13 @@ R.section('8. The Social Market Co. shows');
   ctx.v77FillBlanks({shows:[rf]});
   chk('8e. Rustic Fox holiday market in North Aurora gets 77 mi, not Carol Stream 91',rf.miles,77); }
 
+R.section('8b. A show he logged under another name is adopted, not duplicated');
+{ const d=blank(); const own=ctx.buildPlannedShow({name:'Valley Ridge Market',location:'Antioch, IL',startDate:'2026-09-13',numDays:1});
+  own.status='completed'; own.days[0].payments.cash=310; d.shows.push(own); ctx.applyOneTimeUpdates(d);
+  const on13=d.shows.filter(s=>s.startDate==='2026-09-13');
+  chk('8b1. still one show on Sep 13, his name and sales kept',[on13.length,on13[0].name,on13[0].days[0].payments.cash,on13[0].status],[1,'Valley Ridge Market',310,'completed']);
+  chk('8b2. booth payment added to his record',on13[0].boothPayments.map(p=>p.amount),[68]); }
+
 R.section('9. Mistletoe & Martinis is $125');
 { const d=blank(); const m=Object.assign(ctx.buildPlannedShow({name:'Mistletoe & Martinis',location:'Countryside Banquets, Lakemoor, IL',startDate:'2026-11-27',numDays:1,boothCost:100,miles:35}),
     {boothPayments:[{amount:100,date:'2026-08-25',note:'paid by phone'}]});

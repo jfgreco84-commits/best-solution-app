@@ -86,9 +86,14 @@ Not touched: The Last Fling (8/30, #001921 $68) and Mistletoe & Martinis (11/27)
 the Aug 26 update. Miles one way from Waterford (approx): McHenry 40, Antioch 30, Gurnee 42, Woodstock 45.
 
 **Open:**
-- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out:** Froggy is not sure he worked them (Oct 18). The Sep 12
-  game plan only says to pack for Sunday, so Saturday's Harvest & Handmade was probably skipped; Sunday's Girls
-  Day Out (space 20) was on the plan. No sales anywhere, so both sit as MISSED with the booth money spent. Notes say so.
+- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out: WORKED AND LOGGED** (Froggy, Oct 18), but neither is on
+  the board this code can see. Lead: on **Sep 30 the phone and the cloud copy were both wiped** and the board was
+  rebuilt from the **Sep 26 backup** (v68, `packages/emergency-restore-20260930.json`, encrypted, owner password).
+  If the two shows are not in that backup they were lost before it; if they are, the restore dropped them.
+  Next: decrypt the restore copy (needs Froggy's password, never commit the plaintext) and the Sep 30 emailed
+  `best-solution-backup-2026-09-30.json`, find the two shows, put their counts and money back.
+  The seed now adopts a record on the same date that names the venue or organizer, so a show he typed in
+  under another name ("Valley Ridge Market") is never duplicated.
 - **Mistletoe & Martinis: booth $125** (Froggy, Oct 18). A $100 sticker is corrected to $125; the $100 payment from
   the Master Show Sheet is left alone, so $25 shows as owed until the Chamber (Therese, 815-403-5155) confirms.
 - **Bridal Expo $25 Vendor Spotlight:** offered as a separate invoice; none found and Froggy doesn't know. Not booked.
