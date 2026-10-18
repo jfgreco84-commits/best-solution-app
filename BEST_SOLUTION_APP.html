@@ -295,7 +295,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v80';
+const APP_VERSION='v81';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2514,16 +2514,12 @@ function applyOneTimeUpdates(d){
   }
 
   // v80 (Froggy, Oct 18): Isaiah is paid 40% of his own sales, everyone else 35%; a day
-  // next to the owner splits the 35%. Pay already on a show from Oct 17 on was typed by
-  // hand, so it is marked to stay as typed. Older shows are not touched.
+  // next to the owner splits the 35%. Pay already on a show is kept as typed by
+  // commissionSyncPay the first time it sees the show (sh.payRulesSeen).
   if(!d._applied['pay_rules_v80']){
     try{
       const reps=d.reps||[], isa=reps.find(r=>r&&!r.isSelf&&(r.id==='rep_isaiah'||/^isaiah\b/i.test(r.name||'')));
       if(isa&&isa.commRate==null)isa.commRate=0.40;
-      (d.shows||[]).filter(x=>x&&String(x.startDate||'9999')>=PAY_RULES_FROM&&!x.payFromCommission).forEach(x=>{
-        const ids=new Set(); (x.days||[]).forEach(dy=>{ Object.keys(dy&&dy.repPay||{}).forEach(k=>{ if((parseFloat(dy.repPay[k])||0)>0)ids.add(k); }); Object.keys(dy&&dy.repPayout||{}).forEach(k=>ids.add(k)); });
-        Object.keys(x.repPayout||{}).forEach(k=>ids.add(k));
-        if(ids.size){ x.repPayManual=Object.assign({},x.repPayManual||{}); ids.forEach(k=>x.repPayManual[k]=true); } });
       if(reps.length)d._applied['pay_rules_v80']=true;
     }catch(e){ console.error('pay_rules_v80',e); }
   }
@@ -3663,6 +3659,9 @@ function calcYTD(){
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
   return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum,online:ol};
 }
+// v81: the same entry twice inside 1.5s is a double tap, not a second entry.
+function _sameTap(key){ const n=Date.now(), w=window.__lastTap; window.__lastTap={k:key,t:n}; return !!(w&&w.k===key&&n-w.t<1500); }
+const _skuVals=pfx=>SKUS.map(s=>(($$(pfx+s.key)||{}).value||'')).join(',');
 function _dupGuard(){ const n=Date.now(); if(window.__lastSave&&n-window.__lastSave<900)return true; window.__lastSave=n; return false; }
 function toast(msg,dur=2200){const el=$$('toast');el.textContent=msg;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',dur);}
 function boothPaid(sh){return(sh.boothPayments||[]).reduce((t,p)=>t+(parseFloat(p.amount)||0),0);}
@@ -3754,12 +3753,21 @@ function getShowDates(sh){
 // ===================================================
 // NAVIGATION
 // ===================================================
+// The day a show should open on: today's date while it runs, else the first day not
+// finished yet, else the last day. Never an index the show does not have.
+function showDefaultDay(sh){
+  const n=(sh.days||[]).length; if(!n)return 0;
+  const iso=getShowDates(sh)||[], t=iso.indexOf(_todayKey()); if(t>=0&&t<n)return t;
+  if(sh.status==='active'){ const open=(sh.days||[]).findIndex(d=>!d.eveningCount); if(open>=0)return open; }
+  return sh.status==='completed'?n-1:0;
+}
 function go(pg,shId,dayIdx){
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
   curPg=pg;
   if(shId!==undefined)curShow=shId;
   if(dayIdx!==undefined)curDay=dayIdx;
+  else if(pg==='show'&&shId!==undefined){ const _s=(S.shows||[]).find(x=>x.id===shId); if(_s)curDay=showDefaultDay(_s); } // v81: open on today, not on whatever day was last looked at
   $$('pg-'+pg).classList.add('on');
   const nb=$$('nb-'+pg);if(nb)nb.classList.add('on');
   const _parent={calendar:'shows',supplies:'stock'}[pg]; if(_parent){ const pn=$$('nb-'+_parent); if(pn)pn.classList.add('on'); } // v79: 6 tabs
@@ -4583,7 +4591,7 @@ function showRestock(){
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (now: ${S.inventory[s.key]||0})</label><input class="fi" type="number" id="rst_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applyRestock()">Add to Inventory</button>`);
 }
-function applyRestock(){let n=0;SKUS.forEach(s=>{const v=parseInt($$('rst_'+s.key).value)||0;if(v>0){S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' units added!');}
+function applyRestock(){if(_sameTap('rst|'+_skuVals('rst_')))return;let n=0;SKUS.forEach(s=>{const v=parseInt($$('rst_'+s.key).value)||0;if(v>0){S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' units added!');}
 function showSetAllInv(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Counts</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT count you have right now.</div>
@@ -4602,7 +4610,7 @@ function showAddBatman(){
   <button class="btn btn-gold btn-full" onclick="applyAddBatman()">Add to What I Owe</button>`);
 }
 function bmField(id){ const el=$$(id); return el&&el.value?String(el.value).trim():''; }
-function applyAddBatman(){const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;it[s.key]=v;}});if(n)bmAddLog('borrow',it,bmField('bma_date'),bmField('bma_note'));mClose();saveS();toast('+'+n+' borrowed from Batman (added to the garage)');}
+function applyAddBatman(){if(_sameTap('bma|'+_skuVals('bma_')))return;const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bma_'+s.key).value)||0;if(v>0){b[s.key]=(b[s.key]||0)+v;S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;it[s.key]=v;}});if(n)bmAddLog('borrow',it,bmField('bma_date'),bmField('bma_note'));mClose();saveS();toast('+'+n+' borrowed from Batman (added to the garage)');}
 function showReturnBatman(){
   mOpen(`<div class="mh"><div class="mt">− Returned to Batman</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe, bottle for bottle, and takes them out of the garage.</div>
@@ -4611,7 +4619,7 @@ function showReturnBatman(){
   <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="bmr_note" placeholder="e.g. pallet came in"></div>
   <button class="btn btn-gold btn-full" onclick="applyReturnBatman()">Subtract Returned</button>`);
 }
-function applyReturnBatman(){const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-dec);n+=dec;if(dec)it[s.key]=dec;}});if(n)bmAddLog('return',it,bmField('bmr_date'),bmField('bmr_note'));mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
+function applyReturnBatman(){if(_sameTap('bmr|'+_skuVals('bmr_')))return;const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){const cur=b[s.key]||0;const dec=Math.min(cur,v);b[s.key]=cur-dec;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-dec);n+=dec;if(dec)it[s.key]=dec;}});if(n)bmAddLog('return',it,bmField('bmr_date'),bmField('bmr_note'));mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
 function showSetBatman(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Bottles Owed</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT number of each you currently owe Batman.</div>
@@ -4968,6 +4976,7 @@ function showEditCosts(id){
   <div style="padding:8px 0 12px;font-size:13px;color:var(--muted)">Edit anything below, then Save.</div>
   <div class="fg"><label class="fl">Show Name</label><input class="fi" type="text" id="ec_name" value="${esc(sh.name)}" placeholder="Show name"></div>
   <div class="fg"><label class="fl">Location</label><input class="fi" type="text" id="ec_loc" value="${esc(sh.location)}" placeholder="City, ST"></div>
+  <div class="fg"><label class="fl">Start Date (rain date or rescheduled? change it here)</label><input class="fi" type="date" id="ec_start" value="${esc(sh.startDate)}"></div>
   <div class="fg"><label class="fl">Number of Days</label><input class="fi" type="number" id="ec_days" step="1" min="1" value="${sh.numDays||1}" placeholder="1"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
   <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
@@ -5049,6 +5058,7 @@ function saveEditCosts(id){
   const v=k=>{const el=$$(k);return el?(el.value||'').trim():'';};
   const nm=v('ec_name'); if(nm)sh.name=nm;
   sh.location=v('ec_loc');
+  const sd=v('ec_start'); if(/^\d{4}-\d{2}-\d{2}$/.test(sd)&&sd!==sh.startDate){ invLogPush(sh,{ts:new Date().toISOString(),type:'date moved',changes:[(sh.startDate||'none')+' → '+sd],by:'owner'}); sh.startDate=sd; resizeShowDays(sh,sh.numDays||(sh.days||[]).length||1); }
   const ndRaw=v('ec_days'); if(ndRaw!==''){ const nd=Math.max(1,parseInt(ndRaw,10)||1); if(nd!==sh.numDays) resizeShowDays(sh,nd); }
   sh.boothCost=parseFloat(v('ec_booth'))||0;
   sh.depositDue=v('ec_due')||null;
@@ -5160,7 +5170,7 @@ function showCard(sh){
   const bdg=passed?'🚫 PASSED / NOT DOING':(missed?'❌ MISSED / DID NOT DO':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ DONE':'📅 PLANNED'));
   const dateStr=sh.dates?sh.dates.join(' → '):'';
   const dateBig=(sh.dates&&sh.dates.length)?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):(sh.startDate||'Date TBD');
-  return`<div class="sc ${cls}" onclick="go('show','${sh.id}',0)">
+  return`<div class="sc ${cls}" onclick="go('show','${sh.id}')">
     <span class="sc-badge ${sh.status}"${passed?' style="background:rgba(255,165,0,0.14);color:#FFA500;border:1px solid rgba(255,165,0,0.45)"':(missed?' style="background:var(--redbg);color:var(--red);border:1px solid var(--redbd)"':'')}>${bdg}</span>
     <div class="sc-name">${sh.name}${sh.repOnlyShow?' <span style="font-size:11px;font-weight:800;color:#7EB8F7">👥 CREW-RUN</span>':''}</div>
     <div style="font-size:21px;font-weight:900;color:var(--gold);letter-spacing:.3px;margin:3px 0 4px;line-height:1.15">📅 ${dateBig}${sh.numDays>1?` · ${sh.numDays} days`:''}</div>
@@ -5462,7 +5472,7 @@ function rPnL(){
       const t=calcShow(sh);
       const netColor=t.profit>=0?'var(--green)':'var(--red)';
       const netSign=t.profit>=0?'+':'';
-      h+=`<div class="card" style="cursor:pointer;padding:10px 14px;margin-bottom:7px" onclick="go('show','${sh.id}',0)">
+      h+=`<div class="card" style="cursor:pointer;padding:10px 14px;margin-bottom:7px" onclick="go('show','${sh.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="flex:1;min-width:0">
             <div style="font-weight:800;font-size:14px">${sh.name}</div>
@@ -5520,7 +5530,7 @@ function showNewShowModal(){
   <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ns_b" placeholder="0.00" step="0.01" min="0"></div><div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ns_m" placeholder="0" min="0"></div></div>
   <button class="btn btn-gold btn-full" onclick="createShow()">Create Show</button>`);
 }
-function createShow(){
+function createShow(){ if(_sameTap('ns|'+(($$('ns_n')||{}).value||'')+'|'+(($$('ns_d')||{}).value||'')))return;
   const name=($$('ns_n').value||'').trim();if(!name){toast('Enter a show name!');return;}
   const nd=Math.max(1,parseInt($$('ns_dy').value)||1);
   const ds=$$('ns_d').value;const bc=parseFloat($$('ns_b').value)||0;const mi=parseFloat($$('ns_m').value)||0;
@@ -6483,6 +6493,7 @@ function showTabsBarHTML(sh){
 function rShow(){
   if(!curShow)return;
   const sh=S.shows.find(s=>s.id===curShow);if(!sh){go('shows');return;}
+  if(!(curDay>=0&&curDay<(sh.days||[]).length))curDay=showDefaultDay(sh);
   const t=calcShow(sh);
   const _pd=isPassed(sh);
   const bdgTxt=_pd?'🚫 PASSED / NOT DOING':(sh.status==='active'?'🔴 ACTIVE':sh.status==='completed'?'✅ COMPLETED':'📅 PLANNED');
@@ -6490,7 +6501,8 @@ function rShow(){
   // Packing inventory into a show we are not working would be a real-world
   // mistake, so the action button is replaced by Restore while it is passed.
   const actBtn=_pd?`<button class="btn btn-ghost btn-full" style="margin-bottom:12px;border-color:var(--goldbd);color:var(--gold)" onclick="restoreShowPassed('${sh.id}')">↩️ Restore to Upcoming</button>`
-    :(sh.status==='planned'?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>`:'');
+    :(sh.status==='planned'?`<button class="btn btn-gold btn-full" style="margin-bottom:12px" onclick="showPackModal('${sh.id}')">🎒 Start Show / Pack Inventory</button>`:sh.status==='active'?`<button class="btn btn-red btn-full" style="margin-bottom:12px" onclick="showEndModal('${sh.id}')">🏁 End Show &amp; Return Inventory</button>${canUndoStart(sh)?`<button class="btn btn-ghost btn-full btn-sm" style="margin:-4px 0 12px" onclick="undoStartShow('${sh.id}')">↩️ Packed the wrong show? Undo Start</button>`:''}`
+      :(sh.status==='completed'&&sh.returned&&(Date.now()-Date.parse(sh.returnedAt||0))<14*864e5)?`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px" onclick="reopenShow('${sh.id}')">↩️ Closed by mistake? Reopen Show</button>`:'');
   const passBtn=(sh.status==='completed'||sh.status==='active'||_pd)?''
     :`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(255,165,0,0.45);color:#FFA500" onclick="openMarkPassed('${sh.id}')">🚫 Mark Passed / Not Doing</button>`;
   const dtabs=sh.days.map((d,i)=>{const ok=d.morningCount&&d.eveningCount&&calcPmt(d.payments)>0;return`<button class="dtab ${i===curDay?'on':''} ${ok&&i!==curDay?'done':''}" onclick="go('show','${sh.id}',${i})">${d.date}${ok?'✓':''}</button>`;}).join('');
@@ -6983,6 +6995,15 @@ function showCommRate(sh){ const r=parseFloat(sh&&sh.commissionRate); return isF
 function repCommRate(id){ const r=(S.reps||[]).find(x=>x.id===id); const v=parseFloat(r&&r.commRate); return isFinite(v)&&v>0?v:0.35; }
 function payRulesNew(sh){ return !!sh&&String(sh.startDate||'9999')>=PAY_RULES_FROM; }
 function payRulesOn(sh){ return payRulesNew(sh)&&!sh.payFromCommission&&!isPassed(sh); }
+// One line for the day screen: why this rep's pay is what it is.
+function payHowText(sh,di,id){
+  if(repPayIsManual(sh,id))return 'typed by you, kept as typed';
+  const x=commissionDay(sh,di); if(!x||!(x.vol>0))return 'fills in when money is counted';
+  const own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
+  const r=x.rows.find(r=>r.people.some(p=>p.id===id)); if(!r)return 'not on a crew today';
+  const pp=r.people.find(p=>p.id===id), n=r.crew.length;
+  if(ownId&&r.crew.indexOf(ownId)>=0)return Math.round(showCommRate(sh)*100)+'% of '+fmt(r.vol)+' split '+n+' ways with you';
+  return Math.round(repCommRate(id)*100)+'% of '+fmt(pp.base)+(r.how&&/split/.test(r.how)?' (their share)':''); }
 function repPayIsManual(sh,id){ return !!(sh&&sh.repPayManual&&sh.repPayManual[id]); }
 // Who worked a show with no booths: its reps, plus the owner unless it is a rep-only show.
 function tableCrew(sh){ const own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
@@ -7087,6 +7108,12 @@ function commissionSyncPay(sh){
   if(!sh)return false; const rules=payRulesOn(sh);
   if(!rules&&(!sh.payFromCommission||!hasBooths(sh)))return false;
   let changed=false;
+  // v80: the first time a show comes under the pay rules (the v80 load, a show moved to a
+  // later date, a show arriving from an older device), any pay already on it was typed by hand.
+  // The flag is written only when there is pay to keep or the sync writes pay itself,
+  // so loading the app never writes the device copy for nothing.
+  if(rules&&!sh.payRulesSeen){ const had=showRepIds(sh).filter(id=>repShowPay(sh,id)>0);
+    if(had.length){ sh.repPayManual=Object.assign({},sh.repPayManual||{}); had.forEach(id=>sh.repPayManual[id]=true); sh.payRulesSeen=true; changed=true; } }
   const xs=(sh.days||[]).map((d,di)=>commissionDay(sh,di));
   let lastDi=-1; xs.forEach((x,di)=>{ if(x&&x.vol>0)lastDi=di; });
   const r2=n=>Math.round(n*100)/100;
@@ -7103,7 +7130,7 @@ function commissionSyncPay(sh){
     const want=wants[di];
     const have=d.repPay||{};
     const same=Object.keys(want).length===Object.keys(have).length&&Object.keys(want).every(id=>Math.abs((parseFloat(have[id])||0)-want[id])<0.005);
-    if(!same){ d.repPay=want; changed=true; }
+    if(!same){ d.repPay=want; changed=true; if(rules)sh.payRulesSeen=true; }
   });
   return changed;
 }
@@ -7559,7 +7586,7 @@ function rDay(sh,di){
     ${isA?`<div class="div"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">Day Expenses</div><button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit</button></div>
     <div style="display:flex;flex-wrap:wrap;gap:5px">
-      <span class="chip">Gas: <strong>${fmt(d.expenses?.gas||0)}</strong></span>
+      ${(parseFloat(d.expenses?.gas)||0)>0?`<span class="chip">Gas: <strong>${fmt(d.expenses.gas)}</strong></span>`:''}
       <span class="chip">Food: <strong>${fmt(d.expenses?.food||0)}</strong></span>
       <span class="chip">Hotel: <strong>${fmt(d.expenses?.hotel||0)}</strong></span>
       <span class="chip">Other: <strong>${fmt(d.expenses?.other||0)}</strong></span>
@@ -7587,16 +7614,19 @@ function rDay(sh,di){
       const repRows=payReps.map(rep=>{
         const rp=repDayPay(d,rep.id);
         return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:6px">
-          <div style="font-weight:800;font-size:13px">${rep.name}</div>
+          <div><div style="font-weight:800;font-size:13px">${rep.name}</div>${payRulesOn(sh)?`<div style="font-size:10px;color:var(--muted)">${_esc(payHowText(sh,di,rep.id))}</div>`:''}</div>
           <div style="font-size:13px;font-weight:900;color:${rp>0?'var(--red)':'var(--muted)'}">${rp>0?fmt(rp):'not paid yet'}</div>
         </div>`;
       }).join('');
+      // v80: who the app thinks worked decides the split, so say it out loud where it can be fixed
+      const _own=(S.reps||[]).find(r=>r.isSelf), _ownIn=payRulesOn(sh)&&!hasBooths(sh)&&tableCrew(sh).indexOf(_own&&_own.id)>=0;
+      const crewNote=!payRulesOn(sh)||hasBooths(sh)?'':`<div style="font-size:11px;color:${_ownIn?'var(--gold)':'var(--muted)'};margin:2px 0 6px">${_ownIn?'👑 You are marked as working this show, so the 35% is split with you. Not there? ':'Rep-only show: you are not counted, so each rep gets their full rate. Were you there? '}<a href="#" onclick="openAssignReps('${sh.id}');return false" style="color:var(--blue)">Change crew</a></div>`;
       return`<div class="div"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px">💵 Rep Pay Today</div>
           ${dayPayT>0?`<div style="font-size:11px;color:var(--red);font-weight:700">${fmt(dayPayT)}</div>`:''}
         </div>
-        ${repRows}
+        ${repRows}${crewNote}
         ${sh.payFromCommission?`<div style="font-size:11px;color:var(--muted);margin-top:2px">Figured from the ${Math.round(showCommRate(sh)*100)}% commission on its own. Full breakdown: Teams tab → 💵 Payout Sheet.</div>`
           :`<button class="btn ${dayPayT>0?'btn-ghost':'btn-gold'} btn-full" style="margin-top:2px" onclick="openDayPay('${sh.id}',${di})">💵 ${dayPayT>0?'Edit':'Enter'} Day Pay</button>`}`;
     })()}
@@ -7640,7 +7670,7 @@ function openCloseout(shId,di){
     hasE?('Counted — unsold product recorded'+(bList.length?' at every booth.':'.')):(openBooths.length?('Still open: '+openBooths.map(b=>_esc(b.name)).join(', ')+'. The day total stays unfinished until every booth is counted.'):'Count all unsold product at end of day.'),eveBtn)}
   ${step(2,bList.length?('Money — one drawer per booth'):'Money',hasP?true:false,
     hasP?('Day total '+fmt(dayTotal)+(bList.length?' across '+bList.length+' booths':'')+(d.paymentsAuto?' · auto from old rep-sales data':'')):(bList.length?'Count each booth\'s drawer on its own — they add into the day total.':'Count the day\'s money — one total, by payment method.'),moneyBtn)}
-  ${step(3,'Day expenses',(d.expenses&&Object.values(d.expenses).some(v=>parseFloat(v)>0))?true:'opt','Gas, food, parking, hotel for the day (optional).',`<button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit expenses</button>`)}
+  ${step(3,'Day expenses',(d.expenses&&Object.values(d.expenses).some(v=>parseFloat(v)>0))?true:'opt','Food, parking, hotel for the day (optional; gas is set once in ✏️ Edit Show).',`<button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit expenses</button>`)}
   ${step(4,'Day pay — what each rep gets today',staffed?(calcDayPay(d)>0?true:false):'opt',staffed?(calcDayPay(d)>0?('Entered — '+fmt(calcDayPay(d))+' today.'):'Enter each rep\'s flat $ for this day before you close out.'):'No reps on this show. Workers are logged on the show page.',staffed?`<button class="btn btn-xs ${calcDayPay(d)>0?'btn-ghost':'btn-gold'}" onclick="openDayPay('${sh.id}',${di})">${calcDayPay(d)>0?'Edit day pay':'Enter day pay'}</button>`:`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to show</button>`)}
   ${step(5,'Reconciliation — inventory + cash',reconBad?false:(reconOK?true:'opt'),(reconBad?'⚠️ Inventory mismatch — fix before locking.':(reconOK?'Counts reconcile.':'Reviewed (override on file).'))+cashLine,reconBad?`<button class="btn btn-xs btn-gold" onclick="mClose();go('show','${sh.id}',${di})">Review mismatch</button>`:'')}
   ${(cc.state==='short'||cc.state==='over')?dayCashCheckHTML(sh,di,false):''}
@@ -7686,6 +7716,7 @@ function updPackLeft(){
 function pkAll(shId){SKUS.forEach(s=>{const i=$$('pk_'+s.key);if(i)i.value=S.inventory[s.key]||0;});}
 function confirmPack(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  if(sh.status==='completed'||(sh.status==='active'&&sh.packedInventory)){ mClose(); toast('Already packed.'); return; } // a second tap never packs twice
   // Coverage check: warn when other shows this week still need garage stock
   (()=>{})();
   const others=otherShowsNeedingStock(shId);
@@ -7759,7 +7790,10 @@ function saveCount(shId,di,type,boothId){
   // v41: every count is checked against what the show actually has.
   const over=truckShort(sh).filter(x=>x.di===di||x.di===di+1);
   if(over.length)warn=' 🛑 More than the show has: '+over.map(x=>x.short+' +'+x.over).join(', ')+'. Fix the count or bring it from the garage.';
-  mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn);
+  // v81: a night count above what the table opened with is almost always a typo; say so now, not at closeout
+  if(type==='evening'&&tgt.morningCount){ const hi=SKUS.filter(s=>(c[s.key]||0)>(parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0));
+    if(hi.length)warn=' 🛑 Typo? '+hi.map(s=>s.short+' '+c[s.key]+' tonight, only '+((parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0))+' this morning').join(', ')+'. Tap Evening Count to fix.'; }
+  mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn,warn?7000:2200);
 }
 function lockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; d.locked=true; d.lockTs=new Date().toISOString(); invLogPush(sh,{ts:d.lockTs,di,date:d.date,type:'lock',changes:['day finalized/locked'],by:'owner'}); saveS();toast('🔒 Day finalized'); }
 function unlockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; const reason=(typeof prompt==='function')?prompt('Reason for unlocking this finalized day?'):'unlocked'; if(reason===null)return; d.locked=false; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'unlock',changes:['unlocked: '+(reason||'(no reason)')],by:'owner'}); saveS();toast('🔓 Day unlocked'); }
@@ -8046,8 +8080,45 @@ function endShow(shId){
   <div class="sr" style="border-bottom:none"><span class="srl b">Total returning</span><span class="srv b gold">${total} units</span></div>
   <button class="btn ${iss.length?'btn-ghost':'btn-gold'} btn-full" style="margin-top:12px${iss.length?';border-color:var(--red);color:var(--red)':''}" onclick="confirmEndShow('${shId}')">${iss.length?'⚠️ Close anyway':'✅ Confirm — close show & return stock'}</button>`);
 }
+// v81: the two "I tapped the wrong thing" exits at a show.
+// Undo Start: packed the wrong show (or too early) and nothing has been sold or
+// counted at night yet. The packed stock goes back on the garage shelf and the
+// show is upcoming again.
+function canUndoStart(sh){
+  if(!sh||sh.status!=='active')return false;
+  if((S.transfers||[]).some(t=>t&&(t.fromShowId===sh.id||t.toShowId===sh.id)))return false;
+  let any=false; eachDrawer(sh,src=>{ if(calcPmt(src.payments||{})>0||src.eveningCount)any=true; });
+  return !any&&!(sh.days||[]).some(d=>d.eveningCount||calcPmt(d.payments||{})>0);
+}
+function undoStartShow(shId){
+  const sh=S.shows.find(s=>s.id===shId); if(!sh)return;
+  if(!canUndoStart(sh)){ toast((S.transfers||[]).some(t=>t&&(t.fromShowId===sh.id||t.toShowId===sh.id))?'Stock was moved to or from this show. Undo those moves on the Stock tab first.':'Money or a night count is already on this show. Close it instead.'); return; }
+  const pk=sh.packedInventory||{}, n=SKUS.reduce((t,s)=>t+(parseInt(pk[s.key])||0),0);
+  if(typeof confirm==='function'&&!confirm('Undo starting "'+sh.name+'"?\n\nThe '+n+' units you packed go back on the garage shelf and the show goes back to upcoming.'))return;
+  SKUS.forEach(s=>S.inventory[s.key]=(parseInt(S.inventory[s.key])||0)+(parseInt(pk[s.key])||0));
+  (sh.days||[]).forEach(d=>{ d.morningCount=null; delete d.morningSeeded; delete d.truckCount;
+    Object.values(d.boothCounts||{}).forEach(en=>{ if(en){ delete en.morningCount; delete en.morningSeeded; delete en.restock; delete en.lost; } }); });
+  invLogPush(sh,{ts:new Date().toISOString(),type:'undo start',changes:['unpacked: '+SKUS.filter(s=>pk[s.key]).map(s=>s.short+' +'+pk[s.key]).join(', ')+' back to the garage'],by:'owner'});
+  sh.packedInventory=null; sh.status='planned';
+  saveS(); toast('↩️ Unpacked. '+n+' units back in the garage.'); renderCur();
+}
+// Reopen: closed the show by mistake (Saturday night instead of Sunday). What it
+// returned comes back off the garage shelf so the show can keep counting.
+function reopenShow(shId){
+  const sh=S.shows.find(s=>s.id===shId); if(!sh||sh.status!=='completed')return;
+  const ret=sh.returned; if(!ret||typeof ret!=='object'){ toast('This show was closed before the app tracked returns. Fix its counts instead; the garage follows.'); return; }
+  const short=SKUS.filter(s=>(parseInt(ret[s.key])||0)>(parseInt(S.inventory[s.key])||0));
+  if(short.length){ toast('The garage no longer has what this show returned ('+short.map(s=>s.short+' '+(ret[s.key]||0)).join(', ')+'). Fix its counts instead; the garage follows.',5000); return; }
+  const n=SKUS.reduce((t,s)=>t+(parseInt(ret[s.key])||0),0);
+  if(typeof confirm==='function'&&!confirm('Reopen "'+sh.name+'"?\n\nThe '+n+' units it sent back come off the garage shelf and back to the show, so you can keep counting and taking money.'))return;
+  SKUS.forEach(s=>S.inventory[s.key]=(parseInt(S.inventory[s.key])||0)-(parseInt(ret[s.key])||0));
+  invLogPush(sh,{ts:new Date().toISOString(),type:'reopen',changes:['reopened: '+SKUS.filter(s=>ret[s.key]).map(s=>s.short+' '+ret[s.key]).join(', ')+' back from the garage'],by:'owner'});
+  delete sh.returned; delete sh.returnedAt; delete sh.completedAt; sh.status='active';
+  saveS(); toast('↩️ '+sh.name+' is open again.'); renderCur();
+}
 function confirmEndShow(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
+  if(sh.status==='completed'){ mClose(); toast('Already closed.'); return; } // a second tap never returns stock twice
   const ret=endShowReturns(sh);
   SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)+(ret[s.key]||0));
   sh.returned={...ret}; sh.returnedAt=new Date().toISOString();
@@ -8923,7 +8994,7 @@ function delSup(i){
   S.supplies.splice(i,1);
   saveS();
 }
-function addSupItem(){
+function addSupItem(){ if(_sameTap('sup|'+(($$('sup-new-name')||{}).value||'')))return;
   const name=($$('sup-new-name').value||'').trim();
   if(!name){toast('Enter an item name');return;}
   const qty=parseInt($$('sup-new-qty').value)||0;
@@ -9010,7 +9081,7 @@ function openAddRep(){
   <div class="fg"><label class="fl">Phone (optional)</label><input class="fi" id="ar_phone" type="tel" placeholder="414-555-0100"></div>
   <button class="btn btn-gold btn-full" onclick="saveNewRep()">Add Rep</button>`);
 }
-function saveNewRep(){
+function saveNewRep(){ if(_sameTap('rep|'+(($$('ar_name')||{}).value||'')))return;
   const name=($$('ar_name').value||'').trim();
   if(!name){toast('Enter a name');return;}
   if(!S.reps)S.reps=[];
@@ -9145,7 +9216,7 @@ function _openWorkerModal(shId,wid){
   ${wid?`<button class="btn btn-ghost btn-full" onclick="deleteWorker('${shId}','${wid}')">🗑 Remove Worker</button>`:''}`);
 }
 function _wkToggle(){ const t=($$('wk_type')||{}).value; const hr=$$('wk_hourly'),am=$$('wk_amtwrap'); if(hr)hr.style.display=t==='hourly'?'block':'none'; if(am)am.style.display=t==='hourly'?'none':'block'; }
-function saveWorker(shId,wid){
+function saveWorker(shId,wid){ if(!wid&&_sameTap('wk|'+shId+'|'+(($$('wk_name')||{}).value||'')))return;
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   if(!sh.workers)sh.workers=[];
   const name=(($$('wk_name')||{}).value||'').trim(); if(!name){toast('Enter a name');return;}

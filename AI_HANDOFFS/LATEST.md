@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v80 pay rules, Oct 18 2026](2026-10-18-v80-pay-rules.md)** (Isaiah 40% of his sales, everyone else 35%, a day next to the owner splits the 35%; hand pay always wins; shows before Oct 17 untouched)
+**NEWEST: [v81 show-day safety, Oct 18 2026](2026-10-18-v81-show-day-safety.md)** (Undo Start for a wrong pack, Reopen a show closed by mistake, change a show's date, shows open on today, double taps never double up, typo counts called out on the spot)
 
-**Previous: [v79 simplify, Oct 18 2026](2026-10-18-v79-simplify.md)** (one profit number on Home and P&L, 6 tabs, gas only in Edit Show, Setup Advanced section, Payout Sheet on Teams only, Paste Claude Update gone, online sales in P&L and taxes; year profit $4,838.49)
+**Previous: [v80 pay rules, Oct 18 2026](2026-10-18-v80-pay-rules.md)** (Isaiah 40% of his sales, everyone else 35%, a day next to the owner splits the 35%; hand pay always wins; shows before Oct 17 untouched)
+
+**Before that: [v79 simplify, Oct 18 2026](2026-10-18-v79-simplify.md)** (one profit number on Home and P&L, 6 tabs, gas only in Edit Show, Setup Advanced section, Payout Sheet on Teams only, Paste Claude Update gone, online sales in P&L and taxes; year profit $4,838.49)
 
 **Before that: [v78 paper towels by real count, liner every 4 shows, Oct 18 2026](2026-10-18-v78-paper-liner.md)** (Cranberry 16 rolls, Burgoo 4; estimate 1 roll per person per day; liner $6.25/show; year profit $4,910.49 vs $5,533.40 before v77)
 

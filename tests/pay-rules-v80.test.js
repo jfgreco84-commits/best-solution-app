@@ -72,11 +72,17 @@ R.section('5. Migration');
   d.shows=[{id:'n',name:'New',status:'active',startDate:'2026-10-17',days:[{repPay:{rep_isaiah:120}}]},{id:'o',name:'Old',status:'completed',startDate:'2026-10-10',days:[{repPay:{rep_isaiah:446}}]}];
   ctx.applyOneTimeUpdates(d);
   chk('5a. Isaiah set to 40%',d.reps.find(r=>r.id==='rep_isaiah').commRate,0.4);
-  chk('5b. pay already on an Oct 17+ show is kept as typed',d.shows.find(s=>s.id==='n').repPayManual,{rep_isaiah:true});
-  chk('5c. older shows not touched',d.shows.find(s=>s.id==='o').repPayManual,undefined);
+  ctx.S=d; ctx.commissionSyncAll();
+  chk('5b. pay already on an Oct 17+ show is kept as typed',[d.shows.find(s=>s.id==='n').repPayManual,d.shows[0].days[0].repPay],[{rep_isaiah:true},{rep_isaiah:120}]);
+  chk('5c. older shows not touched',[d.shows.find(s=>s.id==='o').repPayManual,d.shows.find(s=>s.id==='o').payRulesSeen],[undefined,undefined]);
   d.reps.find(r=>r.id==='rep_isaiah').commRate=0.45; const once=JSON.stringify(d); ctx.applyOneTimeUpdates(d);
   chk('5d. runs once: a rate you change later stays',d.reps.find(r=>r.id==='rep_isaiah').commRate,0.45);
   chk('5e. second load changes nothing else',JSON.stringify(d).replace(/"ts":"[^"]*"/g,'')===once.replace(/"ts":"[^"]*"/g,''),true); }
+
+R.section('5f. A show moved to a later date keeps its typed pay');
+{ const h=world(),{ctx}=h; const sh=boothShow(h,[h.isa,h.tj],{startDate:'2026-10-10'}); sh.days[0].repPay={[h.isa]:446,[h.tj]:350}; ctx.commissionSyncAll();
+  sh.startDate='2026-10-24'; ctx.commissionSyncAll();
+  chk('5f. pay unchanged after the date moved into the new rules',pay(sh),{[h.isa]:446,[h.tj]:350}); }
 
 R.section('6. Edit Rep sets the rate');
 { const h=world(),{ctx}=h; ctx.openEditRep(h.tj); ['er_name','er_phone'].forEach(k=>ctx.document.getElementById(k).value=k==='er_name'?'T.J.':'');
