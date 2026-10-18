@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v81 show-day safety, Oct 18 2026](2026-10-18-v81-show-day-safety.md)** (Undo Start for a wrong pack, Reopen a show closed by mistake, change a show's date, shows open on today, double taps never double up, typo counts called out on the spot)
+**NEWEST: [v82 paid-ahead deposits, Oct 18 2026](2026-10-18-v82-paid-ahead.md)** (deposits on upcoming shows no longer cut this season's profit, $3,070.90 on the Oct 17 board; Home bar compares net to 2025 net; year net $7,909.39)
 
-**Previous: [v80 pay rules, Oct 18 2026](2026-10-18-v80-pay-rules.md)** (Isaiah 40% of his sales, everyone else 35%, a day next to the owner splits the 35%; hand pay always wins; shows before Oct 17 untouched)
+**Previous: [v81 show-day safety, Oct 18 2026](2026-10-18-v81-show-day-safety.md)** (Undo Start for a wrong pack, Reopen a show closed by mistake, change a show's date, shows open on today, double taps never double up, typo counts called out on the spot)
+
+**Before that: [v80 pay rules, Oct 18 2026](2026-10-18-v80-pay-rules.md)** (Isaiah 40% of his sales, everyone else 35%, a day next to the owner splits the 35%; hand pay always wins; shows before Oct 17 untouched)
 
 **Before that: [v79 simplify, Oct 18 2026](2026-10-18-v79-simplify.md)** (one profit number on Home and P&L, 6 tabs, gas only in Edit Show, Setup Advanced section, Payout Sheet on Teams only, Paste Claude Update gone, online sales in P&L and taxes; year profit $4,838.49)
 
