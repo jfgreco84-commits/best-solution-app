@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v83 supplies counted once, Oct 18 2026](2026-10-18-v83-supplies-once.md)** (bags + liner were charged as purchases AND per show, +$406.60; no owner lunch on rep-only shows; year net $8,335.99; list of board items to fix)
+**NEWEST: [v84 auditor pass, Oct 18 2026](2026-10-18-v84-auditor-pass.md)** (money checks with one-tap fixes: day sold but no money, rep-only shows charging your lunch/gas, nothing-sold shows, overpaid reps; rep payments linked to shows; tap-to-replace number boxes; money screen says short/over; running show on top)
 
-**Previous: [v82 paid-ahead deposits, Oct 18 2026](2026-10-18-v82-paid-ahead.md)** (deposits on upcoming shows no longer cut this season's profit, $3,070.90 on the Oct 17 board; Home bar compares net to 2025 net; year net $7,909.39)
+**Previous: [v83 supplies counted once, Oct 18 2026](2026-10-18-v83-supplies-once.md)** (bags + liner were charged as purchases AND per show, +$406.60; no owner lunch on rep-only shows; year net $8,335.99; list of board items to fix)
+
+**Before that: [v82 paid-ahead deposits, Oct 18 2026](2026-10-18-v82-paid-ahead.md)** (deposits on upcoming shows no longer cut this season's profit, $3,070.90 on the Oct 17 board; Home bar compares net to 2025 net; year net $7,909.39)
 
 **Before that: [v81 show-day safety, Oct 18 2026](2026-10-18-v81-show-day-safety.md)** (Undo Start for a wrong pack, Reopen a show closed by mistake, change a show's date, shows open on today, double taps never double up, typo counts called out on the spot)
 

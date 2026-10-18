@@ -295,7 +295,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v83';
+const APP_VERSION='v84';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2524,6 +2524,21 @@ function applyOneTimeUpdates(d){
     }catch(e){ console.error('pay_rules_v80',e); }
   }
 
+  // v84 (auditor pass): a rep payment with no show cannot settle a show, so that show reads
+  // "owed" when it was paid. Link a payment to a show only when exactly one of the rep's shows
+  // has an unpaid balance equal to the payment, worked on or before the payment date. Runs once.
+  if(!d._applied['link_rep_payments_v84']){
+    try{ let n=0; const r2=x=>Math.round(x*100)/100;
+      (d.reps||[]).filter(r=>r&&!r.isSelf).forEach(r=>(r.payments||[]).forEach(p=>{ if(!p||p.showId)return; const amt=r2(parseFloat(p.amount)||0); if(!amt)return;
+        const cand=(d.shows||[]).filter(sh=>{ if(!sh||String(sh.startDate||'9999')>String(p.date||'0000'))return false;
+          let earned=0; (sh.days||[]).forEach(dy=>{ earned+=parseFloat((dy&&dy.repPay||{})[r.id])||0; }); if(!earned){ (sh.days||[]).forEach(dy=>{ const v=(dy&&dy.repPayout||{})[r.id]; earned+=parseFloat(v)||0; }); if(!earned)earned=parseFloat((sh.repPayout||{})[r.id])||0; }
+          const paid=(r.payments||[]).filter(q=>q&&q.showId===sh.id).reduce((t,q)=>t+(parseFloat(q.amount)||0),0);
+          return earned>0&&Math.abs(r2(earned-paid)-amt)<0.005; });
+        if(cand.length===1){ p.showId=cand[0].id; p.linkedBy='v84'; n++; } }));
+      d._applied['link_rep_payments_v84']=true;
+    }catch(e){ console.error('link_rep_payments_v84',e); }
+  }
+
   // v77: blank miles + gas price of finished shows, every load (see v77FillBlanks)
   try{ v77FillBlanks(d); }catch(e){ console.error('v77FillBlanks',e); }
 
@@ -3080,6 +3095,26 @@ function auditSkip(sh){
   if(b&&sh.status==='completed'&&sh.completedAt&&sh.completedAt<b)return true;
   return false;
 }
+// v84 (Froggy's auditor pass): money checks. Unlike the stock checks these never skip a
+// show settled by a recount, because a missing $ is missing whenever it happened.
+function auditMoney(sh){
+  const out=[]; if(!sh||isPassed(sh))return out;
+  const days=sh.days||[];
+  const add=(sev,di,code,msg)=>out.push({sev,showId:sh.id,show:sh.name,di,code,msg,key:sh.id+'|'+di+'|'+code,
+    fixes:code==='repOnlyUnset'?[{label:'Rep-only: I was not there',js:`auditSetCrew('${sh.id}',false)`},{label:'I was there',js:`auditSetCrew('${sh.id}',true)`}]
+         :code==='countNoMoney'?[{label:'💵 Enter the money',js:`mClose();go('show','${sh.id}',${di});${hasBooths(sh)?'':`showMoneyModal('${sh.id}',${di})`}`}]
+         :code==='zeroSale'?[{label:'It did not happen',js:`auditDidNotHappen('${sh.id}')`}]:null});
+  const dn=i=>(days[i]&&days[i].date)||('Day '+(i+1));
+  // 6. Sold product but no money counted.
+  days.forEach((d,i)=>{ if(!(d.morningCount&&d.eveningCount))return; const sold=daySold(d), n=SKUS.reduce((t,s)=>t+(sold[s.key]||0),0);
+    if(n>0&&calcPmt(d.payments||{})<=0)add('red',i,'countNoMoney',dn(i)+': '+n+' units sold ('+fmt(calcRev(sold,sh.prices||null))+' at full price) but $0 money counted. Until the money is in, this day shows only the product cost.'); });
+  // 7. A rep worked it without you, but you are still charged as working it (your lunch, your paper towels).
+  if((sh.status==='completed'||sh.status==='active')&&!sh.repOnlyShow&&String(sh.startDate||'')>='2026'){ const own=(S.reps||[]).find(r=>r.isSelf), ids=(sh.repIds||[]).filter(id=>!own||id!==own.id);
+    if(ids.length&&own&&(sh.repIds||[]).indexOf(own.id)<0&&showActualRev(sh)>0)add('gold',0,'repOnlyUnset','Only '+ids.map(sellerName).join(' + ')+' on the crew, but the show counts you as working it ('+fmt(showLunchCost(sh))+' of your lunch, paper towels for '+showPaperCrew(sh)+'). Were you there?'); }
+  // 8. Closed with nothing sold: did it happen?
+  if(sh.status==='completed'&&showActualRev(sh)<5&&SKUS.every(s=>!(showUnitsSold(sh)[s.key]>0)))add('gold',0,'zeroSale','Closed with nothing sold and '+fmt(showActualRev(sh))+' collected, but it still carries '+fmt(calcShow(sh).expenses)+' of costs. If it did not happen, tap below and it moves to Missed with its costs off.');
+  return out;
+}
 function auditShow(sh){
   const out=[]; if(auditSkip(sh))return out;
   const days=sh.days||[], booths=truckMode(sh), today=_todayKey();
@@ -3122,6 +3157,10 @@ function auditAll(st){
   st=st||S; const out=[];
   SKUS.forEach(s=>{ const v=parseInt((st.inventory||{})[s.key])||0; if(v<0)out.push({sev:'red',showId:null,di:null,code:'garageNeg',msg:'Garage shows '+v+' '+s.short+'. You cannot have fewer than zero.',key:'garage|'+s.key}); });
   (st.shows||[]).forEach(sh=>auditShow(sh).forEach(x=>out.push(x)));
+  if(st===S)(st.shows||[]).forEach(sh=>auditMoney(sh).forEach(x=>out.push(x)));
+  // v84: a rep paid more than the pay entered for them means a day pay is missing (profit too high) or a payment was logged twice
+  if(st===S)(st.reps||[]).filter(r=>r&&!r.isSelf).forEach(r=>{ const e=repEarned(r.id), p=repPaid(r.id);
+    if(p-e>1)out.push({sev:'gold',showId:null,di:null,code:'repOverpaid',msg:r.name+' was paid '+fmt(p)+' but only '+fmt(e)+' of pay is entered ('+fmt(p-e)+' more). Either a day pay is missing, which makes profit look '+fmt(p-e)+' too high, or a payment was logged twice. Fix it on the 👥 Reps tab.',key:'rep|'+r.id,fixes:[{label:'Open Reps',js:"mClose();go('reps')"}]}); });
   return out;
 }
 // A show closed from v41 on remembers exactly what it sent home. If a count
@@ -3146,26 +3185,45 @@ function renderAuditBar(){
   let issues=[]; try{ issues=auditAll(S); }catch(e){ console.warn('audit',e); }
   const red=issues.filter(x=>x.sev==='red').length, n=issues.length;
   const bar=$$('auditBar'), badge=$$('auditBadge');
-  if(badge){ badge.textContent=n?('⚠️ '+n):'🛡️'; badge.style.color=red?'var(--red)':n?'var(--gold)':'var(--green)'; badge.title=n?(n+' inventory issue'+(n>1?'s':'')+' — tap to see'):'Inventory audit: all clear'; }
+  if(badge){ badge.textContent=n?('⚠️ '+n):'🛡️'; badge.style.color=red?'var(--red)':n?'var(--gold)':'var(--green)'; badge.title=n?(n+' thing'+(n>1?'s':'')+' to check (stock + money) — tap to see'):'Audit: all clear'; }
   if(bar){
     const pg=$$('pages');
     if(!n){ bar.style.display='none'; bar.innerHTML=''; if(pg&&pg.style)pg.style.top='52px'; }
     else { bar.style.display='block';
       if(pg&&pg.style)pg.style.top='86px';
-      bar.innerHTML=`<div onclick="openAuditModal()" style="cursor:pointer;height:34px;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:${red?'#3a1414':'#3a3208'};border-bottom:1px solid ${red?'var(--red)':'var(--gold)'};padding:9px 14px;font-size:12px;font-weight:700;color:${red?'var(--red)':'var(--gold)'}">⚠️ ${n} inventory issue${n>1?'s':''}: ${_esc(issues[0].show?issues[0].show+' · ':'')}${_esc(issues[0].msg.slice(0,90))}${issues[0].msg.length>90?'…':''} <span style="text-decoration:underline">See all ›</span></div>`; }
+      bar.innerHTML=`<div onclick="openAuditModal()" style="cursor:pointer;height:34px;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:${red?'#3a1414':'#3a3208'};border-bottom:1px solid ${red?'var(--red)':'var(--gold)'};padding:9px 14px;font-size:12px;font-weight:700;color:${red?'var(--red)':'var(--gold)'}">⚠️ ${n} thing${n>1?'s':''} to check: ${_esc(issues[0].show?issues[0].show+' · ':'')}${_esc(issues[0].msg.slice(0,90))}${issues[0].msg.length>90?'…':''} <span style="text-decoration:underline">See all ›</span></div>`; }
   }
   return issues;
 }
 function openAuditModal(){
-  const issues=auditAll(S);
+  const issues=auditAll(S).sort((a,b)=>(a.sev==='red'?0:1)-(b.sev==='red'?0:1));
   const rows=issues.map(x=>`<div class="wb ${x.sev==='red'?'red':'gold'}" style="margin-bottom:8px;font-size:12px">
     ${x.show?`<div style="font-weight:900;margin-bottom:3px">${_esc(x.show)}</div>`:''}${_esc(x.msg)}
-    ${x.showId?`<div style="margin-top:6px"><button class="btn btn-xs btn-ghost" onclick="mClose();auditGo('${x.showId}',${x.di==null?0:x.di})">Open it ›</button></div>`:''}</div>`).join('');
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${(x.fixes||[]).map(f=>`<button class="btn btn-xs btn-gold" onclick="${f.js}">${_esc(f.label)}</button>`).join('')}${x.showId?`<button class="btn btn-xs btn-ghost" onclick="mClose();auditGo('${x.showId}',${x.di==null?0:x.di})">Open it ›</button>`:''}</div></div>`).join('');
   const log=(auditState().log||[]).slice(-8).reverse().map(e=>`<div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--border)">${_esc((e.ts||'').slice(0,16).replace('T',' '))} · ${_esc(e.msg||'')}</div>`).join('');
-  mOpen(`<div class="mh"><div class="mt">🛡️ Inventory Audit</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Runs every time anything is saved. Checks that no table holds more than the show has, every day that opened got counted at close, money always has a count behind it, the truck count matches, and a closed show's garage return matches its counts.${auditState().baseline?' Shows closed before '+_esc(auditState().baseline.slice(0,10))+' were settled by the garage recount and are not re-checked.':''}</div>
+  mOpen(`<div class="mh"><div class="mt">🛡️ Audit: stock + money</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Runs every time anything is saved. <b>Stock:</b> every table, booth and truck adds up and every day that opened got counted. <b>Money:</b> every day that sold has its money in, every show charges your lunch and gas only if you were there, and every rep was paid what was entered. Tap a gold button to fix it on the spot</div>
   ${rows||'<div class="wb green" style="font-size:13px">✅ All clear. Garage, shows, booths and truck all add up.</div>'}
   ${log?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:12px 0 4px">What the audit did on its own</div>${log}`:''}`);
+}
+function auditSetCrew(shId,wasThere){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const own=(S.reps||[]).find(r=>r.isSelf);
+  if(wasThere){ sh.repIds=sh.repIds||[]; if(own&&sh.repIds.indexOf(own.id)<0)sh.repIds.unshift(own.id); sh.repOnlyShow=false; }
+  else { sh.repOnlyShow=true; const g=showGas(sh);
+    sh.repGasPaid=(typeof confirm!=='function')?true:confirm('Did you pay the gas for this show ('+fmt(g)+' estimated)?\n\nOK = yes, keep the gas cost\nCancel = no, the rep covered it'); }
+  invLogPush(sh,{ts:new Date().toISOString(),type:'crew',changes:[wasThere?'owner was there':('rep-only: owner not there'+(sh.repGasPaid===false?', rep covered gas':''))],by:'owner'});
+  saveS(); toast(wasThere?'👑 You are on the crew':'✅ Marked rep-only'); openAuditModal();
+}
+// A closed show where nothing sold and nothing came in: it did not happen. Its stock already went
+// home when it closed, so only the show's own state changes: it becomes Missed and drops its costs.
+function auditDidNotHappen(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh||sh.status!=='completed')return;
+  if(SKUS.some(s=>showUnitsSold(sh)[s.key]>0)||showActualRev(sh)>=5){ toast('Something sold here, so it did happen.'); return; }
+  if(typeof confirm==='function'&&!confirm('Move "'+sh.name+'" to Missed? Its lunch, gas and supplies come off. Stock is already back in the garage.'))return;
+  (sh.days||[]).forEach(d=>{ PMTS.forEach(p=>{ if(d.payments)d.payments[p.key]=0; }); d.repPay={}; });
+  delete sh.returned; delete sh.returnedAt; delete sh.completedAt; sh.packedInventory=null; sh.status='planned';
+  invLogPush(sh,{ts:new Date().toISOString(),type:'did not happen',changes:['moved to Missed from the audit'],by:'owner'});
+  saveS(); toast('Moved to Missed'); openAuditModal();
 }
 function auditGo(shId,di){
   const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
@@ -3388,7 +3446,7 @@ function calcShow(sh){
   });
   // Gas: auto-include the commute estimate once the show has begun, unless gas was hand-logged on any day
   dayGas+=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((t,e)=>t+(parseFloat(e.amount)||0),0); // a Fuel receipt IS the gas
-  const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(showGas(sh)*100)/100):0;
+  const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed')&&!(sh.repOnlyShow&&sh.repGasPaid===false))?(Math.round(showGas(sh)*100)/100):0; // v84: rep-only and you did not cover their gas = no gas
   exp+=gasAuto;
   exp+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   exp+=(sh.lodging||0);
@@ -4712,6 +4770,8 @@ function rShows(){
   </div>`;
   h+=`<button class="btn ${tab==='passed'?'btn-gold':'btn-ghost'} btn-full btn-sm" style="margin-bottom:12px" onclick="showsTab='${tab==='passed'?'upcoming':'passed'}';pipeFilterReset();rShows()">🚫 Passed / Not Doing (${passed.length})</button>`;
   h+=`<button class="btn btn-ghost btn-full btn-sm" style="margin-bottom:12px;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="shows2025Mode=true;rShows()">📊 View 2025 Season Results</button>`;
+  const _live=tab==='upcoming'?upcoming.filter(s=>s.status==='active'):[];
+  if(_live.length&&!activePipelineFilter())h+=`<div class="sec-lbl" style="margin-top:0">🔴 Happening now</div>`+_live.map(s=>showCard(s)).join('');
   if(tab==='upcoming'){
     B=pipelineBuckets(upcoming);
     const planned=B.planned, paidS=B.paid, oweS=B.owe, pendS=B.pending;
@@ -4746,7 +4806,8 @@ function rShows(){
       <button type="button" class="btn btn-gold btn-xs" onclick="clearPipelineFilter()">✕ Show All (${upcoming.length})</button>
     </div>`;
   }
-  if(list.length){h+=list.map(s=>showCard(s)).join('');}
+  const _rest=(_live.length&&!pf)?list.filter(s=>_live.indexOf(s)<0):list;
+  if(_rest.length){h+=_rest.map(s=>showCard(s)).join('');}
   else if(pf){h+=`<div class="empty"><div class="ei">📋</div>No shows in ${PIPE_FILTERS[pf].label} right now.</div>`;}
   else{h+=`<div class="empty"><div class="ei">${tab==='completed'?'✅':tab==='missed'?'⚠️':tab==='passed'?'🚫':'🎪'}</div>${tab==='completed'?'No completed shows yet. Shows move here automatically when you close them out.':tab==='missed'?'No missed shows — nice work staying on top of it!':tab==='passed'?'Nothing passed on. Shows you decide against will be filed here instead of deleted.':'No upcoming shows. Tap + New Show to start.'}</div>`;}
   h+=`<div style="height:10px"></div>`;
@@ -7688,7 +7749,8 @@ function openCloseout(shId,di){
   ${step(2,bList.length?('Money — one drawer per booth'):'Money',hasP?true:false,
     hasP?('Day total '+fmt(dayTotal)+(bList.length?' across '+bList.length+' booths':'')+(d.paymentsAuto?' · auto from old rep-sales data':'')):(bList.length?'Count each booth\'s drawer on its own — they add into the day total.':'Count the day\'s money — one total, by payment method.'),moneyBtn)}
   ${step(3,'Day expenses',(d.expenses&&Object.values(d.expenses).some(v=>parseFloat(v)>0))?true:'opt','Food, parking, hotel for the day (optional; gas is set once in ✏️ Edit Show).',`<button class="btn btn-xs btn-ghost" onclick="showExpModal('${sh.id}',${di})">Edit expenses</button>`)}
-  ${step(4,'Day pay — what each rep gets today',staffed?(calcDayPay(d)>0?true:false):'opt',staffed?(calcDayPay(d)>0?('Entered — '+fmt(calcDayPay(d))+' today.'):'Enter each rep\'s flat $ for this day before you close out.'):'No reps on this show. Workers are logged on the show page.',staffed?`<button class="btn btn-xs ${calcDayPay(d)>0?'btn-ghost':'btn-gold'}" onclick="openDayPay('${sh.id}',${di})">${calcDayPay(d)>0?'Edit day pay':'Enter day pay'}</button>`:`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to show</button>`)}
+  ${payRulesOn(sh)&&staffed?step(4,'Rep pay',calcDayPay(d)>0?true:'opt',calcDayPay(d)>0?('Filled in from the money: '+fmt(calcDayPay(d))+' today. Change it only if you paid something different.'):'Fills in by itself once the money is counted.',`<button class="btn btn-xs btn-ghost" onclick="openDayPay('${sh.id}',${di})">${calcDayPay(d)>0?'See / change':'Change'}</button>`):''}
+  ${payRulesOn(sh)&&staffed?'':step(4,'Day pay — what each rep gets today',staffed?(calcDayPay(d)>0?true:false):'opt',staffed?(calcDayPay(d)>0?('Entered — '+fmt(calcDayPay(d))+' today.'):'Enter each rep\'s flat $ for this day before you close out.'):'No reps on this show. Workers are logged on the show page.',staffed?`<button class="btn btn-xs ${calcDayPay(d)>0?'btn-ghost':'btn-gold'}" onclick="openDayPay('${sh.id}',${di})">${calcDayPay(d)>0?'Edit day pay':'Enter day pay'}</button>`:`<button class="btn btn-xs btn-ghost" onclick="mClose();go('show','${sh.id}',${di})">Go to show</button>`)}
   ${step(5,'Reconciliation — inventory + cash',reconBad?false:(reconOK?true:'opt'),(reconBad?'⚠️ Inventory mismatch — fix before locking.':(reconOK?'Counts reconcile.':'Reviewed (override on file).'))+cashLine,reconBad?`<button class="btn btn-xs btn-gold" onclick="mClose();go('show','${sh.id}',${di})">Review mismatch</button>`:'')}
   ${(cc.state==='short'||cc.state==='over')?dayCashCheckHTML(sh,di,false):''}
   <div style="margin-top:14px">
@@ -7914,14 +7976,19 @@ function mmDropSeller(id){
   if(st.ids.length<2){ toast('Use the button above to go back to one total'); return; }
   st.ids.splice(k,1); delete st.split[id]; mmRender();
 }
-function updPmt(){ let t=0; PMTS.forEach(p=>{const el=$$('pm_'+p.key);t+=parseFloat(el&&el.value)||0;}); const e=$$('pmtTot'); if(e)e.textContent=fmt(t); }
+function updPmt(){ let t=0; PMTS.forEach(p=>{const el=$$('pm_'+p.key);t+=parseFloat(el&&el.value)||0;}); const e=$$('pmtTot'); if(e)e.textContent=fmt(t); mmDiffUpd(t); }
+// v84: as the money goes in, say right away whether the drawer matches what sold
+function mmDiffText(t,exp){ const d=Math.round((t-exp)*100)/100; if(!(t>0))return `<span style="color:var(--muted)">Should be about ${fmt(exp)}</span>`;
+  if(Math.abs(d)<=Math.max(5,exp*0.02))return `<span style="color:var(--green)">✅ Matches what sold (${fmt(exp)})</span>`;
+  return d<0?`<span style="color:var(--gold)">${fmt(-d)} short of what sold (${fmt(exp)}). Discounts? Recount if not.</span>`:`<span style="color:#7EB8F7">${fmt(d)} over what sold (${fmt(exp)}). Card tax, tips or a missed sale.</span>`; }
+function mmDiffUpd(t){ const el=$$('mmDiff'); if(el&&el.dataset)el.innerHTML=mmDiffText(t,parseFloat(el.dataset.exp)||0); }
 function updSplitPmt(){
   const st=mmState(); let g=0;
   st.ids.forEach(id=>{ const e=st.split[id]||{}; let t=0;
     PMTS.forEach(p=>{ const el=$$('sp_'+id+'_'+p.key);
       t+=(el&&el.value!=null&&el.value!=='')?(parseFloat(el.value)||0):(parseFloat(e[p.key])||0); });
     const sub=$$('sub_'+id); if(sub)sub.textContent=fmt(t); g+=t; });
-  const e=$$('pmtTot'); if(e)e.textContent=fmt(g);
+  const e=$$('pmtTot'); if(e)e.textContent=fmt(g); mmDiffUpd(g);
 }
 function mmRender(){
   const st=mmState();
@@ -7963,6 +8030,7 @@ function mmRender(){
     <span style="font-weight:900">TOTAL COLLECTED</span>
     <span id="pmtTot" style="font-size:22px;font-weight:900;color:var(--gold)">${fmt(grand)}</span>
   </div>
+  ${exp>0?`<div id="mmDiff" data-exp="${exp}" style="text-align:center;font-size:12px;font-weight:800;margin:-4px 0 10px">${mmDiffText(grand,exp)}</div>`:''}
   <button class="btn btn-gold btn-full" onclick="saveMoney()">Save Money Count</button>`);
 }
 // Callable two ways: bare, from the modal, or with an explicit target. When a
@@ -8089,8 +8157,9 @@ function endShowReturns(sh){
 function endShow(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const ret=endShowReturns(sh); const total=SKUS.reduce((t,s)=>t+(ret[s.key]||0),0);
-  const iss=auditShow(sh).filter(x=>x.sev==='red'&&x.code!=='returnDrift');
+  const all=auditShow(sh).concat(auditMoney(sh)), iss=all.filter(x=>x.sev==='red'&&x.code!=='returnDrift'&&x.code!=='countNoMoney'), noMoney=all.filter(x=>x.code==='countNoMoney');
   mOpen(`<div class="mh"><div class="mt">📦 Close show — returning stock</div><button class="mx" onclick="mClose()">×</button></div>
+  ${noMoney.length?`<div class="wb gold" style="margin-bottom:10px;font-size:12px"><strong>💵 Money not counted yet.</strong> Stock can go home, but enter the money so the show's profit is real.<br>${noMoney.map(x=>'• '+_esc(x.msg)).join('<br>')}</div>`:''}
   ${iss.length?`<div class="wb red" style="margin-bottom:10px;font-size:12px"><strong>🛑 Fix these before you close.</strong> Closing now sends the wrong numbers back to the garage.<br>${iss.map(x=>'• '+_esc(x.msg)).join('<br>')}</div>`:'<div class="wb green" style="margin-bottom:10px;font-size:12px">🛡️ Audit clean: every day counted, nothing on a table the show did not have.</div>'}
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Packed − sold − lost = what goes back to master inventory (booth + anything still in the truck).</div>
   ${SKUS.map(s=>`<div class="sr"><span class="srl">${s.name}</span><span class="srv">+${ret[s.key]||0}</span></div>`).join('')}
@@ -9044,18 +9113,20 @@ function rReps(){
     const row=(name,sub,owed,btn)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div style="min-width:0"><div style="font-weight:700;font-size:13px">${name}</div><div style="font-size:10px;color:var(--muted)">${sub}</div></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span style="color:var(--gold);font-weight:800">${fmt(owed)}</span>${btn}</div></div>`;
     h+=`<div class="card" style="border-color:var(--gold);margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:10px;color:var(--gold);text-transform:uppercase;font-weight:700">💸 Payouts Due</div><div style="font-size:16px;font-weight:900;color:var(--gold)">${fmt(grand)}</div></div>
-      ${repDebts.map(x=>row(x.r.name,'sales rep · paid per day',x.owed,`<button class="btn btn-xs btn-gold" onclick="openLogRepPmt('${x.r.id}')">Pay</button>`)).join('')}
+      ${repDebts.map(x=>row(x.r.name,repOwedWhere(x.r.id)||(Math.round(repCommRate(x.r.id)*100)+'% of own sales'),x.owed,`<button class="btn btn-xs btn-gold" onclick="openLogRepPmt('${x.r.id}')">Pay</button>`)).join('')}
       ${workerDebts.map(x=>row((x.w.name||'Worker').replace(/</g,'&lt;'),x.sh.name.replace(/</g,'&lt;')+' · '+(((WORKER_TYPES.find(t=>t.k===x.w.type)||{}).l)||'flat'),x.owed,`<button class="btn btn-xs btn-gold" onclick="openEditWorker('${x.sh.id}','${x.w.id}')">Pay</button>`)).join('')}
     </div>`;
   })();
   if(!reps.length){ h+='<div class="empty"><div class="ei">👥</div><div>No reps yet.</div></div>'; }
-  reps.forEach(r=>{
+  // v84: people with no shows and no pay (e.g. Batman, who lends stock) stay out of the way
+  const _idle=reps.filter(r=>!r.isSelf&&!repWorkedShows(r.id).length&&!repEarned(r.id)&&!repPaid(r.id));
+  reps.filter(r=>_idle.indexOf(r)<0).forEach(r=>{
     const earned=repEarned(r.id),paid=repPaid(r.id),owed=Math.max(0,earned-paid);
     const worked=repWorkedShows(r.id);
     h+=`<div class="card" style="margin-bottom:8px;cursor:pointer" onclick="openRepProfile('${r.id}')">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="font-weight:800;font-size:15px">${r.name}${r.isSelf?' 👑':''}</div>
-        <div style="font-size:11px;color:var(--muted)">${worked.length} show${worked.length!==1?'s':''} ›</div>
+        <div style="font-size:11px;color:var(--muted)">${r.isSelf?'':Math.round(repCommRate(r.id)*100)+'% · '}${worked.length} show${worked.length!==1?'s':''} ›</div>
       </div>
       ${r.isSelf?`<div style="font-size:12px;color:var(--muted);margin-top:4px">Owner — paid by show profit</div>`:`
       <div class="g3" style="margin-top:8px">
@@ -9065,9 +9136,20 @@ function rReps(){
       </div>`}
     </div>`;
   });
+  if(_idle.length)h+=`<div style="font-size:11px;color:var(--muted);margin:2px 0 10px">No shows or pay yet: ${_idle.map(r=>`<span style="cursor:pointer;text-decoration:underline" onclick="openRepProfile('${r.id}')">${_esc(r.name)}</span>`).join(', ')}</div>`;
   h+=`<button class="btn btn-gold btn-full" style="margin-top:4px" onclick="openAddRep()">+ Add Rep</button>`;
   pg('reps').innerHTML=h;
 }
+// Which shows a rep is still owed for, e.g. "Wine and Harvest $266 · Burgoo $55.75"
+function repOwedWhere(repId){
+  // per show: pay minus what was paid against that show. Money not tied to a show, and any show
+  // paid over, settles the oldest balances first, so the list always adds up to the total owed.
+  const r2=n=>Math.round(n*100)/100, rows=(S.shows||[]).map(sh=>({sh,o:r2(repShowPay(sh,repId)-repPaid(repId,sh.id))})).filter(x=>Math.abs(x.o)>0.005)
+    .sort((a,b)=>String(a.sh.startDate||'').localeCompare(String(b.sh.startDate||'')));
+  const rep=(S.reps||[]).find(x=>x.id===repId)||{};
+  let pool=(rep.payments||[]).filter(p=>!p.showId||!(S.shows||[]).some(sh=>sh.id===p.showId)).reduce((t,p)=>t+(parseFloat(p.amount)||0),0)+rows.filter(x=>x.o<0).reduce((t,x)=>t-x.o,0);
+  return rows.filter(x=>x.o>0).map(x=>{ const take=Math.min(pool,x.o); pool=r2(pool-take); return {sh:x.sh,o:r2(x.o-take)}; }).filter(x=>x.o>0.005)
+    .map(x=>x.sh.name.replace(/^\d+\w*\s+Annual\s+/i,'').slice(0,22)+' '+fmt(x.o)).join(' · '); }
 function openRepProfile(repId){
   const r=(S.reps||[]).find(x=>x.id===repId); if(!r)return;
   const earned=repEarned(repId),paid=repPaid(repId),owed=Math.max(0,earned-paid);
@@ -9527,6 +9609,15 @@ function restoreBackupFile(){
 // ===================================================
 // MODAL
 // ===================================================
+// v84: tap a number box and what you type replaces it (no deleting the 0 first)
+try{
+  const _num=t=>t&&t.tagName==='INPUT'&&(t.type==='number'||t.inputMode==='decimal');
+  document.addEventListener('focusin',e=>{ const t=e.target; if(!_num(t))return;
+    if(t.value!==''&&parseFloat(t.value)===0){ t.dataset.zero='1'; t.value=''; }      // a 0 clears: type the real number
+    else if(t.value!==''){ t.__sel=true; setTimeout(()=>{ try{ t.select(); }catch(_){} },0); } });
+  document.addEventListener('click',e=>{ const t=e.target; if(t&&t.__sel){ t.__sel=false; try{ t.select(); }catch(_){} } }); // select again after the tap, which moves the caret
+  document.addEventListener('focusout',e=>{ const t=e.target; if(_num(t)&&t.dataset&&t.dataset.zero){ delete t.dataset.zero; if(t.value===''){ t.value='0'; try{ t.dispatchEvent(new Event('input',{bubbles:true})); }catch(_){} } } });
+}catch(e){}
 function mOpen(h){$$('mb').innerHTML=h;$$('mo').classList.add('on');document.body.style.overflow='hidden';}
 function mClose(){$$('mo').classList.remove('on');document.body.style.overflow='';}
 function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
@@ -10042,7 +10133,7 @@ function bxView(st){
       if(d.expenses){ exp+=Object.values(d.expenses).reduce((a,b)=>a+N(b),0); dayGas+=N(d.expenses.gas); }
     });
     dayGas+=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((t,e)=>t+N(e.amount),0);
-    const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed'))?(Math.round(V.gas(sh)*100)/100):0;
+    const gasAuto=(dayGas<=0&&(sh.status==='active'||sh.status==='completed')&&!(sh.repOnlyShow&&sh.repGasPaid===false))?(Math.round(V.gas(sh)*100)/100):0;
     exp+=gasAuto;
     exp+=(sh.showExpenses||[]).reduce((t,e)=>t+N(e.amount),0);
     exp+=N(sh.lodging);
