@@ -6186,7 +6186,9 @@ function expenseAuditV77(d){
   // 2. gas: past shows are frozen at their month's price (v77FillBlanks) before the default moves
   log.push.apply(log,v77FillBlanks(d));
   const oldGas=parseFloat(st.gasPrice);
-  if(!isFinite(oldGas)||oldGas<=0||oldGas===3.5){ st.gasPrice=V77_GAS_NOW; log.push('gas default $'+(isFinite(oldGas)?oldGas.toFixed(2):'—')+' → $'+V77_GAS_NOW.toFixed(2)); }
+  // Froggy asked for gas to be brought current (Oct 17), so the default moves whatever it was; finished
+  // shows were frozen at their own month above, so history does not move with it. His board ran at $4.00.
+  if(!(isFinite(oldGas)&&Math.abs(oldGas-V77_GAS_NOW)<0.005)){ st.gasPrice=V77_GAS_NOW; log.push('gas default $'+(isFinite(oldGas)?oldGas.toFixed(2):'—')+' → $'+V77_GAS_NOW.toFixed(2)); }
   // 3. blank booth fees
   V77_BOOTH.forEach(b=>{ const sh=shows.find(x=>x&&x.passed!==true&&x.startDate===b.date&&b.re.test(x.name||'')); if(!sh)return;
     if((parseFloat(sh.boothCost)||0)>0||(sh.boothPayments||[]).length)return;
@@ -6231,9 +6233,9 @@ function v77FillBlanks(d){
 // Square receipts (each receipt's line item names its event).
 const SMC_V77=[
   {name:'Harvest & Handmade Market',re:/harvest/i,date:'2026-09-12',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001922',paidOn:'2026-08-21',
-    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided. WORKED: Froggy worked this show and logged it in the app (Oct 18). The counts and money are not on the board that was rebuilt after the Sep 30 wipe; they are being recovered from his backups.'},
+    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided.'},
   {name:'A Girls Day Out Market',re:/girl.?s day out/i,date:'2026-09-13',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001927',paidOn:'2026-08-21',
-    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor space 20. Bring your own 6-8 ft table, 2 chairs provided. WORKED: Froggy worked this show and logged it in the app (Oct 18). The counts and money are not on the board that was rebuilt after the Sep 30 wipe; they are being recovered from his backups.'},
+    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor space 20. Bring your own 6-8 ft table, 2 chairs provided.'},
   {name:'Merry Makers Expo',re:/merry makers/i,date:'2026-11-08',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:100,paid:103,inv:'001933',paidOn:'2026-08-21',
     note:'2nd Annual. 6161 W Grand Ave, Gurnee IL. Setup 10am-12pm.'},
   {name:'Holly Jolly Christmas Market',re:/holly jolly/i,date:'2026-11-14',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001931',paidOn:'2026-08-21',

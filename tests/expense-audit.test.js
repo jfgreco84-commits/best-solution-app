@@ -89,8 +89,8 @@ R.section('7. Never overwrites what is there');
   own.boothCost=75; own.boothPayments=[]; own.miles=88; own.gasPrice=3.99;
   delete d2._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d2);
   chk('7a. booth, miles, gas price kept',[own.boothCost,own.boothPayments.length,own.miles,own.gasPrice],[75,0,88,3.99]);
-  const d3=blank(); d3.settings.gasPrice=3.89; ctx.applyOneTimeUpdates(d3);
-  chk('7b. a gas price Froggy set himself is kept',d3.settings.gasPrice,3.89);
+  const d3=blank(); d3.settings.gasPrice=4; ctx.applyOneTimeUpdates(d3);
+  chk('7b. his old $4.00 default moves to the Oct 2026 price (he asked for gas to be updated)',d3.settings.gasPrice,4.2);
   const d4=blank(); d4.shows=[]; d4._applied={}; Object.keys(ctx.MRG_SEED_RECORDS).forEach(k=>d4._applied[k]=true);
   ctx.applyOneTimeUpdates(d4);
   chk('7c. no shows yet: waits',!!d4._applied['expense_audit_v77'],false); }
@@ -118,6 +118,18 @@ R.section('8b. A show he logged under another name is adopted, not duplicated');
   const on13=d.shows.filter(s=>s.startDate==='2026-09-13');
   chk('8b1. still one show on Sep 13, his name and sales kept',[on13.length,on13[0].name,on13[0].days[0].payments.cash,on13[0].status],[1,'Valley Ridge Market',310,'completed']);
   chk('8b2. booth payment added to his record',on13[0].boothPayments.map(p=>p.amount),[68]); }
+
+R.section('8c. His real Sep 12 + Sep 13 records (from his phone, Oct 18)');
+{ const d=blank();
+  const h=ctx.buildPlannedShow({name:'Harvest & Handmade Market',location:'McHenry VFW Post 4600 · 3002 W IL Route 120, McHenry, IL 60051',startDate:'2026-09-12',numDays:1,boothCost:78,miles:39});
+  h.status='completed'; Object.assign(h.days[0].payments,{cash:205,square:100,zelle:20});
+  const g=ctx.buildPlannedShow({name:'A Girls Day Out Market',location:'Valley Ridge Golf Course · 40150 N IL-59, Antioch, IL 60002',startDate:'2026-09-13',numDays:1,boothCost:68,miles:33});
+  g.status='completed'; g.days[0].payments.cash=499;
+  d.shows.push(h,g); ctx.applyOneTimeUpdates(d);
+  chk('8c1. one record each, his names, still completed',[d.shows.filter(s=>s.startDate==='2026-09-12'&&/harvest/i.test(s.name)).length,d.shows.filter(s=>s.startDate==='2026-09-13'&&/girl/i.test(s.name)).length,h.status,g.status],[1,1,'completed','completed']);
+  chk('8c2. his money and miles untouched',[ctx.calcShow(h).gross,ctx.calcShow(g).gross,h.miles,g.miles],[325,499,39,33]);
+  chk('8c3. booth stays $78 / $68 (no double count)',[ctx.calcShow(h).booth,ctx.calcShow(g).booth],[78,68]);
+  chk('8c4. no "recovered" text in the notes',/recover/i.test(h.notes+g.notes),false); }
 
 R.section('9. Mistletoe & Martinis is $125');
 { const d=blank(); const m=Object.assign(ctx.buildPlannedShow({name:'Mistletoe & Martinis',location:'Countryside Banquets, Lakemoor, IL',startDate:'2026-11-27',numDays:1,boothCost:100,miles:35}),

@@ -86,14 +86,12 @@ Not touched: The Last Fling (8/30, #001921 $68) and Mistletoe & Martinis (11/27)
 the Aug 26 update. Miles one way from Waterford (approx): McHenry 40, Antioch 30, Gurnee 42, Woodstock 45.
 
 **Open:**
-- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out: WORKED AND LOGGED** (Froggy, Oct 18), but neither is on
-  the board this code can see. Lead: on **Sep 30 the phone and the cloud copy were both wiped** and the board was
-  rebuilt from the **Sep 26 backup** (v68, `packages/emergency-restore-20260930.json`, encrypted, owner password).
-  If the two shows are not in that backup they were lost before it; if they are, the restore dropped them.
-  Next: decrypt the restore copy (needs Froggy's password, never commit the plaintext) and the Sep 30 emailed
-  `best-solution-backup-2026-09-30.json`, find the two shows, put their counts and money back.
-  The seed now adopts a record on the same date that names the venue or organizer, so a show he typed in
-  under another name ("Valley Ridge Market") is never duplicated.
+- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out: on the live board, completed, nothing lost.** Froggy's
+  screenshots (Oct 18): Harvest $325 collected (cash 205, Square 100, Zelle 20), 39 mi one way; Girls Day Out $499,
+  33 mi, Alivia $50 day pay. Same names and dates as the seed, so `social_market_v77` adopts them (blanks only;
+  sales, miles and booth untouched). Pinned by test 8c.
+- **Gas default:** his live board ran at **$4.00** (Harvest 78 mi / 17.5 x $4.00 = $17.83), not $3.50. Froggy asked
+  for gas to be updated, so v77 moves the default to $4.20 whatever it was; finished shows are frozen at their month first.
 - **Mistletoe & Martinis: booth $125** (Froggy, Oct 18). A $100 sticker is corrected to $125; the $100 payment from
   the Master Show Sheet is left alone, so $25 shows as owed until the Chamber (Therese, 815-403-5155) confirms.
 - **Bridal Expo $25 Vendor Spotlight:** offered as a separate invoice; none found and Froggy doesn't know. Not booked.
