@@ -112,4 +112,12 @@ R.section('8. The Social Market Co. shows');
   ctx.v77FillBlanks({shows:[rf]});
   chk('8e. Rustic Fox holiday market in North Aurora gets 77 mi, not Carol Stream 91',rf.miles,77); }
 
+R.section('9. Mistletoe & Martinis is $125');
+{ const d=blank(); const m=Object.assign(ctx.buildPlannedShow({name:'Mistletoe & Martinis',location:'Countryside Banquets, Lakemoor, IL',startDate:'2026-11-27',numDays:1,boothCost:100,miles:35}),
+    {boothPayments:[{amount:100,date:'2026-08-25',note:'paid by phone'}]});
+  d.shows.push(m); ctx.applyOneTimeUpdates(d);
+  chk('9a. sticker $100 -> $125, payment untouched, $25 shows as owed',[m.boothCost,m.boothPayments.length,m.boothPayments[0].amount],[125,1,100]);
+  delete d._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d);
+  chk('9b. rerun does not add the note twice',(m.notes.match(/Booth \$125 \(v77\)/g)||[]).length,1); }
+
 R.done();

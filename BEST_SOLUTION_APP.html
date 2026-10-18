@@ -6195,6 +6195,14 @@ function expenseAuditV77(d){
     sh.notes=(sh.notes?sh.notes+' ':'')+'Booth $'+b.cost+' (v77): '+b.note+'.';
     log.push(sh.name+' booth $'+b.cost+(b.paid?' paid':' owed'));
     invLogPush(sh,{ts:new Date().toISOString(),type:'🏬 booth fee filled (v77)',changes:['$'+b.cost+(b.paid?' paid':' owed')+' · '+b.note],by:'owner'}); });
+  // 3b. Mistletoe & Martinis is a $125 Non-Member Corner Booth (Chain O'Lakes
+  // Chamber registration; Froggy confirmed $125 Oct 18). The Master Show Sheet
+  // had $100. Only a $100 sticker is corrected; payments are left as they are,
+  // so any gap shows as owed until the Chamber confirms what was paid.
+  shows.filter(x=>x&&x.startDate==='2026-11-27'&&/mistletoe/i.test(x.name||'')).forEach(x=>{
+    if(Math.abs((parseFloat(x.boothCost)||0)-100)<0.005||!(parseFloat(x.boothCost)>0)){ x.boothCost=125;
+      x.notes=(x.notes?x.notes+' ':'')+"Booth $125 (v77): Non-Member Corner Booth 8x10 per the Chain O'Lakes Chamber registration, confirmed by Froggy Oct 18. Payment not confirmed in Gmail: Froggy asked Therese (815-403-5155) on Oct 10, no reply yet.";
+      log.push(x.name+' booth $125'); } });
   // 4. not worked: passed, never deleted (refused on a show that is active or completed)
   V77_PASS.forEach(([re,date])=>{ shows.filter(x=>x&&!isPassed(x)&&re.test(x.name||'')&&(date?x.startDate===date:String(x.startDate||'').startsWith('2026')))
     .forEach(x=>{ const why=date?'Before the Rustic Fox 2026 season contract (Jul 31), not worked':'No Sip & Sleigh / Kris Kringle in 2026. The one Rustic Fox holiday market is Nov 7 in North Aurora';
@@ -6223,9 +6231,9 @@ function v77FillBlanks(d){
 // Square receipts (each receipt's line item names its event).
 const SMC_V77=[
   {name:'Harvest & Handmade Market',re:/harvest/i,date:'2026-09-12',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001922',paidOn:'2026-08-21',
-    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided.'},
+    note:'3002 IL-120, McHenry IL 60051. Setup from 10am. 8x8 space, one 8 ft table + 2 chairs provided. Worked? Unknown: Froggy is not sure, and the Sep 12 game plan only says to pack for Sunday, so it was probably skipped. No sales were logged; mark it passed or enter the counts.'},
   {name:'A Girls Day Out Market',re:/girl.?s day out/i,date:'2026-09-13',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001927',paidOn:'2026-08-21',
-    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor. Bring your own 6-8 ft table, 2 chairs provided.'},
+    note:'40150 N IL-59, Antioch IL 60002. Setup from 10am. Indoor space 20. Bring your own 6-8 ft table, 2 chairs provided. Worked? Froggy thinks so but is not sure; the Sep 13 game plan had him there. No sales were logged; enter the counts and money if you have them.'},
   {name:'Merry Makers Expo',re:/merry makers/i,date:'2026-11-08',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:100,paid:103,inv:'001933',paidOn:'2026-08-21',
     note:'2nd Annual. 6161 W Grand Ave, Gurnee IL. Setup 10am-12pm.'},
   {name:'Holly Jolly Christmas Market',re:/holly jolly/i,date:'2026-11-14',open:'12:00',close:'16:00',loc:'McHenry VFW Post 4600, McHenry, IL',miles:40,fee:75,paid:78,inv:'001931',paidOn:'2026-08-21',

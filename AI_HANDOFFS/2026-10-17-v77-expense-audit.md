@@ -86,12 +86,12 @@ Not touched: The Last Fling (8/30, #001921 $68) and Mistletoe & Martinis (11/27)
 the Aug 26 update. Miles one way from Waterford (approx): McHenry 40, Antioch 30, Gurnee 42, Woodstock 45.
 
 **Open:**
-- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out** go on as MISSED (no sales logged). Sep 12-13 is also
-  Maxwell Street Days Sep. If they were worked, enter the counts and money; if not, the booth money is still spent.
-- **Mistletoe & Martinis:** the board says $100 paid by phone (Master Show Sheet). Gmail shows a $125
-  Non-Member Corner Booth registration billed by the Chain O'Lakes Chamber and no payment confirmation; Froggy's
-  Oct 10 email asking if it is paid has no reply. Left as is.
-- **Bridal Expo $25 Vendor Spotlight:** offered as a separate invoice; none found.
+- **Sep 12 Harvest & Handmade + Sep 13 Girls Day Out:** Froggy is not sure he worked them (Oct 18). The Sep 12
+  game plan only says to pack for Sunday, so Saturday's Harvest & Handmade was probably skipped; Sunday's Girls
+  Day Out (space 20) was on the plan. No sales anywhere, so both sit as MISSED with the booth money spent. Notes say so.
+- **Mistletoe & Martinis: booth $125** (Froggy, Oct 18). A $100 sticker is corrected to $125; the $100 payment from
+  the Master Show Sheet is left alone, so $25 shows as owed until the Chamber (Therese, 815-403-5155) confirms.
+- **Bridal Expo $25 Vendor Spotlight:** offered as a separate invoice; none found and Froggy doesn't know. Not booked.
 
 ## VERIFIED
 
