@@ -32,7 +32,8 @@ R.section('2. Shelf liner, lunch, no candy');
   chk('2a. liner = 2 rolls every 4 shows = half a roll @ $12.49',ctx.showLinerCost(sh),6.25);
   chk('2b. lunch = $20 x 2 days',ctx.showLunchCost(sh),40);
   sh.showExpenses=[{id:'f',cat:'food',amount:30}];
-  chk('2c. real food logged: no auto lunch',ctx.showLunchCost(sh),0);
+  chk('2c. $30 of food logged on a 2-day show: lunch is the other $10',ctx.showLunchCost(sh),10);
+  sh.showExpenses=[{id:'f',cat:'food',amount:357}]; chk('2c2. food logged over the budget: no extra lunch',ctx.showLunchCost(sh),0);
   chk('2d. no candy function left',typeof ctx.candyPerShow,'undefined');
   chk('2e. candy gone from supplies, paper + liner added',[d.supplies.some(x=>/candy/i.test(x.name)),d.supplies.some(x=>x.id==='sup_paper'),d.supplies.some(x=>x.id==='sup_liner')],[false,true,true]);
   chk('2f. settings defaults',[d.settings.paperPackPrice,d.settings.linerRollCost,d.settings.lunchPerDay,'candyPerShow' in d.settings],[17.5,12.49,20,false]); }
@@ -113,7 +114,7 @@ R.section('8. The Social Market Co. shows');
   ctx.applyOneTimeUpdates(d2);
   chk('8d. one he typed in himself: name kept, $75 payment not doubled',[d2.shows.filter(s=>/holly jolly/i.test(s.name)).length,d2.shows.filter(s=>/holly jolly/i.test(s.name)).map(s=>[s.name,s.boothPayments.length])],[1,[['Holly Jolly Xmas Market',1]]]);
   const rf=ctx.buildPlannedShow({name:'The Rustic Fox Holiday Market (Holiday Weekend)',location:'The Rustic Fox, 1790 Towne Center Drive, North Aurora, IL 60542',startDate:'2026-11-07',numDays:1});
-  ctx.v77FillBlanks({shows:[rf]});
+  ctx.v77FillMiles({shows:[rf]});
   chk('8e. Rustic Fox holiday market in North Aurora gets 77 mi, not Carol Stream 91',rf.miles,77); }
 
 R.section('8b. A show he logged under another name is adopted, not duplicated');
@@ -148,5 +149,30 @@ R.section('10. v78 real paper counts');
   chk('10a. Cranberry 16, Burgoo 4',[c.paperRolls,b.paperRolls],[16,4]);
   b.paperRolls=6; delete d._applied['paper_actuals_v78']; ctx.applyOneTimeUpdates(d);
   chk('10b. a count he changed is never overwritten',b.paperRolls,6); }
+
+R.section('11. Review fixes (Oct 18)');
+{ const d=full(); ctx.S=d;
+  const kk=Object.assign(ctx.buildPlannedShow({name:'Kris Kringle Christmas Market',location:'Pewaukee, WI',startDate:'2026-12-05',numDays:1,boothCost:150}),{boothPayments:[{amount:150,date:'2026-09-01'}]});
+  const ss=ctx.buildPlannedShow({name:'Sip and Sleigh Holiday Market',location:'Kenosha, WI',startDate:'2026-11-29',numDays:1});
+  const d2=blank(); d2.shows.push(kk,ss); d2.shows.push(ctx.buildPlannedShow({name:'Kris Kringle — Carol Stream',location:'Carol Stream, IL',startDate:'2026-12-04',numDays:3}));
+  ctx.applyOneTimeUpdates(d2);
+  chk('11a. another organizer\'s Kris Kringle / Sip and Sleigh is never passed',[!!kk.passed,!!ss.passed],[false,false]);
+  chk('11b. the old placeholder still is',!!d2.shows.find(s=>s.name==='Kris Kringle — Carol Stream').passed,true);
+  const d3=blank(); d3.settings.gasPrice=4; const old=ctx.buildPlannedShow({name:'Old Show',location:'Racine, WI',startDate:'2025-12-06',numDays:1,miles:40}); old.status='completed'; d3.shows.push(old);
+  ctx.applyOneTimeUpdates(d3);
+  chk('11c. a finished show with no month reading keeps the old $4.00, not the new default',[old.gasPrice,d3.settings.gasPrice],[4,4.2]);
+  const z=ctx.buildPlannedShow({name:'Racine Holiday Pop-up',location:'Racine, WI',startDate:'2026-11-30',numDays:1}); z.miles=0;
+  const d4=full(); d4.shows.push(z); ctx.applyOneTimeUpdates(d4); ctx.applyOneTimeUpdates(d4);
+  chk('11d. a 0 he typed is not refilled on every load',z.miles,0);
+  chk('11e. town only, not the street ("N Milwaukee Ave, Chicago")',ctx.v77FillMiles({shows:[Object.assign(ctx.buildPlannedShow({name:'Logan Square Holiday Market',location:'2755 N Milwaukee Ave, Chicago',startDate:'2026-12-01',numDays:1}),{miles:0})]}),[]);
+  chk('11f. "Maxwell Street Market" in Chicago is not Mukwonago',ctx.v77FillMiles({shows:[Object.assign(ctx.buildPlannedShow({name:'Maxwell Street Market',location:'Chicago, IL',startDate:'2026-12-01',numDays:1}),{miles:0})]}),[]);
+  const p=ctx.buildPlannedShow({name:'Test',location:'Racine, WI',startDate:'2027-03-06',numDays:1}); p.paperRolls=4;
+  (d.supplies.find(x=>x.id==='sup_paper')||{}).cost=2.9167; p.supplyUse=[{name:'Paper Towels (Bounty)',qty:4}];
+  chk('11g. paper towels logged in Supplies Used are not counted twice',ctx.showSupplyCost(p),ctx.showPaperCost(p)+ctx.showLinerCost(p));
+  chk('11h. snapshot engine agrees',ctx.bxView(d).supplyCost(p),ctx.showSupplyCost(p));
+  const k1=Object.assign(ctx.buildPlannedShow({name:'Kane County Flea Market',location:'St Charles, IL',startDate:'2026-06-06',numDays:2,miles:71}),{status:'completed'});
+  const k2=Object.assign(ctx.buildPlannedShow({name:'Kane county flea market',location:'St. Charles IL',startDate:'2026-10-03',numDays:2}),{status:'completed',miles:0});
+  const d5=blank(); d5.shows.push(k1,k2); ctx.applyOneTimeUpdates(d5);
+  chk('11i. Kane County (Oct) gets the June miles',k2.miles,71); }
 
 R.done();
