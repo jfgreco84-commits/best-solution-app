@@ -545,7 +545,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v85';
+const APP_VERSION='v86';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2833,6 +2833,28 @@ function applyOneTimeUpdates(d){
         if(cand.length===1){ p.showId=cand[0].id; p.linkedBy='v84'; n++; } }));
       d._applied['link_rep_payments_v84']=true;
     }catch(e){ console.error('link_rep_payments_v84',e); }
+  }
+
+  // v86 (Froggy, Oct 19): Andre earned $1,250 and was paid $1,250. Pewaukee Beach Party pay
+  // $350 -> $588; the unlinked $727 on 7/6 becomes $588 for Pewaukee + $125 for Rustic Fox
+  // Carol Stream. Only touches records still holding the old values; retried until it can apply.
+  if(!d._applied['andre_pay_1250_v86']){
+    try{
+      const A='rep_andre_1780776467102', PEW='sh_1779985491801', RF='sh_auto_rusticfoxcarolstream_1779985456781794', PID='rp_1783303935212';
+      const rep=(d.reps||[]).find(r=>r&&r.id===A), pew=(d.shows||[]).find(s=>s&&s.id===PEW), rf=(d.shows||[]).find(s=>s&&s.id===RF);
+      const pay=rep&&(rep.payments||[]).find(p=>p&&p.id===PID);
+      const dayPay=sh=>(sh.days||[]).some(dy=>dy&&((dy.repPay&&parseFloat(dy.repPay[A]))||(dy.repPayout&&parseFloat(dy.repPayout[A]))));
+      if(rep&&pew&&rf&&pay&&!dayPay(pew)){
+        const pewPay=parseFloat((pew.repPayout||{})[A]);
+        if(pewPay===588&&pay.showId===PEW&&parseFloat(pay.amount)===588){ d._applied['andre_pay_1250_v86']=true; }
+        else if(pewPay===350&&parseFloat(pay.amount)===727&&!pay.showId){
+          pew.repPayout[A]=588;
+          pay.amount=588; pay.showId=PEW; pay.note=pay.note||'Payout — Pewaukee Beach party'; pay.fixedBy='v86';
+          rep.payments.push({id:'rp_andre_rf_v86',date:pay.date||'2026-07-06',note:'Payout — Rustic Fox — Carol Stream (Jul)',amount:125,showId:RF,fixedBy:'v86'});
+          d._applied['andre_pay_1250_v86']=true;
+        }
+      }
+    }catch(e){ console.error('andre_pay_1250_v86',e); }
   }
 
   // v77: blank miles + gas price of finished shows, every load (see v77FillBlanks)
