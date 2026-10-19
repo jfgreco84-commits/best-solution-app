@@ -2925,17 +2925,11 @@ function renderCur(){
   updateSupplyBadge();
   try{ renderAuditBar(); }catch(e){}
 }
+// Oct 19: no count badge on the bottom nav (Froggy's call). Low supplies
+// still show inside Stock > Supplies. This only clears any old badge.
 function updateSupplyBadge(){
-  const sup=S.supplies||[];
-  const lowCnt=sup.filter(s=>s.qty<=s.low&&s.low>0).length;
-  const nb=$$('nb-stock');if(!nb)return; // v79: Supplies lives inside Stock
-  const existing=nb.querySelector('.nb-badge');
-  if(lowCnt>0){
-    if(existing)existing.textContent=lowCnt;
-    else{const b=document.createElement('span');b.className='nb-badge';b.textContent=lowCnt;nb.appendChild(b);}
-  } else {
-    if(existing)existing.remove();
-  }
+  const nb=$$('nb-stock');if(!nb)return;
+  nb.querySelectorAll('.nb-badge').forEach(b=>b.remove());
 }
 
 // ===================================================
