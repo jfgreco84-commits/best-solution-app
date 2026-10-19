@@ -1,8 +1,30 @@
 # LATEST
 
-**NEWEST: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
+**NEWEST: [v85 bulletproof, Oct 18 2026](2026-10-18-v85-bulletproof.md)** (damaged data no longer opens as a blank board that overwrites the real one; full-phone saves never silent; daily auto copy; crash recovery screen with data download; no negative or 10x-typo money)
 
-**Previous: [v73 Burgoo restock repair, Oct 11 2026](2026-10-11-v73-burgoo-restock-fix.md)** (Day 2 restock 33/33 F37, 24/24 Jamie's Outpost, set right on load)
+**Previous: [v84 auditor pass, Oct 18 2026](2026-10-18-v84-auditor-pass.md)** (money checks with one-tap fixes: day sold but no money, rep-only shows charging your lunch/gas, nothing-sold shows, overpaid reps; rep payments linked to shows; tap-to-replace number boxes; money screen says short/over; running show on top)
+
+**Before that: [v83 supplies counted once, Oct 18 2026](2026-10-18-v83-supplies-once.md)** (bags + liner were charged as purchases AND per show, +$406.60; no owner lunch on rep-only shows; year net $8,335.99; list of board items to fix)
+
+**Before that: [v82 paid-ahead deposits, Oct 18 2026](2026-10-18-v82-paid-ahead.md)** (deposits on upcoming shows no longer cut this season's profit, $3,070.90 on the Oct 17 board; Home bar compares net to 2025 net; year net $7,909.39)
+
+**Before that: [v81 show-day safety, Oct 18 2026](2026-10-18-v81-show-day-safety.md)** (Undo Start for a wrong pack, Reopen a show closed by mistake, change a show's date, shows open on today, double taps never double up, typo counts called out on the spot)
+
+**Before that: [v80 pay rules, Oct 18 2026](2026-10-18-v80-pay-rules.md)** (Isaiah 40% of his sales, everyone else 35%, a day next to the owner splits the 35%; hand pay always wins; shows before Oct 17 untouched)
+
+**Before that: [v79 simplify, Oct 18 2026](2026-10-18-v79-simplify.md)** (one profit number on Home and P&L, 6 tabs, gas only in Edit Show, Setup Advanced section, Payout Sheet on Teams only, Paste Claude Update gone, online sales in P&L and taxes; year profit $4,838.49)
+
+**Before that: [v78 paper towels by real count, liner every 4 shows, Oct 18 2026](2026-10-18-v78-paper-liner.md)** (Cranberry 16 rolls, Burgoo 4; estimate 1 roll per person per day; liner $6.25/show; year profit $4,910.49 vs $5,533.40 before v77)
+
+**Before that: [v77 expense audit, Oct 17 2026](2026-10-17-v77-expense-audit.md)** (paper towels 2 rolls/person/day, 2 shelf liner rolls/show, $20 lunch/day, no candy, gas $4.20 with past shows frozen by month, break-even gas double count fixed, Rustic Fox booths $60, blank miles filled)
+
+**Before that: [v76 Fox & Found Oct packed for Isaiah, Oct 16 2026](2026-10-16-v76-fox-found-oct-pack.md)** (352 units from the garage incl. 19 travel sets, Isaiah crew-run; plus 192 bottles borrowed from Batman Oct 16; Chicago Women's Expo Oct 24-25 added)
+
+**Before that: [v75 Batman history log, Oct 15 2026](2026-10-15-v75-batman-history.md)** (every borrow, return and Set Exact logged by date and size; history back-filled from backups; undo + CSV)
+
+**Before that: [v74 inventory alert, Oct 12 2026](2026-10-12-v74-inventory-alert.md)** (Home card names the exact count problem with one-tap fixes; shows settled by the Sep 23 recount no longer alert)
+
+**Before that: [v73 Burgoo restock repair, Oct 11 2026](2026-10-11-v73-burgoo-restock-fix.md)** (Day 2 restock 33/33 F37, 24/24 Jamie's Outpost, set right on load)
 
 **Before that: [v72 Previous Years, Oct 10 2026](2026-10-10-v72-previous-years.md)** (every show screen shows the same show in earlier years, per size and per day)
 

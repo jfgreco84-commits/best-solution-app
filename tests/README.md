@@ -18,6 +18,17 @@ node tests/compare-tools.test.js
 node tests/previous-years.test.js
 node tests/burgoo-restock-fix.test.js
 node tests/inventory-alert.test.js
+node tests/batman-history.test.js
+node tests/fox-found-oct-pack.test.js
+node tests/womens-expo.test.js
+node tests/expense-audit.test.js
+node tests/simplify-v79.test.js
+node tests/pay-rules-v80.test.js
+node tests/show-day-safety-v81.test.js
+node tests/paid-ahead-v82.test.js
+node tests/supplies-once-v83.test.js
+node tests/auditor-v84.test.js
+node tests/bulletproof-v85.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 

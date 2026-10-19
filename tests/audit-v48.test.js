@@ -26,7 +26,7 @@ R.section('1. Exports price at show prices');
 R.section('2. Fuel receipt is the gas; day modal does not pre-fill gas');
 { const h=world(),{ctx}=h; const sh=show(ctx,{booths:false,numDays:3,extra:{miles:100,showExpenses:[{id:'f',cat:'fuel',amount:110}]}});
   chk('2a. gas = the receipt only',Math.round(ctx.calcShow(sh).expenses*100)/100>=110&&ctx.calcShow(sh).gasAuto===0,true);
-  ctx.showExpModal('s',0); chk('2b. gas field empty',/id="ex_g" value=""/.test(h.modal()),true); }
+  ctx.showExpModal('s',0); chk('2b. day screen has no gas box (v79: gas lives in Edit Show)',/id="ex_g"/.test(h.modal()),false); }
 
 R.section('3. A booth that ends above what it had');
 { const h=world(),{ctx}=h; const sh=show(ctx); ctx.showPackModal('s'); ctx.pkAll('s'); ctx.document.getElementById('pk_c5s').value='300'; ctx.confirmPack('s');
