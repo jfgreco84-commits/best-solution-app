@@ -45,7 +45,12 @@ R.section('1. Borrowed / Returned / Set Exact each write a dated log entry');
   SK.forEach(k=>h.set('bmr_'+k,k==='32oz'?20:''));
   x.applyReturnBatman();
   L=x.S.settings.batmanLog;
-  chk('1e. return logs what actually came off (capped at owed)',[L[1].type,L[1].items['32oz'],L[1].date],['return',12,'2026-10-15']);
+  chk('1e. return logs the full amount given back',[L[1].type,L[1].items['32oz'],L[1].date],['return',20,'2026-10-15']);
+  chk('1e2. returning more than owed leaves a negative balance',[x.S.batmanBorrow['32oz'],x.S.inventory['32oz']],[-8,2]);
+  chk('1e3. the negative shows on the Batman screen',/−8[\s\S]*gave back extra/.test(x.secBatman())&&/Gave back more than owed on 1 size/.test(x.secBatman()),true);
+  h.clear(); SK.forEach(k=>h.set('bms_'+k,x.S.batmanBorrow[k]||0));
+  x.applySetBatman();
+  chk('1e4. Set Exact keeps a negative count',[x.S.batmanBorrow['32oz'],x.S.settings.batmanLog.length],[-8,2]);
 
   h.clear(); SK.forEach(k=>h.set('bms_'+k,k==='c5l'?10:(x.S.batmanBorrow[k]||0)));
   x.applySetBatman();
