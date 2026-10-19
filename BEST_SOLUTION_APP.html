@@ -149,6 +149,256 @@
     .srv{font-size:14px;font-weight:700}
     .srv.gold{color:var(--gold)}.srv.green{color:var(--green)}.srv.red{color:var(--red)}.srv.lg{font-size:18px}
 
+    /* COLLECTED VS FULL PRICE TABLE */
+    .ct-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding-bottom:12px;margin-bottom:4px;border-bottom:1px solid var(--border);text-align:center}
+    .ct-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+    .ct-big{font-size:18px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+    .ct-r{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;column-gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+    .ct-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:10px 0 6px}
+    .ct-h .ct-v{font-size:10px;font-weight:700;color:var(--muted)}
+    .ct-n{font-size:13px;color:var(--text);line-height:1.3;overflow-wrap:anywhere}
+    .ct-v{text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:52px}
+    .ct-col{color:var(--green)}.ct-mut{color:var(--muted);font-weight:600}
+    .ct-up{color:var(--green)}.ct-dn{color:var(--red)}.ct-z{color:var(--muted);font-weight:400}
+    .ct-live{font-size:9px;font-weight:800;color:var(--gold);border:1px solid var(--goldbd);background:var(--goldbg);border-radius:4px;padding:1px 4px;vertical-align:1px}
+    .ct-t{border-top:2px solid var(--border);border-bottom:none;padding-top:11px}
+    .ct-t .ct-n{font-weight:800;font-size:14px}.ct-t .ct-v{font-size:14px;font-weight:900}
+    .ct-cnt{display:block;font-size:10px;color:var(--muted);font-weight:600}
+    .ct-note{font-size:11px;color:var(--muted);margin-top:8px;text-align:center}
+
+    /* WORKLOAD TABLE */
+    .wl-r{display:grid;grid-template-columns:minmax(0,1fr) 58px 72px 64px;column-gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+    .wl-h{padding:0 0 8px}
+    .wl-h .wl-v{font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;color:var(--muted)}
+    .wl-l{font-size:14px;font-weight:700;color:var(--text);line-height:1.25}
+    .wl-s{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .wl-v{text-align:right;font-size:14px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+    .wl-v.wl-t{color:var(--text);font-weight:900}
+    .wl-gold .wl-t{color:var(--gold)}
+    .wl-x{margin-top:6px}
+    .wl-note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
+
+    /* MILEAGE BY SHOW */
+    .mi-h,.mi-r>summary,.mi-t{display:grid;grid-template-columns:minmax(0,1fr) 46px 72px 62px;column-gap:8px;align-items:center}
+    .mi-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800;padding-bottom:8px;border-bottom:1px solid var(--border)}
+    .mi-r{border-bottom:1px solid var(--border)}
+    .mi-r>summary{list-style:none;cursor:pointer;padding:10px 0}
+    .mi-r>summary::-webkit-details-marker{display:none}
+    .mi-r>summary .mi-n::before{content:'▸ ';color:var(--gold)}
+    .mi-r[open]>summary .mi-n::before{content:'▾ '}
+    .mi-n{font-size:13px;font-weight:700;color:var(--text);line-height:1.3;overflow-wrap:anywhere}
+    .mi-s{display:block;font-size:11px;font-weight:400;color:var(--muted)}
+    .mi-v{text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .mi-h .mi-v{font-size:10px}
+    .mi-g{color:var(--green)}
+    .mi-none .mi-n{color:var(--muted)}
+    .mi-x{background:var(--card2);border-radius:8px;padding:6px 10px;margin:0 0 10px}
+    .mi-d{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:5px 0}
+    .mi-d+.mi-d{border-top:1px solid var(--border)}
+    .mi-d>span:last-child{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .mi-d i{color:var(--muted);font-style:normal;font-size:11px}
+    .mi-t{border-top:2px solid var(--border);padding-top:11px;margin-top:2px}
+    .mi-t .mi-n{font-size:14px;font-weight:800}.mi-t .mi-v{font-size:13px;font-weight:900}
+
+    /* TOP 10 SHOWS */
+    .bs-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+    .bs-sum b{display:block;font-size:18px;font-weight:900;font-variant-numeric:tabular-nums}
+    .bs-sum span,.bs-k span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-top:2px}
+    .bs-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 6px}
+    .bs-tab{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:9px 0;font-size:12px;font-weight:800;cursor:pointer}
+    .bs-tab.on{background:var(--goldbg);border-color:var(--goldbd);color:var(--gold)}
+    .bs-note{font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px}
+    .bs-c{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
+    .bs-c[open]{border-color:var(--goldbd)}
+    .bs-c>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px 14px}
+    .bs-c>summary::-webkit-details-marker{display:none}
+    .bs-rk{width:28px;height:28px;border-radius:50%;background:var(--card3);color:var(--muted);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center}
+    .bs-m1{background:#FFD700;color:#000}.bs-m2{background:#C0C0C0;color:#000}.bs-m3{background:#CD7F32;color:#000}
+    .bs-nm{font-size:14px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+    .bs-mt{font-size:11px;color:var(--muted);margin-top:2px}
+    .bs-pf{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+    .bs-pf b{display:block;font-size:15px;font-weight:900}
+    .bs-pf span{display:block;font-size:11px;color:var(--muted)}
+    .bs-b{padding:0 14px 14px;border-top:1px solid var(--border)}
+    .bs-k{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px}
+    .bs-k>div{background:var(--card2);border-radius:8px;padding:8px 4px;text-align:center}
+    .bs-k b{font-size:14px;font-weight:900;font-variant-numeric:tabular-nums}
+    .bs-sh{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:14px 0 4px}
+    .bs-l{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--border)}
+    .bs-l>span:last-child{color:var(--text);font-variant-numeric:tabular-nums}
+    .bs-tot{border-top:2px solid var(--border);border-bottom:none;font-weight:800;color:var(--text);padding-top:8px;font-size:14px}
+    .bs-gold{color:var(--gold)}
+    .bs-us{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+    .bs-u{background:var(--card2);border-radius:8px;padding:6px 0;text-align:center}
+    .bs-u b{display:block;font-size:14px;font-weight:900;color:var(--gold)}
+    .bs-u span{font-size:10px;color:var(--muted);font-weight:700}
+    .bs-bar{display:grid;grid-template-columns:64px 1fr auto;gap:8px;align-items:center;font-size:12px;padding:4px 0;color:var(--muted)}
+    .bs-bar>div{height:8px;background:var(--card2);border-radius:4px;overflow:hidden}
+    .bs-bar i{display:block;height:100%;background:var(--green);border-radius:4px}
+    .bs-bar>span:last-child{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+    .bs-bar em{font-style:normal;color:var(--muted);font-weight:400;font-size:11px}
+    .bs-none{font-size:11px;color:var(--muted)}
+    .bs-loc{font-size:11px;color:var(--muted);margin-top:10px}
+
+    /* BOOTH COSTS */
+    .bc-k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-top:2px}
+    .bc-bar{height:8px;background:var(--card2);border-radius:4px;overflow:hidden;margin-top:14px}
+    .bc-bar i{display:block;height:100%;background:var(--green)}
+    .bc-cap{font-size:11px;color:var(--muted);text-align:center;margin-top:6px}
+    .bc-hd{font-size:12px;font-weight:800;color:var(--text);text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .bc-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .bc-due{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+    .bc-due:last-child{border-bottom:none}
+    .bc-due b{font-size:14px;font-variant-numeric:tabular-nums}
+    .bc-n{font-size:13px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+    .bc-n span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .bc-list{padding-top:4px;padding-bottom:10px}
+    .bc-r{border-bottom:1px solid var(--border)}
+    .bc-r>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0}
+    .bc-r>summary::-webkit-details-marker{display:none}
+    .bc-r>summary .bc-n::before{content:'▸ ';color:var(--gold)}
+    .bc-r[open]>summary .bc-n::before{content:'▾ '}
+    .bc-v{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+    .bc-v b{font-size:14px;font-weight:900;margin-left:6px}
+    .bc-v em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:2px}
+    .bc-tag{font-size:9px;font-weight:900;letter-spacing:.05em;border-radius:4px;padding:2px 5px;vertical-align:2px}
+    .bc-paid{background:var(--greenbg);color:var(--green);border:1px solid var(--greenbd)}
+    .bc-part{background:var(--goldbg);color:var(--gold);border:1px solid var(--goldbd)}
+    .bc-owed{background:var(--redbg);color:var(--red);border:1px solid var(--redbd)}
+    .bc-free{background:var(--card2);color:var(--muted);border:1px solid var(--border)}
+    .bc-x{background:var(--card2);border-radius:8px;padding:6px 10px 10px;margin-bottom:10px}
+    .bc-l{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);padding:7px 0;border-bottom:1px solid var(--border)}
+    .bc-l>span:last-child{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+    .bc-x .bc-l{font-size:12px;padding:5px 0}
+    .bc-big{font-size:14px;color:var(--text);font-weight:800}
+    .card>.bc-l:last-child{border-bottom:none}
+    .bc-big>span:last-child{font-weight:900}
+    .bc-sh{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:10px 0 2px}
+    .bc-p{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:5px 0}
+    .bc-p i{display:block;font-style:normal;font-size:11px;opacity:.8}
+    .bc-p b{color:var(--green);font-variant-numeric:tabular-nums}
+    .bc-tot{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:800;padding-top:10px}
+    .bc-tot>span:last-child{font-variant-numeric:tabular-nums;text-align:right}
+    .bc-red{color:var(--red)}.bc-grn{color:var(--green)}.bc-gold{color:var(--gold)}
+
+    /* PAYMENT BREAKDOWN */
+    .pm-hero{text-align:center;margin-bottom:12px}
+    .pm-hero span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+    .pm-hero b{display:block;font-size:28px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums;margin:2px 0}
+    .pm-hero em{font-style:normal;font-size:11px;color:var(--muted)}
+    .pm-bar{display:flex;gap:2px;border-radius:7px;overflow:hidden;background:var(--card2)}
+    .pm-bar i{display:block;min-width:2px}
+    .pm-split{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px;text-align:center}
+    .pm-split>div{background:var(--card2);border-radius:8px;padding:8px 4px}
+    .pm-split b{display:block;font-size:18px;font-weight:900}
+    .pm-split span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:.05em}
+    .pm-split em{display:block;font-style:normal;font-size:12px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+    .pm-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .pm-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .pm-th,.pm-tr{display:grid;grid-template-columns:minmax(0,1fr) 92px 50px 46px;gap:6px;align-items:center}
+    .pm-th{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800;padding-bottom:6px;border-bottom:1px solid var(--border)}
+    .pm-th span:not(:first-child),.pm-tr span:not(:first-child){text-align:right}
+    .pm-tr{font-size:13px;padding:9px 0 0;font-variant-numeric:tabular-nums}
+    .pm-tr span:first-child{font-weight:700}
+    .pm-tr span:nth-child(3),.pm-tr span:nth-child(4){color:var(--muted)}
+    .pm-mini{grid-column:1/-1;height:4px;background:var(--card2);border-radius:2px;overflow:hidden;margin-bottom:6px}
+    .pm-mini i{display:block;height:100%}
+    .pm-ttl{border-top:2px solid var(--border);margin-top:4px;padding-top:10px;font-weight:900}
+    .pm-ttl span{color:var(--text)!important}
+    .pm-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:0}
+    .pm-l{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);padding:7px 0;border-bottom:1px solid var(--border)}
+    .pm-l>span:last-child{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .pm-l em{font-style:normal;color:var(--muted);font-size:11px}
+    .pm-tot{border-top:2px solid var(--border);border-bottom:none;color:var(--text);font-weight:800;font-size:14px;padding-top:9px}
+    .pm-tot>span:last-child{font-weight:900}
+    .pm-red{color:var(--red)}
+    .pm-note{font-size:11px;color:var(--muted);margin-top:8px}
+    .pm-list{padding-top:4px}
+    .pm-r{border-bottom:1px solid var(--border)}
+    .pm-r>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 0}
+    .pm-r>summary::-webkit-details-marker{display:none}
+    .pm-r>summary b{font-size:14px;font-weight:900;font-variant-numeric:tabular-nums}
+    .pm-r>summary .pm-bar{grid-column:1/-1}
+    .pm-n{font-size:13px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+    .pm-n::before{content:'▸ ';color:var(--gold)}
+    .pm-r[open] .pm-n::before{content:'▾ '}
+    .pm-n span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .pm-x{background:var(--card2);border-radius:8px;padding:4px 10px 10px;margin-bottom:10px}
+    .pm-x .pm-l{font-size:12px;padding:6px 0}
+
+    /* OTHER EXPENSES */
+    .ex-hero{text-align:center}
+    .ex-hero span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+    .ex-hero b{display:block;font-size:28px;font-weight:900;color:var(--red);font-variant-numeric:tabular-nums;margin:2px 0}
+    .ex-hero em{font-style:normal;font-size:11px;color:var(--muted)}
+    .ex-k{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px;text-align:center}
+    .ex-k>div{background:var(--card2);border-radius:8px;padding:8px 4px}
+    .ex-k b{display:block;font-size:15px;font-weight:900;font-variant-numeric:tabular-nums}
+    .ex-k span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;letter-spacing:.05em;margin-top:2px}
+    .ex-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+    .ex-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .ex-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .ex-c{padding:7px 0}
+    .ex-ct{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:700}
+    .ex-ct em,.ex-g em{font-style:normal;font-weight:400;color:var(--muted);font-size:11px}
+    .ex-ct b{font-variant-numeric:tabular-nums}
+    .ex-b{height:6px;background:var(--card2);border-radius:3px;overflow:hidden;margin-top:5px}
+    .ex-b i{display:block;height:100%;background:var(--red);border-radius:3px}
+    .ex-m{display:grid;grid-template-columns:110px 1fr 84px;gap:10px;align-items:center;font-size:12px;padding:6px 0;color:var(--muted)}
+    .ex-m .ex-b{margin:0}
+    .ex-m b{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .ex-i{display:grid;grid-template-columns:minmax(0,1fr) auto 20px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer}
+    .ex-i:last-child{border-bottom:none}
+    .ex-i b{font-size:13px;color:var(--red);font-variant-numeric:tabular-nums}
+    .ex-i em{font-style:normal;font-size:11px;opacity:.6}
+    .ex-n{font-size:13px;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+    .ex-n span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .ex-g{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;padding:0 14px}
+    .ex-g>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:12px 0;font-size:13px;font-weight:800}
+    .ex-g>summary::-webkit-details-marker{display:none}
+    .ex-g>summary>span::before{content:'▸ ';color:var(--gold)}
+    .ex-g[open]>summary>span::before{content:'▾ '}
+    .ex-g[open]>summary{border-bottom:1px solid var(--border)}
+    .ex-g>summary b{font-variant-numeric:tabular-nums}
+    .ex-tot{border-top:2px solid var(--border);margin-top:6px;padding-top:9px}
+    .ex-note{font-size:11px;color:var(--muted);margin-top:8px}
+
+    /* MASTER INVENTORY */
+    .iv-top{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;text-align:center}
+    .iv-top span,.iv-hero span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+    .iv-top b{display:block;font-size:17px;font-weight:900;margin-top:2px;font-variant-numeric:tabular-nums}
+    .iv-hero{text-align:center;background:var(--greenbg);border:1px solid var(--greenbd);border-radius:10px;padding:10px;margin-top:12px}
+    .iv-hero b{display:block;font-size:24px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums;margin:2px 0}
+    .iv-hero em{font-style:normal;font-size:11px;color:var(--muted)}
+    .iv-btns{margin-top:10px;display:grid}
+    .iv-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:16px 2px 8px}
+    .iv-hd span{font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px}
+    .iv-h,.iv-r>summary,.iv-t{display:grid;grid-template-columns:minmax(0,1fr) 44px 78px 84px;gap:6px;align-items:center}
+    .iv-h{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:800;padding-bottom:6px;border-bottom:1px solid var(--border)}
+    .iv-r{border-bottom:1px solid var(--border)}
+    .iv-r>summary{list-style:none;cursor:pointer;padding:10px 0}
+    .iv-r>summary::-webkit-details-marker{display:none}
+    .iv-n{font-size:14px;font-weight:800}
+    .iv-r .iv-n::before{content:'▸ ';color:var(--gold)}
+    .iv-r[open] .iv-n::before{content:'▾ '}
+    .iv-n>span{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
+    .iv-q,.iv-v{text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .iv-h .iv-q,.iv-h .iv-v{font-size:10px}
+    .iv-t{border-top:2px solid var(--border);padding-top:10px;margin-top:2px}
+    .iv-t>div{font-weight:900}
+    .iv-x{background:var(--card2);border-radius:8px;padding:4px 10px 10px;margin-bottom:10px}
+    .iv-sh{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin:10px 0 2px}
+    .iv-l{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);padding:5px 0;border-bottom:1px solid var(--border)}
+    .iv-l>span:last-child{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+    .iv-l em{font-style:normal;color:var(--muted);font-size:11px}
+    .card>.iv-l{font-size:13px;padding:7px 0}
+    .iv-gold{color:var(--gold)!important}.iv-grn{color:var(--green)}.iv-red{color:var(--red)!important}
+    .iv-warn{font-size:13px;color:var(--gold);padding-bottom:6px}
+    .iv-note{font-size:11px;color:var(--muted);margin-top:8px}
+    .iv-ex p{font-size:12px;color:var(--muted);line-height:1.5;margin:0 0 8px}
+    .iv-ex p:last-child{margin:0}
+    .iv-ex b{color:var(--text)}
+
     /* CHIPS */
     .chip{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--card2);border:1px solid var(--border)}
     .chip.gold{background:var(--goldbg);color:var(--gold);border-color:var(--goldbd)}
@@ -4176,14 +4426,27 @@ function secCollected(){
   let h='';
   const _sell=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)).sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
   if(_sell.length){
-    let tp=0,tc=0;
-    const rows=_sell.map(sh=>{const pot=showPotentialRev(sh),col=showActualRev(sh),gap=pot-col;tp+=pot;tc+=col;
-      return `<div class="sr"><span class="srl">${sh.name}${sh.status==='active'?' <span style="color:var(--gold);font-size:10px">●LIVE</span>':''}</span><span class="srv"><span style="color:var(--green)">${fmt(col)}</span> <span style="color:var(--muted)">/ ${fmt(pot)}</span>${gap>0.5?` <span style="color:var(--red)">−${fmt(gap)}</span>`:''}</span></div>`;}).join('');
-    const tg=tp-tc;
-    h+=`<div class="card">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Collected (green) / full price · <span style="color:var(--red)">red</span> = discount or freebie given that show</div>
+    const data=_sell.map(sh=>({sh,pot:showPotentialRev(sh),col:showActualRev(sh)}));
+    const tp=data.reduce((t,d)=>t+d.pot,0),tc=data.reduce((t,d)=>t+d.col,0);
+    // Whole dollars when every figure is whole, so the columns stay narrow on a phone.
+    const whole=data.every(d=>Math.abs(d.pot-Math.round(d.pot))<0.005&&Math.abs(d.col-Math.round(d.col))<0.005);
+    const m=n=>whole?fmt(Math.round(n)).replace(/\.00$/,''):fmt(n);
+    const diff=n=>Math.abs(n)<0.5?'<span class="ct-z">—</span>':n>0?`<span class="ct-up">+${m(n)}</span>`:`<span class="ct-dn">−${m(-n)}</span>`;
+    const rows=data.map(({sh,pot,col})=>`<div class="ct-r">
+        <div class="ct-n">${sh.name}${sh.status==='active'?' <span class="ct-live">LIVE</span>':''}</div>
+        <div class="ct-v ct-col">${m(col)}</div><div class="ct-v ct-mut">${m(pot)}</div><div class="ct-v">${diff(col-pot)}</div>
+      </div>`).join('');
+    h+=`<div class="card ct">
+        <div class="ct-sum">
+          <div><div class="ct-k">Collected</div><div class="ct-big" style="color:var(--green)">${m(tc)}</div></div>
+          <div><div class="ct-k">Full price</div><div class="ct-big">${m(tp)}</div></div>
+          <div><div class="ct-k">Over / under</div><div class="ct-big">${diff(tc-tp)}</div></div>
+        </div>
+        <div class="ct-r ct-h"><div>Show</div><div class="ct-v">Collected</div><div class="ct-v">Full</div><div class="ct-v">+/−</div></div>
         ${rows}
-        <div class="sr" style="border-top:1px solid var(--border);margin-top:5px;padding-top:7px"><span class="srl b">Season total</span><span class="srv b"><span style="color:var(--green)">${fmt(tc)}</span> <span style="color:var(--muted)">/ ${fmt(tp)}</span>${tg>0.5?` <span style="color:var(--red)">−${fmt(tg)} given away</span>`:''}</span></div>
+        <div class="ct-r ct-t"><div class="ct-n">Season total <span class="ct-cnt">${data.length} shows</span></div>
+          <div class="ct-v ct-col">${m(tc)}</div><div class="ct-v ct-mut">${m(tp)}</div><div class="ct-v">${diff(tc-tp)}</div></div>
+        <div class="ct-note"><span class="ct-up">+</span> took in more than full price &nbsp;·&nbsp; <span class="ct-dn">−</span> discounts or freebies given</div>
       </div>`;
   }
   return h;
@@ -4195,54 +4458,136 @@ function secUnits(C){
   </div>`;
 }
 function secWorkload(C){
+  // Same numbers as before, laid out as Done / Coming up / Total so each row adds across.
+  const staffDone=(S.shows||[]).filter(sh=>!isMissed(sh)&&!isPassed(sh)&&sh.status==='completed').reduce((t,sh)=>t+staffedHours(sh),0);
+  const h=n=>fmtN(n)+'h';
+  const row=(label,sub,d,u,t,cls)=>`<div class="wl-r${cls?' '+cls:''}"><div class="wl-l">${label}<span class="wl-s">${sub}</span></div><div class="wl-v">${d}</div><div class="wl-v">${u}</div><div class="wl-v wl-t">${t}</div></div>`;
+  const missed=C.missedShows.length;
   return `<div class="card">
-    <div class="g3" style="margin-bottom:8px">
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${C.done.length}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Shows Done</div></div>
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${C.plannedCount}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Shows Planned</div></div>
-      <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:${C.missedShows.length?'var(--red)':'var(--muted)'}">${C.missedShows.length}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Missed</div></div>
+    <div class="wl-r wl-h"><div></div><div class="wl-v" style="color:var(--green)">Done</div><div class="wl-v" style="color:var(--gold)">Coming up</div><div class="wl-v">Total</div></div>
+    ${row('Shows','booked',C.done.length,C.plannedCount,C.bookedCount)}
+    ${row('Show days','3-day show = 3',C.completedDays,C.plannedDays,C.bookedShowDays)}
+    ${row('Work hours','show hours, 1 person',h(C.completedHours),h(C.plannedHours),h(C.completedHours+C.plannedHours))}
+    ${row('Staff hours ⚡','work hours × people',h(staffDone),h(C.totalStaffedHours-staffDone),h(C.totalStaffedHours),'wl-gold')}
+    <div class="wl-x">
+      <div class="sr"><span class="srl">Your hours <span class="wl-s" style="display:inline">${C.myHoursTotal>0?'logged in Edit Show':'not logged yet · add them in Edit Show'}</span></span><span class="srv">${h(C.myHoursTotal)}</span></div>
+      ${missed?`<div class="sr"><span class="srl">Missed <span class="wl-s" style="display:inline">date passed, never started or closed out</span></span><span class="srv red">${missed} show${missed===1?'':'s'}</span></div>`:''}
     </div>
-    <div class="sr"><span class="srl b">Shows booked</span><span class="srv">${C.bookedCount}</span></div>
-    <div class="sr"><span class="srl">Booked show-days <span style="color:var(--muted)">(stacks overlaps)</span></span><span class="srv">${C.bookedShowDays}</span></div>
-    <div class="sr"><span class="srl b">Total staffed hours ⚡</span><span class="srv gold">${fmtN(C.totalStaffedHours)}h</span></div>
-    <div class="sr"><span class="srl">My hours (you)</span><span class="srv">${fmtN(C.myHoursTotal)}h</span></div>
-    <div style="height:6px"></div>
-    <div class="sr"><span class="srl">Planned show days</span><span class="srv">${C.plannedDays}</span></div>
-    <div class="sr"><span class="srl">Completed show days</span><span class="srv">${C.completedDays}</span></div>
-    <div class="sr"><span class="srl">Est. planned work hours</span><span class="srv">${fmtN(C.plannedHours)}h</span></div>
-    <div class="sr"><span class="srl">Completed work hours</span><span class="srv">${fmtN(C.completedHours)}h</span></div>
-    <div style="font-size:10px;color:var(--muted);margin-top:6px">⚡ Staffed hours = each show-day's hours × people working it (reps + you), so two shows running at once count double. "My hours" is logged per show in Edit Show.</div>
+    <div class="wl-note">⚡ Staff hours count every person. 3 people working an 8-hour day = 24 staff hours. Two shows on the same day both count.</div>
   </div>`;
 }
 function secBooth(){
   // Committed / owed are forward-looking, so a passed show is not in them.
   // Anything already PAID on a passed show is real money gone, and gets its own
   // sunk-cost line below rather than quietly disappearing.
-  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed'&&!isPassed(sh)).sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0);
-  const passedSunk=(S.shows||[]).filter(sh=>isPassed(sh)).reduce((t,sh)=>t+boothPaid(sh),0);
+  const byDate=(a,b)=>showSortKey(a)<showSortKey(b)?-1:showSortKey(a)>showSortKey(b)?1:0;
+  const allUpcoming=[...S.shows].filter(sh=>sh.status!=='completed'&&!isPassed(sh)).sort(byDate);
+  const passed=(S.shows||[]).filter(sh=>isPassed(sh)&&boothPaid(sh)>0.005).sort(byDate);
+  const passedSunk=passed.reduce((t,sh)=>t+boothPaid(sh),0);
+  const doneShows=(S.shows||[]).filter(sh=>sh.status==='completed'&&!isPassed(sh)).sort(byDate).reverse();
   const totalBoothCommitted=allUpcoming.reduce((t,sh)=>t+(sh.boothCost||0),0);
   const totalBoothPaidSeason=allUpcoming.reduce((t,sh)=>t+boothPaid(sh),0);
   const totalBoothOwed=Math.max(0,totalBoothCommitted-totalBoothPaidSeason);
   const unpaidList=allUpcoming.filter(sh=>boothBalance(sh)>0.01);
+  const doneBooth=doneShows.reduce((t,sh)=>t+calcShow(sh).booth,0);
+  const doneGross=doneShows.reduce((t,sh)=>t+calcShow(sh).gross,0);
+  const seasonSpent=doneBooth+totalBoothPaidSeason+passedSunk;
+  const paidPct=totalBoothCommitted>0?Math.min(100,Math.round(totalBoothPaidSeason/totalBoothCommitted*100)):100;
+  const dates=sh=>sh.dates&&sh.dates.length?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+  const dfmt=d=>(typeof csFmtDate==='function'?csFmtDate(d):d)||'no date';
+  const days=sh=>sh.numDays||(sh.days||[]).length||1;
+  const pays=sh=>(sh.boothPayments||[]).length?(sh.boothPayments||[]).map(p=>`<div class="bc-p"><span>${_esc(dfmt(p.date))}${p.note?`<i>${_esc(p.note)}</i>`:''}</span><b>${fmt(parseFloat(p.amount)||0)}</b></div>`).join(''):'<div class="bc-p"><span>No payments logged yet</span></div>';
+  const tag=sh=>{const c=sh.boothCost||0,pd=boothPaid(sh);
+    if(c<=0.005&&pd<=0.005)return '<span class="bc-tag bc-free">FREE</span>';
+    if(boothBalance(sh)<=0.01)return '<span class="bc-tag bc-paid">PAID</span>';
+    return pd>0.005?'<span class="bc-tag bc-part">PARTIAL</span>':'<span class="bc-tag bc-owed">NOT PAID</span>';};
+  const line=(l,v)=>`<div class="bc-l"><span>${l}</span><span>${v}</span></div>`;
+  const upRows=allUpcoming.map(sh=>{const c=sh.boothCost||0,pd=boothPaid(sh),bal=boothBalance(sh);
+    return `<details class="bc-r"><summary><div class="bc-n">${_esc(sh.name)}<span>${dates(sh)}${sh.status==='active'?' · LIVE':''}</span></div>
+        <div class="bc-v">${tag(sh)}<b>${fmt(c)}</b>${bal>0.01?`<em class="bc-red">${fmt(bal)} owed</em>`:''}</div></summary>
+      <div class="bc-x">
+        ${line('Booth price',fmt(c))}${line('Paid so far',`<span class="bc-grn">${fmt(pd)}</span>`)}${line('Balance',bal>0.01?`<span class="bc-red">${fmt(bal)}</span>`:'<span class="bc-grn">$0.00</span>')}
+        ${line('Show days',days(sh))}${c>0?line('Booth cost per day',fmt(c/days(sh))):''}
+        ${pd>c+0.01?line('Paid over sticker',`<span class="bc-red">${fmt(pd-c)}</span>`):''}
+        <div class="bc-sh">Payments</div>${pays(sh)}
+        ${bal>0.01?`<button class="btn btn-green btn-full" style="margin-top:8px" onclick="openBoothPmt('${sh.id}')">+ Log a payment</button>`:''}
+      </div></details>`;}).join('');
+  const doneRows=doneShows.map(sh=>{const t=calcShow(sh),pc=t.gross>0?Math.round(t.booth/t.gross*100):null;
+    return `<details class="bc-r"><summary><div class="bc-n">${_esc(sh.name)}<span>${dates(sh)}</span></div>
+        <div class="bc-v"><b>${fmt(t.booth)}</b><em>${pc!=null?pc+'% of '+fmt(t.gross)+' gross':'no sales logged'}</em></div></summary>
+      <div class="bc-x">
+        ${line('Booth price',fmt(sh.boothCost||0))}${line('Paid',fmt(boothPaid(sh)))}
+        ${line('Booth booked in P&amp;L',fmt(t.booth))}${line('Show days',days(sh))}${line('Booth cost per day',fmt(t.booth/days(sh)))}
+        ${line('Gross collected',`<span class="bc-gold">${fmt(t.gross)}</span>`)}${t.booth>0?line('Gross per $1 of booth',fmt(t.gross/t.booth)):''}
+        <div class="bc-sh">Payments</div>${pays(sh)}
+      </div></details>`;}).join('');
+  const passRows=passed.map(sh=>`<div class="bc-l"><span>${_esc(sh.name)} <i style="font-style:normal;color:var(--muted)">${dates(sh)}</i></span><span style="color:#FFA500">${fmt(boothPaid(sh))}</span></div>`).join('');
   return `<div class="card">
-    <div class="g3" style="margin-bottom:${unpaidList.length?10:0}px">
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Total Committed</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Paid</div></div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Still Owed</div></div>
+    <div class="g3">
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--gold)">${fmt(totalBoothCommitted)}</div><div class="bc-k">Committed</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:var(--green)">${fmt(totalBoothPaidSeason)}</div><div class="bc-k">Paid</div></div>
+      <div style="text-align:center"><div style="font-size:18px;font-weight:900;color:${totalBoothOwed>0?'var(--red)':'var(--green)'}">${fmt(totalBoothOwed)}</div><div class="bc-k">Still owed</div></div>
     </div>
-    ${unpaidList.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${unpaidList.map(sh=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="font-weight:700">${sh.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--red);font-weight:900">${fmt(boothBalance(sh))} owed</span><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div></div>`).join('')}</div>`:'<div style="font-size:12px;color:var(--green);text-align:center;padding-top:4px">✅ All booth fees paid</div>'}
-    ${passedSunk>0.005?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">🚫 Not counted above: <strong style="color:#FFA500">${fmt(passedSunk)}</strong> already paid on shows marked Passed / Not Doing. That money is spent and still counts in the P&amp;L — it is just no longer a booking commitment.</div>`:''}
+    <div class="bc-bar"><i style="width:${paidPct}%"></i></div>
+    <div class="bc-cap">${paidPct}% paid on ${allUpcoming.length} upcoming show${allUpcoming.length===1?'':'s'} · ${unpaidList.length} still owe${unpaidList.length===1?'s':''} money</div>
+  </div>
+  ${unpaidList.length?`<div class="bc-hd">💸 Pay these next</div><div class="card">${unpaidList.map(sh=>`<div class="bc-due"><div class="bc-n">${_esc(sh.name)}<span>${dates(sh)} · ${fmt(boothPaid(sh))} of ${fmt(sh.boothCost||0)} paid</span></div><b class="bc-red">${fmt(boothBalance(sh))}</b><button class="btn btn-green btn-xs" onclick="openBoothPmt('${sh.id}')">+ Pay</button></div>`).join('')}</div>`
+    :'<div class="card" style="text-align:center;color:var(--green);font-size:13px;font-weight:700">✅ All booth fees paid</div>'}
+  ${allUpcoming.length?`<div class="bc-hd">📅 Upcoming shows <span>tap for payments</span></div><div class="card bc-list">${upRows}
+    <div class="bc-tot"><span>Upcoming total</span><span>${fmt(totalBoothPaidSeason)} paid of ${fmt(totalBoothCommitted)}</span></div></div>`:''}
+  ${doneShows.length?`<div class="bc-hd">✅ Completed shows <span>booth vs sales</span></div><div class="card bc-list">${doneRows}
+    <div class="bc-tot"><span>Completed total</span><span>${fmt(doneBooth)}${doneGross>0?` · ${Math.round(doneBooth/doneGross*100)}% of gross`:''}</span></div></div>`:''}
+  ${passed.length?`<div class="bc-hd">🚫 Passed / Not Doing <span>money already spent</span></div><div class="card">${passRows}
+    <div class="bc-cap" style="text-align:left;margin-top:8px">Not in Committed above. That money is spent and still counts in the P&amp;L; it's just no longer a booking.</div></div>`:''}
+  <div class="bc-hd">🧾 Whole season</div>
+  <div class="card">
+    ${line('Booth on completed shows',fmt(doneBooth))}
+    ${line('Paid toward upcoming shows',fmt(totalBoothPaidSeason))}
+    ${passedSunk>0.005?line('Paid on passed shows',fmt(passedSunk)):''}
+    <div class="bc-l bc-big"><span>Spent on booths so far</span><span>${fmt(seasonSpent)}</span></div>
+    ${totalBoothOwed>0.005?line('Still to pay',`<span class="bc-red">${fmt(totalBoothOwed)}</span>`):''}
+    <div class="bc-l bc-big"><span>Season booth total</span><span>${fmt(seasonSpent+totalBoothOwed)}</span></div>
   </div>`;
 }
 function secExpenses(C){
+  const list=[...(S.otherExpenses||[])].map(e=>({...e,amt:parseFloat(e.amount)||0})).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const total=list.reduce((t,e)=>t+e.amt,0);
+  const mk=_todayKey().slice(0,7);
+  const thisMonth=list.filter(e=>String(e.date||'').slice(0,7)===mk).reduce((t,e)=>t+e.amt,0);
+  const monthName=k=>/^\d{4}-\d{2}$/.test(k)?new Date(k+'-15T12:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric'}):'No date';
+  const dshort=d=>/^\d{4}-\d{2}-\d{2}$/.test(d||'')?new Date(d+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+  const pc=v=>total>0?Math.round(v/total*100):0;
+  const group=(arr,key)=>{const m={};arr.forEach(e=>{const k=key(e);(m[k]=m[k]||{k,amt:0,n:0,items:[]});m[k].amt+=e.amt;m[k].n++;m[k].items.push(e);});return Object.values(m);};
+  const cats=group(list,e=>e.category||'Other').sort((a,b)=>b.amt-a.amt);
+  const months=group(list,e=>String(e.date||'').slice(0,7)||'none').sort((a,b)=>b.k.localeCompare(a.k));
+  const maxMonth=Math.max(0,...months.map(m=>m.amt));
+  const item=e=>`<div class="ex-i" onclick="openOtherExpense('','${e.id}')"><div class="ex-n">${_esc(e.note||e.category||'Expense')}<span>${dshort(e.date)}${e.category?' · '+_esc(e.category):''}</span></div><b>${fmt(e.amt)}</b><em>✏️</em></div>`;
+  // Spending logged inside shows lives in each show's P&L, not in the total above.
+  const showSpend={};let showTotal=0;
+  (S.shows||[]).filter(sh=>sh.status==='completed'||sh.status==='active').forEach(sh=>(sh.showExpenses||[]).forEach(e=>{const v=parseFloat(e.amount)||0;if(!v)return;showSpend[e.cat||'other']=(showSpend[e.cat||'other']||0)+v;showTotal+=v;}));
+  const showCats=SHOW_EXP_CATS.filter(c=>showSpend[c.key]>0).sort((a,b)=>showSpend[b.key]-showSpend[a.key]);
   return `<div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:2px">YTD Spent</div>
-        <div style="font-size:24px;font-weight:900;color:var(--red)">${fmt(C.ytd.otherSpend)}</div>
+      <div class="ex-hero"><span>Spent this season</span><b>${fmt(total)}</b><em>${list.length} expense${list.length===1?'':'s'} logged · business costs not tied to one show</em></div>
+      <div class="ex-k">
+        <div><b>${fmt(thisMonth)}</b><span>This month</span></div>
+        <div><b>${fmt(list.length?total/list.length:0)}</b><span>Avg expense</span></div>
+        <div><b>${months.filter(m=>m.k!=='none').length?fmt(total/months.filter(m=>m.k!=='none').length):'—'}</b><span>Avg / month</span></div>
       </div>
-      <button class="btn btn-gold btn-sm" onclick="openManageExpenses()">Other Expenses →</button>
+      <div class="ex-btns"><button class="btn btn-gold" onclick="openOtherExpense()">+ Log expense</button><button class="btn btn-ghost" onclick="openManageExpenses()">Manage all →</button></div>
     </div>
-  </div>`;
+    ${list.length?`<div class="ex-hd">By category</div>
+    <div class="card">${cats.map(c=>`<div class="ex-c"><div class="ex-ct"><span>${_esc(c.k)} <em>${c.n} item${c.n===1?'':'s'}</em></span><span><b>${fmt(c.amt)}</b> <em>${pc(c.amt)}%</em></span></div><div class="ex-b"><i style="width:${pc(c.amt)}%"></i></div></div>`).join('')}</div>
+    <div class="ex-hd">By month</div>
+    <div class="card">${months.map(m=>`<div class="ex-m"><span>${monthName(m.k)}</span><div class="ex-b"><i style="width:${maxMonth?Math.round(m.amt/maxMonth*100):0}%"></i></div><b>${fmt(m.amt)}</b></div>`).join('')}</div>
+    <div class="ex-hd">Biggest expenses</div>
+    <div class="card">${list.slice().sort((a,b)=>b.amt-a.amt).slice(0,5).map(item).join('')}</div>
+    <div class="ex-hd">Every expense <span>tap one to edit</span></div>
+    ${months.map(m=>`<details class="ex-g"${m===months[0]?' open':''}><summary><span>${monthName(m.k)} <em>${m.n} item${m.n===1?'':'s'}</em></span><b>${fmt(m.amt)}</b></summary>${m.items.map(item).join('')}</details>`).join('')}`
+    :`<div class="card" style="text-align:center;color:var(--muted);font-size:13px">No expenses logged yet. Tap + Log expense to add one.</div>`}
+    ${showTotal>0?`<div class="ex-hd">Also spent at shows <span>not in the total above</span></div>
+    <div class="card">${showCats.map(c=>`<div class="ex-c"><div class="ex-ct"><span>${c.icon} ${c.label}</span><span><b>${fmt(showSpend[c.key])}</b></span></div></div>`).join('')}
+      <div class="ex-ct ex-tot"><span>Show receipts total</span><span><b>${fmt(showTotal)}</b></span></div>
+      <div class="ex-note">Receipts logged inside a show (fuel, hotel, food…) are already counted in that show's profit.</div></div>`:''}`;
 }
 function secSplit(C){
   return `<div class="card">
@@ -4269,56 +4614,232 @@ function secSplit(C){
 }
 function secPayments(C){
   if(!(C.pmtGrand>0))return '';
-  const pmtHasData=PMTS.filter(p=>(C.ytd.pmtTotals[p.key]||0)>0);
+  const T=C.ytd.pmtTotals, G=C.pmtGrand;
+  const pct=v=>G>0?Math.round(v/G*100):0;
+  const used=PMTS.filter(p=>(T[p.key]||0)>0).sort((a,b)=>T[b.key]-T[a.key]);
+  const card=PMTS.filter(p=>p.commRate===COMM_CARD).reduce((n,p)=>n+(T[p.key]||0),0);
+  const cash=T.cash||0, apps=G-cash-card;
+  // Same shows calcYTD counts (completed + running), newest first.
+  const shows=(S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').map(sh=>{const p=showPmtTotals(sh);return{sh,p,tot:PMTS.reduce((n,k)=>n+(p[k.key]||0),0)};}).filter(x=>x.tot>0).sort((a,b)=>showSortKey(a.sh)<showSortKey(b.sh)?1:-1);
+  const showsUsing=k=>shows.filter(x=>(x.p[k]||0)>0).length;
+  const bar=(vals,h)=>`<div class="pm-bar" style="height:${h}px">${vals.filter(([v])=>v>0).map(([v,c,tot])=>`<i style="flex:${v};background:${c}" title="${Math.round(v/tot*100)}%"></i>`).join('')}</div>`;
+  const ln=(l,v,cls)=>`<div class="pm-l${cls?' '+cls:''}"><span>${l}</span><span>${v}</span></div>`;
+  const fees=C.ytd.cardFees||0, stax=C.ytd.salesTax||0;
+  const best=k=>shows.slice().sort((a,b)=>(b.p[k]||0)-(a.p[k]||0))[0];
+  const topCash=best('cash');
+  const cardShare=x=>x.tot>0?PMTS.filter(p=>p.commRate===COMM_CARD).reduce((n,p)=>n+(x.p[p.key]||0),0)/x.tot:0;
+  const topCard=shows.slice().sort((a,b)=>cardShare(b)-cardShare(a))[0];
+  const rows=shows.map(x=>{const parts=used.map(p=>[x.p[p.key]||0,p.color,x.tot]);
+    return `<details class="pm-r"><summary><div class="pm-n">${_esc(x.sh.name)}<span>${x.sh.dates&&x.sh.dates.length?x.sh.dates[0]:''}${x.sh.status==='active'?' · LIVE':''} · ${Math.round((x.p.cash||0)/x.tot*100)}% cash</span></div><b>${fmt(x.tot)}</b>${bar(parts,6)}</summary>
+      <div class="pm-x">${PMTS.filter(p=>(x.p[p.key]||0)>0).map(p=>ln(`<i class="pm-dot" style="background:${p.color}"></i>${p.label}`,`${fmt(x.p[p.key])} <em>${Math.round(x.p[p.key]/x.tot*100)}%</em>`)).join('')}
+      ${ln('Total collected','<b>'+fmt(x.tot)+'</b>','pm-tot')}
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="go('show','${x.sh.id}')">Open show →</button></div></details>`;}).join('');
   return `<div class="card">
-      <div class="hbar" style="height:14px;border-radius:7px">
-        ${pmtHasData.map(p=>{const pct=(C.ytd.pmtTotals[p.key]/C.pmtGrand)*100;return`<div class="hbar-seg" style="background:${p.color};flex:${pct};min-width:${pct>1?2:0}px"></div>`;}).join('')}
+      <div class="pm-hero"><span>Total collected this season</span><b>${fmt(G)}</b><em>across ${shows.length} show${shows.length===1?'':'s'} · ${fmt(shows.length?G/shows.length:0)} average per show</em></div>
+      ${bar(used.map(p=>[T[p.key]||0,p.color,G]),14)}
+      <div class="pm-split">
+        <div><b style="color:#00D26A">${pct(cash)}%</b><span>Cash</span><em>${fmt(cash)}</em></div>
+        <div><b style="color:#4FC3F7">${pct(card)}%</b><span>Card</span><em>${fmt(card)}</em></div>
+        <div><b style="color:#9b6dff">${pct(apps)}%</b><span>Apps</span><em>${fmt(apps)}</em></div>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">
-        ${PMTS.map(p=>{const v=C.ytd.pmtTotals[p.key]||0;if(!v)return'';const pct=Math.round((v/C.pmtGrand)*100);return`<div style="display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span><span style="font-size:12px;font-weight:700">${p.label}: ${fmt(v)} <span style="color:var(--muted)">(${pct}%)</span></span></div>`;}).join('')}
-      </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between">
-        <span style="font-size:12px;color:var(--muted)">💵 Cash</span>
-        <span style="font-size:15px;font-weight:900;color:var(--green)">${fmt(C.ytd.pmtTotals.cash||0)} (${C.pmtGrand>0?Math.round(((C.ytd.pmtTotals.cash||0)/C.pmtGrand)*100):0}% of total)</span>
-      </div>
+    </div>
+    <div class="pm-hd">By payment type</div>
+    <div class="card">
+      <div class="pm-th"><span>Method</span><span>Amount</span><span>Share</span><span>Shows</span></div>
+      ${used.map(p=>`<div class="pm-tr"><span><i class="pm-dot" style="background:${p.color}"></i>${p.label}</span><span>${fmt(T[p.key])}</span><span>${pct(T[p.key])}%</span><span>${showsUsing(p.key)}</span><div class="pm-mini"><i style="width:${G>0?T[p.key]/G*100:0}%;background:${p.color}"></i></div></div>`).join('')}
+      <div class="pm-tr pm-ttl"><span>Total</span><span>${fmt(G)}</span><span>100%</span><span>${shows.length}</span></div>
+    </div>
+    ${card>0?`<div class="pm-hd">What card sales cost</div>
+    <div class="card">
+      ${ln('Card sales (Square + Debit)',fmt(card))}
+      ${ln(`Processing fees (${(((S.settings&&S.settings.sqFee)||0)*100).toFixed(1)}%)`,`<span class="pm-red">−${fmt(fees)}</span>`)}
+      ${stax>0?ln('Sales tax inside card sales (owed to state)',`<span class="pm-red">−${fmt(stax)}</span>`):''}
+      ${ln('Card money you keep',fmt(card-fees-stax),'pm-tot')}
+      <div class="pm-note">Cash and app payments have no fee here, which is why the cash share matters.</div>
+    </div>`:''}
+    ${shows.length>1?`<div class="pm-hd">Highlights</div>
+    <div class="card">
+      ${topCash&&(topCash.p.cash||0)>0?ln('Most cash in one show',`${_esc(topCash.sh.name)} · <b>${fmt(topCash.p.cash)}</b>`):''}
+      ${topCard&&cardShare(topCard)>0?ln('Most card-heavy show',`${_esc(topCard.sh.name)} · <b>${Math.round(cardShare(topCard)*100)}% card</b>`):''}
+      ${ln('Biggest single show',`${_esc(shows.slice().sort((a,b)=>b.tot-a.tot)[0].sh.name)} · <b>${fmt(Math.max(...shows.map(x=>x.tot)))}</b>`)}
+    </div>`:''}
+    <div class="pm-hd">By show <span>tap for the split</span></div>
+    <div class="card pm-list">${rows}
+      <div class="pm-l pm-tot"><span>All shows</span><span>${fmt(shows.reduce((n,x)=>n+x.tot,0))}</span></div>
     </div>`;
 }
 function secInventory(C){
-  return `<div class="sec-row"><div class="sec-lbl" style="margin:0">SNAPSHOT</div><button class="btn btn-ghost btn-xs" onclick="go('stock')">Manage →</button></div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;margin-bottom:12px">
-      <div><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Total Units</div><div style="font-size:24px;font-weight:900;color:var(--gold)">${C.invUnits}</div></div>
-      <div style="text-align:center"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Cost Basis</div><div style="font-size:20px;font-weight:900">${fmt(C.invCost)}</div></div>
-      <div style="text-align:right"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">Retail Value</div><div style="font-size:20px;font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</div></div>
+  // Selling pace = units sold per selling show this season, so "shows left" is an estimate, not a promise.
+  const nSell=(C.sellShows||[]).length;
+  const upcoming=C.plannedCount||0;
+  const rows=SKUS.map(s=>{const q=S.inventory[s.key]||0,c=getCost(s.key),pr=getP(s.key),sold=(C.ytd.units||{})[s.key]||0,pace=nSell?sold/nSell:0;
+    return {s,q,c,pr,sold,pace,left:pace>0?q/pace:null,need:Math.max(0,Math.ceil(pace*upcoming-q))};});
+  const margin=C.invRetail-C.invCost;
+  const mPct=C.invRetail>0?Math.round(margin/C.invRetail*100):0;
+  const fx=n=>n==null?'—':n>=10?Math.round(n):n.toFixed(1);
+  const lowest=rows.filter(r=>r.left!=null).sort((a,b)=>a.left-b.left)[0];
+  const needs=rows.filter(r=>r.need>0);
+  const ln=(l,v)=>`<div class="iv-l"><span>${l}</span><span>${v}</span></div>`;
+  const prod=rows.map(r=>{const low=r.q<5;const unitM=r.pr-r.c;
+    return `<details class="iv-r"><summary>
+        <div class="iv-n">${r.s.emoji} ${r.s.short}${low?' <span class="chip red" style="font-size:9px;padding:1px 5px">LOW</span>':''}<span>${r.left==null?'no sales yet':'≈ '+fx(r.left)+' shows left'}</span></div>
+        <div class="iv-q${low?' iv-red':''}">${fmtN(r.q)}</div><div class="iv-v">${fmt(r.q*r.c)}</div><div class="iv-v iv-gold">${fmt(r.q*r.pr)}</div></summary>
+      <div class="iv-x">
+        <div class="iv-sh">Per bottle</div>
+        ${ln('You pay (cost)',fmt(r.c))}${ln('You sell it for',fmt(r.pr))}${ln('You make per bottle',`<b class="iv-grn">${fmt(unitM)}</b> <em>${r.pr>0?Math.round(unitM/r.pr*100):0}% margin</em>`)}
+        <div class="iv-sh">This product on the shelf</div>
+        ${ln('Bottles on hand',fmtN(r.q))}${ln('Cost of those bottles',fmt(r.q*r.c))}${ln('If all sell at full price',`<span class="iv-gold">${fmt(r.q*r.pr)}</span>`)}${ln('Profit locked in the stock',`<b class="iv-grn">${fmt(r.q*unitM)}</b>`)}
+        <div class="iv-sh">Selling pace</div>
+        ${ln('Sold this season',fmtN(r.sold)+' bottles')}${ln('Average per show',nSell?fx(r.pace):'—')}${ln('Stock lasts about',r.left==null?'—':fx(r.left)+' shows')}
+        ${upcoming?ln(`Need for ${upcoming} booked show${upcoming===1?'':'s'}`,r.pace?fmtN(Math.ceil(r.pace*upcoming))+' bottles':'—'):''}
+        ${r.need>0?ln('Short by','<b class="iv-red">'+fmtN(r.need)+' bottles</b>'):''}
+        ${ln('Share of your stock',`${C.invUnits?Math.round(r.q/C.invUnits*100):0}% of bottles · ${C.invRetail?Math.round(r.q*r.pr/C.invRetail*100):0}% of retail value`)}
+      </div></details>`;}).join('');
+  return `<div class="card">
+      <div class="iv-top">
+        <div><span>Bottles on hand</span><b class="iv-gold">${fmtN(C.invUnits)}</b></div>
+        <div><span>What you paid</span><b>${fmt(C.invCost)}</b></div>
+        <div><span>Full-price value</span><b class="iv-gold">${fmt(C.invRetail)}</b></div>
+      </div>
+      <div class="iv-hero"><span>Profit sitting on the shelf</span><b>${fmt(margin)}</b><em>${mPct}% margin if every bottle sells at full price</em></div>
+      <div class="iv-btns"><button class="btn btn-ghost" onclick="go('stock')">Manage stock →</button></div>
     </div>
-    <table class="inv-table">
-      <tr><th>Product</th><th>Qty</th><th>Cost Val</th><th>Retail Val</th></tr>
-      ${SKUS.map(s=>{const q=S.inventory[s.key]||0;const low=q<5;return`<tr><td><span style="font-size:14px">${s.emoji}</span> <strong>${s.short}</strong>${low?` <span class="chip red" style="font-size:10px;padding:1px 6px">LOW</span>`:''}</td><td style="color:${low?'var(--red)':q>50?'var(--green)':'var(--text)'};font-weight:${low?900:700}">${q}</td><td>${fmt(q*getCost(s.key))}</td><td style="color:var(--gold)">${fmt(q*getP(s.key))}</td></tr>`;}).join('')}
-      <tr style="border-top:2px solid var(--border)"><td style="font-weight:900">TOTAL</td><td style="font-weight:900;color:var(--gold)">${C.invUnits}</td><td style="font-weight:900">${fmt(C.invCost)}</td><td style="font-weight:900;color:var(--gold)">${fmt(C.invRetail)}</td></tr>
-    </table>
-    ${C.lowStock.length?`<div class="wb gold" style="margin-top:10px">⚠️ Low stock: ${C.lowStock.map(s=>s.short+' ('+S.inventory[s.key]+')').join(', ')} — restock soon.</div>`:''}
-    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Potential margin on current stock: <strong style="color:var(--green)">${fmt(C.invRetail-C.invCost)}</strong></div>
-  </div>`;
+    ${C.lowStock.length||needs.length?`<div class="iv-hd">⚠️ Restock watch</div><div class="card">
+      ${C.lowStock.length?`<div class="iv-warn">Under 5 left: <b>${C.lowStock.map(s=>s.short+' ('+(S.inventory[s.key]||0)+')').join(', ')}</b></div>`:''}
+      ${needs.map(r=>ln(`${r.s.emoji} ${r.s.short} for the ${upcoming} booked show${upcoming===1?'':'s'}`,`<b class="iv-red">order ~${fmtN(r.need)}</b>`)).join('')}
+      <div class="iv-note">Based on your average sold per show this season. Bigger shows sell more.</div></div>`:''}
+    <div class="iv-hd">By product <span>tap for the detail</span></div>
+    <div class="card">
+      <div class="iv-h"><div>Product</div><div class="iv-q">Qty</div><div class="iv-v">Cost</div><div class="iv-v">Retail</div></div>
+      ${prod}
+      <div class="iv-t"><div class="iv-n">Total</div><div class="iv-q">${fmtN(C.invUnits)}</div><div class="iv-v">${fmt(C.invCost)}</div><div class="iv-v iv-gold">${fmt(C.invRetail)}</div></div>
+      ${lowest?`<div class="iv-note">First to run out: <b>${lowest.s.short}</b>, about ${fx(lowest.left)} show${lowest.left===1?'':'s'} of stock at your current pace.</div>`:''}
+    </div>
+    <div class="iv-hd">What these numbers mean</div>
+    <div class="card iv-ex">
+      <p><b>Bottles on hand</b> is what's counted in your master (garage) inventory right now.</p>
+      <p><b>What you paid</b> (cost basis) is bottles × what each one cost you. It's the money tied up in stock.</p>
+      <p><b>Full-price value</b> (retail) is bottles × your selling price. It's what you'd take in if everything sold with no discounts.</p>
+      <p><b>Profit on the shelf</b> is the difference. Discounts, freebies and show costs come out of it, so real profit lands lower.</p>
+      <p><b>Shows left</b> divides bottles on hand by your average sold per show this season${nSell?` (${nSell} selling show${nSell===1?'':'s'})`:''}.</p>
+    </div>`;
 }
 function secMileage(C){
   if(!(C.ytd.miles>0))return '';
+  const rate=S.settings.irsRate||0;
+  // Same shows calcYTD counts (completed + running), newest first, so the rows add up to the totals.
+  const list=(S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
+  const dt=sh=>(sh.startDate&&/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))?new Date(sh.startDate+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+  const gasTotal=C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice;
+  const noMiles=list.filter(sh=>!(showMiles(sh)>0)).length;
+  const line=(l,v)=>`<div class="mi-d"><span>${l}</span><span>${v}</span></div>`;
+  const rows=list.map(sh=>{
+    const mi=showMiles(sh),gas=showGas(sh),trips=showRoundTrips(sh);
+    const route=parseFloat(sh.totalMiles)>0;
+    const manualGas=sh.gasOverride!=null&&sh.gasOverride!=='';
+    const tripsSet=sh.roundTrips!=null&&sh.roundTrips!=='';
+    const det=mi>0?[
+      line('One-way distance',`${fmtN(sh.miles||0)} mi`),
+      line('Round trips',`${trips}${tripsSet?'':' <i>(1 per show day)</i>'}`),
+      route?line('Miles driven',`${fmtN(mi)} mi <i>(real route)</i>`):line('Miles driven',`${fmtN(sh.miles||0)} × 2 × ${trips} = ${fmtN(mi)} mi`),
+      line('IRS deduction',`${fmtN(mi)} mi × $${rate.toFixed(2)} = <b class="mi-g">${fmt(mi*rate)}</b>`),
+      manualGas?line('Gas','<b>'+fmt(gas)+'</b> <i>(entered)</i>')
+        :line('Gas (est.)',`${fmtN(mi)} mi ÷ ${showMpg(sh)} mpg × $${showGasPrice(sh).toFixed(2)} = <b>${fmt(gas)}</b>`),
+      (parseFloat(sh.lodging)||0)>0?line('Lodging',fmt(parseFloat(sh.lodging))):''
+    ].join(''):`<div class="mi-d"><span>No miles entered. Add them in ✏️ Edit Show.</span></div>`;
+    return `<details class="mi-r${mi>0?'':' mi-none'}"><summary>
+        <div class="mi-n">${_esc(sh.name)}<span class="mi-s">${dt(sh)}${sh.status==='active'?' · LIVE':''}</span></div>
+        <div class="mi-v">${mi>0?fmtN(mi):'—'}</div><div class="mi-v mi-g">${mi>0?fmt(mi*rate):'—'}</div><div class="mi-v">${gas>0?fmt(gas):'—'}</div>
+      </summary><div class="mi-x">${det}</div></details>`;
+  }).join('');
   return `<div class="card">
       <div class="g3">
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--gold)">${fmtN(C.ytd.miles)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Total Miles</div></div>
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(C.mileDeduct)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
-        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
+        <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(gasTotal)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted)">Rate: $${S.settings.irsRate}/mile · MPG: ${S.settings.mpg} · Gas: $${S.settings.gasPrice}/gal</div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">IRS rate $${rate.toFixed(2)}/mile · ${S.settings.mpg} mpg · gas $${(parseFloat(S.settings.gasPrice)||0).toFixed(2)}/gal (defaults, a show can override)</div>
+    </div>
+    <div class="card">
+      <div class="mi-h"><div>Show</div><div class="mi-v">Miles</div><div class="mi-v">Deduct</div><div class="mi-v">Gas</div></div>
+      ${rows}
+      <div class="mi-t"><div class="mi-n">Total <span class="mi-s">${list.length} shows${noMiles?` · ${noMiles} with no miles`:''}</span></div>
+        <div class="mi-v">${fmtN(C.ytd.miles)}</div><div class="mi-v mi-g">${fmt(C.mileDeduct)}</div><div class="mi-v">${fmt(gasTotal)}</div></div>
     </div>`;
 }
 function secBest(C){
-  let h='';
-  if(C.bestGross||C.bestProfit){
-    if(C.bestGross)h+=bestShowCardHTML(C.bestGross,'🥇 Highest Grossing Show');
-    if(C.bestProfit&&C.bestProfit!==C.bestGross)h+=bestShowCardHTML(C.bestProfit,'💰 Highest Profit Show');
-    else if(C.bestProfit&&C.bestProfit===C.bestGross)h+=`<div style="font-size:11px;color:var(--muted);margin:-2px 0 8px;text-align:center">Same show is both highest grossing and highest profit.</div>`;
-  }
-  return h;
+  // Top 10 completed shows. Every show is rendered once; the sort tabs reorder them and show the first 10.
+  const shows=(C.done||[]).map(sh=>{
+    const t=calcShow(sh),u=showUnitsSold(sh),p=showPmtTotals(sh);
+    const days=sh.numDays||(sh.days||[]).length||1;
+    const units=SKUS.reduce((n,k)=>n+(u[k.key]||0),0);
+    const hrs=(typeof showWorkHoursTotal==='function')?showWorkHoursTotal(sh):0;
+    return {sh,t,u,p,days,units,hrs,margin:t.gross>0?t.profit/t.gross:0,perDay:t.profit/days};
+  });
+  if(!shows.length)return '';
+  const seasonProfit=shows.reduce((n,x)=>n+x.t.profit,0);
+  const pct=n=>Math.round(n*100)+'%';
+  const dateStr=sh=>sh.dates&&sh.dates.length?(sh.dates.length>1?sh.dates[0]+' – '+sh.dates[sh.dates.length-1]:sh.dates[0]):'';
+  const ln=(l,v,cls)=>`<div class="bs-l${cls?' '+cls:''}"><span>${l}</span><span>${v}</span></div>`;
+  const neg=n=>n>0.005?'−'+fmt(n):fmt(0);
+  const cards=shows.map(x=>{
+    const {sh,t,u,p}=x;
+    const other=Math.max(0,t.expenses-t.booth-t.repPay-t.workerPay-t.supplyCost-(t.lunch||0)-t.cardFees-t.gasAuto-(sh.lodging||0));
+    const money=[
+      ln('Gross collected','<b class="bs-gold">'+fmt(t.gross)+'</b>'),
+      t.salesTax>0?ln('Sales tax (state’s cut)',neg(t.salesTax)):'',
+      ln('Product cost',neg(t.cogs)),
+      ln('Booth',neg(t.booth)),
+      t.repPay>0?ln('Rep pay',neg(t.repPay)):'',
+      t.workerPay>0?ln('Worker pay',neg(t.workerPay)):'',
+      t.gasAuto>0?ln('Gas (estimate)',neg(t.gasAuto)):'',
+      (sh.lodging||0)>0?ln('Lodging',neg(sh.lodging)):'',
+      t.supplyCost>0?ln('Bags & supplies',neg(t.supplyCost)):'',
+      (t.lunch||0)>0?ln('Lunch',neg(t.lunch)):'',
+      t.cardFees>0?ln('Card fees',neg(t.cardFees)):'',
+      other>0.005?ln('Other expenses',neg(other)):'',
+      ln('Net profit',`<b style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</b>`,'bs-tot')
+    ].join('');
+    const pg=PMTS.reduce((n,k)=>n+(p[k.key]||0),0);
+    const pay=PMTS.filter(k=>(p[k.key]||0)>0).sort((a,b)=>p[b.key]-p[a.key]).map(k=>`<div class="bs-bar"><span>${k.label}</span><div><i style="width:${pg?Math.round(p[k.key]/pg*100):0}%"></i></div><span>${fmt(p[k.key])} <em>${pg?pct(p[k.key]/pg):''}</em></span></div>`).join('')||'<div class="bs-none">No payment data</div>';
+    const un=SKUS.filter(k=>(u[k.key]||0)>0).map(k=>`<div class="bs-u"><b>${u[k.key]}</b><span>${k.short}</span></div>`).join('')||'<div class="bs-none">No unit data</div>';
+    return `<details class="bs-c" data-profit="${t.profit}" data-gross="${t.gross}" data-perday="${x.perDay}" data-margin="${x.margin}"><summary>
+        <div class="bs-rk">#</div>
+        <div class="bs-hd"><div class="bs-nm">${_esc(sh.name)}</div><div class="bs-mt">${[dateStr(sh),x.days+' day'+(x.days===1?'':'s'),pct(x.margin)+' margin'].filter(Boolean).join(' · ')}</div></div>
+        <div class="bs-pf"><b style="color:${t.profit>=0?'var(--green)':'var(--red)'}">${fmt(t.profit)}</b><span>${fmt(t.gross)} gross</span></div>
+      </summary><div class="bs-b">
+        <div class="bs-k">
+          <div><b>${fmt(x.perDay)}</b><span>Profit / day</span></div>
+          <div><b>${fmt(t.gross/x.days)}</b><span>Gross / day</span></div>
+          <div><b>${x.hrs>0?fmt(t.profit/x.hrs):'—'}</b><span>Profit / hour</span></div>
+          <div><b>${fmtN(x.units)}</b><span>Units sold</span></div>
+          <div><b>${x.units?fmt(t.gross/x.units):'—'}</b><span>Avg / unit</span></div>
+          <div><b>${seasonProfit>0?pct(t.profit/seasonProfit):'—'}</b><span>Of season profit</span></div>
+        </div>
+        <div class="bs-sh">Where the money went</div>${money}
+        <div class="bs-sh">Units sold</div><div class="bs-us">${un}</div>
+        <div class="bs-sh">How they paid</div>${pay}
+        ${sh.location?`<div class="bs-loc">📍 ${_esc(sh.location)}</div>`:''}
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="go('show','${sh.id}')">Open show →</button>
+      </div></details>`;
+  }).join('');
+  const tabs=[['profit','Profit'],['gross','Gross'],['perday','$ / day'],['margin','Margin']].map(([k,l],i)=>`<button class="bs-tab${i?'':' on'}" onclick="bestSort(this,'${k}')">${l}</button>`).join('');
+  const top=shows.slice().sort((a,b)=>b.t.profit-a.t.profit).slice(0,10);
+  const topProfit=top.reduce((n,x)=>n+x.t.profit,0);
+  return `<div class="card bs-sum">
+      <div><b>${shows.length}</b><span>Shows done</span></div>
+      <div><b style="color:var(--green)">${fmt(seasonProfit)}</b><span>Season profit</span></div>
+      <div><b>${seasonProfit>0?pct(topProfit/seasonProfit):'—'}</b><span>From top ${top.length}</span></div>
+    </div>
+    <div class="bs-tabs">${tabs}</div>
+    <div class="bs-note">Tap a show for the full breakdown</div>
+    <div id="bsList">${cards}</div>`;
+}
+function bestSort(btn,key){
+  const list=document.getElementById('bsList'); if(!list)return;
+  (btn&&btn.parentNode?btn.parentNode.querySelectorAll('.bs-tab'):[]).forEach(b=>b.classList.toggle('on',b===btn));
+  const cs=[...list.querySelectorAll('.bs-c')].sort((a,b)=>parseFloat(b.dataset[key])-parseFloat(a.dataset[key]));
+  cs.forEach((c,i)=>{ list.appendChild(c); c.style.display=i<10?'':'none'; const r=c.querySelector('.bs-rk'); r.textContent=i+1; r.className='bs-rk'+(i<3?' bs-m'+(i+1):''); });
 }
 // ---- BORROWED FROM BATMAN ----
 // batmanBorrow is the debt. + Borrowed More / - Returned also move the garage,
@@ -4581,7 +5102,7 @@ function dashSectionGrid(){
     })()},
     {k:'split',icon:'💰',label:'Money Split',sub:'After-tax keep'},
     {k:'payments',icon:'💳',label:'Payment Breakdown',sub:'How you got paid'},
-    {k:'best',icon:'🏆',label:'Best Shows',sub:'Top grossing / profit'},
+    {k:'best',icon:'🏆',label:'Top 10 Shows',sub:'Ranked by profit, gross, $/day'},
     {k:'batman',icon:'🦇',label:'Borrowed from Batman',sub:bmBottles()+' bottles owed · '+fmt(bmRetail())},
     {k:'online',icon:'📮',label:'Online Sales',sub:(function(){ const T=olTotals(); return T.orders+' order'+(T.orders!==1?'s':'')+' · '+fmt(T.amount); })()}
   ];
@@ -4605,8 +5126,8 @@ function rSection(){
     expenses:{t:'Other Expenses',f:secExpenses},
     debt:{t:'Product Debt — '+((S.productDebt||{}).supplier||'Mark Martone'),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
-    payments:{t:'Payment Breakdown (YTD)',f:secPayments},
-    best:{t:'Best Shows This Season',f:secBest},
+    payments:{t:'Payment Breakdown — 2026 Season',f:secPayments},
+    best:{t:'Top 10 Shows This Season',f:secBest},
     batman:{t:'Borrowed from Batman',f:secBatman},
     online:{t:'Online Sales',f:secOnline}
   };
@@ -4617,6 +5138,7 @@ function rSection(){
   h+=(body&&body.trim())?body:`<div class="card" style="text-align:center;color:var(--muted)">No data for this section yet.</div>`;
   h+=`<button class="btn btn-ghost btn-full" style="margin:16px 0 8px" onclick="go('home')">← Back to Dashboard</button>`;
   setPG('section',h);
+  if(curSection==='best')bestSort(document.querySelector('.bs-tab'),'profit');
 }
 
 // ===================================================
@@ -8849,17 +9371,17 @@ function saveOtherExpense(editId){ if(_dupGuard())return;
   if(editId){
     const ex=S.otherExpenses.find(e=>e.id===editId);
     if(ex){ex.amount=amt;ex.note=note;ex.category=category;ex.date=date;}
-    saveS();openManageExpenses();toast('✅ Expense updated');
+    saveS();openManageExpenses();toast('✅ Expense updated');renderCur();
   }else{
     S.otherExpenses.push({id:'oe_'+Date.now(),amount:amt,note,category,date});
-    mClose();saveS();toast('✅ Expense logged — '+fmt(amt));
+    mClose();saveS();toast('✅ Expense logged — '+fmt(amt));renderCur();
   }
 }
 function delOtherExpense(id){
   const ex=(S.otherExpenses||[]).find(e=>e.id===id);if(!ex)return;
   if(!confirm('Delete this expense?\n\n'+(ex.note||ex.category||'Expense')+' — '+fmt(ex.amount)))return;
   S.otherExpenses=(S.otherExpenses||[]).filter(e=>e.id!==id);
-  saveS();openManageExpenses();toast('🗑️ Expense deleted');
+  saveS();openManageExpenses();toast('🗑️ Expense deleted');renderCur();
 }
 function openManageExpenses(){
   const list=[...(S.otherExpenses||[])].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
