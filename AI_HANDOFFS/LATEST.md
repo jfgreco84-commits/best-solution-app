@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [Batman negative balance, Oct 19 2026](2026-10-19-batman-negative-balance.md)** (returning more than owed now shows a red negative instead of stopping at 0; Set Exact takes negatives)
+**NEWEST: [v87 Calendar tab is back, Oct 21 2026](2026-10-21-v87-calendar-tab.md)** (📅 CAL is its own bottom tab again, between Shows and Reps; owner uses it constantly)
 
-**Previous: [v85 bulletproof, Oct 18 2026](2026-10-18-v85-bulletproof.md)** (damaged data no longer opens as a blank board that overwrites the real one; full-phone saves never silent; daily auto copy; crash recovery screen with data download; no negative or 10x-typo money)
+**Previous: [Batman negative balance, Oct 19 2026](2026-10-19-batman-negative-balance.md)** (returning more than owed now shows a red negative instead of stopping at 0; Set Exact takes negatives)
+
+**Before that: [v85 bulletproof, Oct 18 2026](2026-10-18-v85-bulletproof.md)** (damaged data no longer opens as a blank board that overwrites the real one; full-phone saves never silent; daily auto copy; crash recovery screen with data download; no negative or 10x-typo money)
 
 **Before that: [v84 auditor pass, Oct 18 2026](2026-10-18-v84-auditor-pass.md)** (money checks with one-tap fixes: day sold but no money, rep-only shows charging your lunch/gas, nothing-sold shows, overpaid reps; rep payments linked to shows; tap-to-replace number boxes; money screen says short/over; running show on top)
 
