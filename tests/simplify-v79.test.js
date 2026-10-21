@@ -45,9 +45,9 @@ R.section('2. Online sales count in the year');
   chk('2e. season CSV has an online row',/Online sales \(1 orders/.test(csv),true); }
 
 R.section('3. Six tabs');
-{ chk('3a. no Calendar nav button',/id="nb-calendar"/.test(html),false);
+{ chk('3a. Calendar has its own nav button again (v87, owner asked)',/id="nb-calendar"/.test(html),true);
   chk('3b. no Supplies nav button',/id="nb-supplies"/.test(html),false);
-  chk('3c. six nav buttons',(html.match(/<button class="nb[^"]*" id="nb-/g)||[]).length,6);
+  chk('3c. seven nav buttons',(html.match(/<button class="nb[^"]*" id="nb-/g)||[]).length,7);
   const h=world(),{ctx}=h; ctx.go('calendar'); chk('3d. Calendar page still opens with a Shows toggle',/go\('shows'\)/.test(h.els['pg-calendar'].innerHTML),true);
   ctx.go('supplies'); chk('3e. Supplies page still opens with a Stock toggle',/go\('stock'\)/.test(h.els['pg-supplies'].innerHTML),true); }
 

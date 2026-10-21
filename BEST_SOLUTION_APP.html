@@ -514,6 +514,7 @@
   <button class="nb on" id="nb-home" onclick="go('home')"><span class="ni">📊</span>HOME</button>
   <button class="nb" id="nb-stock" onclick="go('stock')"><span class="ni">📦</span>STOCK</button>
   <button class="nb" id="nb-shows" onclick="go('shows')"><span class="ni">🎪</span>SHOWS</button>
+  <button class="nb" id="nb-calendar" onclick="go('calendar')"><span class="ni">📅</span>CAL</button>
   <button class="nb" id="nb-reps" onclick="go('reps')"><span class="ni">👥</span>REPS</button>
   <button class="nb" id="nb-pnl" onclick="go('pnl')"><span class="ni">💰</span>P&amp;L</button>
   <button class="nb" id="nb-settings" onclick="go('settings')"><span class="ni">⚙️</span>SETUP</button>
@@ -545,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v86';
+const APP_VERSION='v87';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -4170,7 +4171,7 @@ function go(pg,shId,dayIdx){
   else if(pg==='show'&&shId!==undefined){ const _s=(S.shows||[]).find(x=>x.id===shId); if(_s)curDay=showDefaultDay(_s); } // v81: open on today, not on whatever day was last looked at
   $$('pg-'+pg).classList.add('on');
   const nb=$$('nb-'+pg);if(nb)nb.classList.add('on');
-  const _parent={calendar:'shows',supplies:'stock'}[pg]; if(_parent){ const pn=$$('nb-'+_parent); if(pn)pn.classList.add('on'); } // v79: 6 tabs
+  const _parent={supplies:'stock'}[pg]; if(_parent){ const pn=$$('nb-'+_parent); if(pn)pn.classList.add('on'); } // v87: Calendar has its own tab again
   if(pg==='section'){const nbh=$$('nb-home');if(nbh)nbh.classList.add('on');}
   if(pg==='show'){
     $$('hdrR').innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('shows')">← Back</button>`;
