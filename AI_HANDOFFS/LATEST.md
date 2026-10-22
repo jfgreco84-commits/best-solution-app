@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [Sync: device behind the cloud can load it, Oct 22 2026](2026-10-22-sync-behind-cloud.md)** (phone with fewer finished shows than the cloud was stuck on "working offline"; Sync Now now offers Load the cloud copy)
+**NEWEST: [v88 Batman debt put back to after the Oct 19 return, Oct 22 2026](2026-10-22-v88-batman-oct19-fix.md)** (cloud copy predated the return; owed set to 2oz 96, C5-S 274, rest 0 = 370; garage not changed)
 
-**Previous: [v87 Calendar tab is back, Oct 21 2026](2026-10-21-v87-calendar-tab.md)** (📅 CAL is its own bottom tab again, between Shows and Reps; owner uses it constantly)
+**Previous: [Sync: device behind the cloud can load it, Oct 22 2026](2026-10-22-sync-behind-cloud.md)** (phone with fewer finished shows than the cloud was stuck on "working offline"; Sync Now now offers Load the cloud copy)
+
+**Before that: [v87 Calendar tab is back, Oct 21 2026](2026-10-21-v87-calendar-tab.md)** (📅 CAL is its own bottom tab again, between Shows and Reps; owner uses it constantly)
 
 **Before that: [Batman negative balance, Oct 19 2026](2026-10-19-batman-negative-balance.md)** (returning more than owed now shows a red negative instead of stopping at 0; Set Exact takes negatives)
 
