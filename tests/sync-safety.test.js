@@ -406,5 +406,33 @@ const resolve=(w,a,b)=>w.run('typeof cloudResolve==="function"?cloudResolve('+JS
     R.check(tag+'cloud still protocol 99',db.row.data_value._syncProtocol,99);
   }
 
+  R.section('9. Device behind the cloud on finished shows: Sync Now offers the cloud copy (Oct 22 phone)');
+  { const db=fakeSb(ROW); const A=await synced(db);
+    A.run('S.batmanBorrow={c5s:274,"2oz":96};saveS()'); await settle();
+    const writes0=db.writes.length;
+    R.check('setup: cloud has the Batman return',db.row.data_value.batmanBorrow.c5s,274);
+    // the device loses a finished show and its Batman return (stale copy)
+    A.run('S.shows.find(x=>x.status==="completed").status="active";S.batmanBorrow={c5s:1054,"2oz":343};saveS()'); await settle();
+    R.check('stale copy is not pushed',db.writes.length,writes0);
+    R.check('sync shows error',A.run('_syncState'),'error');
+    await A.run('cloudSyncNow()'); await settle();
+    R.check('Sync Now raises the "behind" choice instead of a dead end',kindOf(A),'behind');
+    R.check('still nothing written',db.writes.length,writes0);
+    const r=await resolve(A,'cloud');
+    R.check('owner loads the cloud copy',r.ok,true);
+    R.check('finished shows back to 20',A.run('doneShows(S)'),20);
+    R.check('Batman return is back',A.run('S.batmanBorrow.c5s'),274);
+    R.check('synced again',A.run('_syncState'),'synced');
+  }
+  { // same thing on a fresh open of the app (hydrate on load)
+    const db=fakeSb(ROW); const A=await synced(db);
+    A.run('S.shows.find(x=>x.status==="completed").status="active";saveS()'); await settle();
+    const B=wired(db,undefined,undefined,A.store);
+    await B.run('cloudHydrate()'); await settle();
+    R.check('on load: "behind" choice raised',kindOf(B),'behind');
+    R.check('on load: overwrite still refused',(await resolve(B,'device','OVERWRITE CLOUD')).ok,false);
+    R.check('on load: cloud still 20 finished',doneIn(db.row.data_value),20);
+  }
+
   R.done();
 })().catch(e=>{console.error(e);process.exit(1);});

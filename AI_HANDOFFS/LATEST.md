@@ -1,8 +1,10 @@
 # LATEST
 
-**NEWEST: [v87 Calendar tab is back, Oct 21 2026](2026-10-21-v87-calendar-tab.md)** (📅 CAL is its own bottom tab again, between Shows and Reps; owner uses it constantly)
+**NEWEST: [Sync: device behind the cloud can load it, Oct 22 2026](2026-10-22-sync-behind-cloud.md)** (phone with fewer finished shows than the cloud was stuck on "working offline"; Sync Now now offers Load the cloud copy)
 
-**Previous: [Batman negative balance, Oct 19 2026](2026-10-19-batman-negative-balance.md)** (returning more than owed now shows a red negative instead of stopping at 0; Set Exact takes negatives)
+**Previous: [v87 Calendar tab is back, Oct 21 2026](2026-10-21-v87-calendar-tab.md)** (📅 CAL is its own bottom tab again, between Shows and Reps; owner uses it constantly)
+
+**Before that: [Batman negative balance, Oct 19 2026](2026-10-19-batman-negative-balance.md)** (returning more than owed now shows a red negative instead of stopping at 0; Set Exact takes negatives)
 
 **Before that: [v85 bulletproof, Oct 18 2026](2026-10-18-v85-bulletproof.md)** (damaged data no longer opens as a blank board that overwrites the real one; full-phone saves never silent; daily auto copy; crash recovery screen with data download; no negative or 10x-typo money)
 
