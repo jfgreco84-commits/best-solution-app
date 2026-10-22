@@ -1892,7 +1892,8 @@ function applyOneTimeUpdates(d){
   // Puts the debt back to what the Oct 19 return left (from that day's
   // screenshots): 32oz 0, 16oz 0, 8oz 0, 2oz 96, C5-S 274, C5-L 0. Debt only,
   // like Set Exact; the garage is not touched. Runs only on that stale copy
-  // (no return in History, C5-S 1054, C5-L 445), so a copy that has the
+  // (Oct 16 borrow but no return in History, C5-S 1054, C5-L 445), so a
+  // copy that has the
   // return is left alone.
   if(!d._applied['batman_oct19_return_v88']){
     try{ const r=bmFixOct19Return(d); if(r)d._applied['batman_oct19_return_v88']=true; }
@@ -6903,6 +6904,7 @@ function bmFixOct19Return(d){
   if(!b||!SKUS.some(s=>(parseInt(b[s.key])||0)!==0))return false;
   const L=bmLogOf(d);
   if(L.some(e=>e&&e.type==='return'))return true;
+  if(!L.some(e=>e&&e.id==='bmh_v76_oct16'))return true; // the stale copy has the Oct 16 borrow
   if((parseInt(b.c5s)||0)!==1054||(parseInt(b.c5l)||0)!==445)return true;
   const to={'32oz':0,'16oz':0,'8oz':0,'2oz':96,c5s:274,c5l:0}, items={};
   SKUS.forEach(s=>{ const nv=to[s.key]||0, dv=nv-(parseInt(b[s.key])||0); if(dv)items[s.key]=dv; b[s.key]=nv; });
