@@ -10359,7 +10359,7 @@ async function cloudPush(){
   if(syncQuarantine()){ cloudBlock('restored copy held on this device'); return {ok:false,reason:'quarantined'}; }
   if(_cloudDivergent){ setSync('error'); return {ok:false,reason:'diverged: resolve first'}; }
   if(!_cloudVerified){ setSync('error'); return {ok:false,reason:'no verified cloud read: '+(_cloudBlocked||'not read yet')}; }
-  if(_cloudDoneSeen>doneShows(S)){ setSync('error'); toast('⚠️ Not syncing: the cloud has '+_cloudDoneSeen+' finished shows, this device '+doneShows(S)+'. Your cloud copy is protected. Setup → Device Backups or sign out and back in.',6000); return {ok:false,reason:'cloud protected'}; }
+  if(_cloudDoneSeen>doneShows(S)){ setSync('error'); toast('⚠️ Not syncing: the cloud has '+_cloudDoneSeen+' finished shows, this device '+doneShows(S)+'. Your cloud copy is protected. Setup → Sync Now to load it.',6000); return {ok:false,reason:'cloud protected'}; }
   if(!S._updatedAt)S._updatedAt=new Date().toISOString();
   S._syncProtocol=SYNC_PROTOCOL;
   const atSent=S._updatedAt, doc=JSON.parse(JSON.stringify(S));
@@ -10450,7 +10450,7 @@ function adoptCloud(cloud,row){
 function cloudDiverge(kind,cloud,row){
   _cloudVerified=false;
   _cloudDivergent={kind,row,cloudShows:(cloud.shows||[]).length,cloudDone:doneShows(cloud),cloudUpdatedAt:cloud._updatedAt||''};
-  cloudBlock(kind==='restored'?'restored copy held on this device':'this device and the cloud both changed');
+  cloudBlock(kind==='restored'?'restored copy held on this device':kind==='behind'?'the cloud has newer finished shows':'this device and the cloud both changed');
   try{ if(typeof mOpen==='function')openSyncResolve(); }catch(e){}
 }
 async function cloudHydrate(){
@@ -10475,6 +10475,10 @@ async function cloudHydrate(){
   backupCloudSnap(cloud);
   _cloudDoneSeen=Math.max(_cloudDoneSeen,doneShows(cloud));
   if(quar){ cloudDiverge('restored',cloud,row); return; }
+  // The cloud holds finished shows this device lacks. Pushing is refused
+  // below, so without this the device sat on "working offline" with no way
+  // out (Oct 22: phone 23 finished, cloud 24). Ask the owner instead.
+  if(doneShows(cloud)>doneShows(S)){ cloudDiverge('behind',cloud,row); return; }
   const base=syncBaseGet();
   const cloudMoved=!base||base.token!==row.token||(row.rev!=null&&base.rev!=null&&base.rev!==row.rev);
   const localDirty=!base||(S._updatedAt||'')!==base.at;
@@ -10523,6 +10527,7 @@ async function cloudResolve(choice,phrase){
 function openSyncResolve(){
   const dv=_cloudDivergent||{}, q=syncQuarantine();
   const head=q?'This phone holds a RESTORED copy. It is not sent to the cloud until you choose.'
+             :dv.kind==='behind'?'The cloud has more finished shows than this device, so this device is behind. Load the cloud copy to catch up.'
              :'This device and the cloud were both changed. Nothing has been overwritten.';
   mOpen(`<div class="mh"><div class="mt">⚠️ Sync needs you</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;margin-bottom:10px">${head}</div>
@@ -10582,7 +10587,8 @@ async function cloudSignOut(){
 async function cloudSyncNow(){
   if(!_cloudUser){toast('Sign in first');return;}
   setSync('syncing');
-  if(!_cloudVerified)await cloudHydrate(); else await cloudPush();
+  if(!_cloudVerified)await cloudHydrate();
+  else{ const r=await cloudPush(); if(r&&r.reason==='cloud protected')await cloudHydrate(); }
   rSettings();
   if(_cloudDivergent)openSyncResolve();
 }
