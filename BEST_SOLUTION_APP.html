@@ -546,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v89';
+const APP_VERSION='v90';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2891,6 +2891,16 @@ function applyOneTimeUpdates(d){
   if(!d._applied['garage_count_oct22_v89']){
     try{ const r=garageCountOct22(d); if(r)d._applied['garage_count_oct22_v89']=true; }
     catch(e){ console.error('garage_count_oct22_v89',e); }
+  }
+
+  // v90 (Froggy, Oct 23): the Oct 22 count is what stayed in the garage AFTER
+  // TJ's 244 for A Fair to Remember went out. v89 skipped because that show
+  // was packed after the count, and the pack took the 244 out of the garage a
+  // second time. Garage back to the count; the show keeps its 244. Still
+  // skipped if a transfer or any OTHER show from Oct 23 on moved stock.
+  if(!d._applied['garage_count_oct22_v90']){
+    try{ const r=garageCountOct22(d,/fair to remember/i); if(r)d._applied['garage_count_oct22_v90']=true; }
+    catch(e){ console.error('garage_count_oct22_v90',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -6978,15 +6988,15 @@ function bmFixOct19Return(d){
 }
 // v89: see the garage_count_oct22_v89 note in applyOneTimeUpdates.
 // true = done or not needed; false = wait (blank device before cloud sync).
-function garageCountOct22(d){
+function garageCountOct22(d,allowShow){
   const inv=d.inventory; if(!inv||!SKUS.some(s=>(parseInt(inv[s.key])||0)>0))return false;
   if(!looksUsed(d))return false; // fresh device before cloud sync: wait for the real data
   const AT='2026-10-23T00:39:00.000Z', to={'32oz':118,'16oz':141,'8oz':263,'2oz':352,c5s:517,c5l:300};
   if((d.transfers||[]).some(t=>t&&String(t.ts||'')>AT))return true;
-  if((d.shows||[]).some(sh=>sh&&String(sh.startDate||'')>='2026-10-23'&&(sh.status==='active'||sh.status==='completed'||sh.packedInventory)))return true;
+  if((d.shows||[]).some(sh=>sh&&String(sh.startDate||'')>='2026-10-23'&&!(allowShow&&allowShow.test(sh.name||''))&&(sh.status==='active'||sh.status==='completed'||sh.packedInventory)))return true;
   if(SKUS.every(s=>(parseInt(inv[s.key])||0)===to[s.key]))return true;
   const ch={}; SKUS.forEach(s=>{ const dv=to[s.key]-(parseInt(inv[s.key])||0); if(dv)ch[s.key]=dv; inv[s.key]=to[s.key]; });
-  garageLogOf(d).push({ts:new Date().toISOString(),why:'your Oct 22 7:39 PM hard count put back (v89)',changes:ch,after:Object.assign({},to)});
+  garageLogOf(d).push({ts:new Date().toISOString(),why:'your Oct 22 7:39 PM hard count put back ('+(allowShow?'v90, TJ\'s Fair to Remember stock stays with the show':'v89')+')',changes:ch,after:Object.assign({},to)});
   auditState(d).log.push({ts:new Date().toISOString(),msg:'Garage put back to the Oct 22 7:39 PM hard count (v89): '+SKUS.filter(s=>ch[s.key]).map(s=>s.short+' '+(ch[s.key]>0?'+':'')+ch[s.key]).join(', ')});
   _garageLoggedAt=JSON.stringify(to); // already logged above; garageCheck must not log it twice
   return true;
