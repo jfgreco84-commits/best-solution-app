@@ -546,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v88';
+const APP_VERSION='v89';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2874,6 +2874,25 @@ function applyOneTimeUpdates(d){
   // v77: blank miles + gas price of finished shows, every load (see v77FillBlanks)
   try{ v77FillBlanks(d); }catch(e){ console.error('v77FillBlanks',e); }
 
+  // v89 (Froggy, Oct 22): the Fox & Found and Andre-paid audit items do not
+  // matter and kept coming back. Hidden for good (settings.audit.hidden).
+  if(!d._applied['audit_hide_fox_andre_v89']){
+    try{ const a=auditState(d); if(!a.hidden||typeof a.hidden!=='object')a.hidden={}; const ts=new Date().toISOString();
+      (d.shows||[]).forEach(sh=>{ if(sh&&/fox\s*(&|and)\s*found/i.test(sh.name||'')&&String(sh.startDate||'')>='2026-10')a.hidden[sh.id+'|*']=ts; });
+      (d.reps||[]).forEach(r=>{ if(r&&(r.id==='rep_andre_1780776467102'||/^andre\b/i.test(r.name||'')))a.hidden['rep|'+r.id]=ts; });
+      d._applied['audit_hide_fox_andre_v89']=true; }
+    catch(e){ console.error('audit_hide_fox_andre_v89',e); }
+  }
+
+  // v89: put the garage back to Froggy's hard count of Oct 22, 7:39 PM CT
+  // (screenshots): 32oz 118, 16oz 141, 8oz 263, 2oz 352, C5-S 517, C5-L 300.
+  // Skipped if anything moved stock after that (a transfer, or a show from
+  // Oct 23 on packed), so it never undoes real work. Logged in Garage History.
+  if(!d._applied['garage_count_oct22_v89']){
+    try{ const r=garageCountOct22(d); if(r)d._applied['garage_count_oct22_v89']=true; }
+    catch(e){ console.error('garage_count_oct22_v89',e); }
+  }
+
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
   // NOT marker gated, so a document arriving from an older build, an older
   // backup or the cloud is put into the invoice shape whether or not it
@@ -2917,10 +2936,46 @@ function _saveFailBar(on){ try{ let b=document.getElementById('saveFailBar');
   b.textContent='🛑 NOT SAVED: this phone is out of storage. Tap here to download your data now, then free up space.'; }catch(e){} }
 // One automatic copy a day, so a bad day can always be rolled back (keeps the last 3).
 function dailyCopy(){ try{ const k=_todayKey(); if(localStorage.getItem('dd_bs_lastcopy')===k)return; backupLocal(); localStorage.setItem('dd_bs_lastcopy',k); }catch(e){} }
+// v89 GARAGE HISTORY. Every change to the garage counts is logged with when and
+// why, so a count that moves can always be traced. The baseline is kept per
+// device (dd_bs_garage_seen), so loading a cloud copy, restoring a backup or an
+// app update that moves the garage is logged too. Log: S.settings.garageLog.
+let _garageWhy='', _lastModal={t:'',at:0}, _garageLoggedAt='';
+const GARAGE_SEEN_KEY='dd_bs_garage_seen';
+function garageNow(st){ const o={}; SKUS.forEach(s=>o[s.key]=parseInt(((st||S).inventory||{})[s.key])||0); return o; }
+function garageLogOf(st){ st.settings=st.settings||{}; if(!Array.isArray(st.settings.garageLog))st.settings.garageLog=[]; return st.settings.garageLog; }
+function garageWhyGuess(){
+  if(_garageWhy)return _garageWhy;
+  if(_lastModal.t&&Date.now()-_lastModal.at<5*60*1000)return _lastModal.t;
+  return {stock:'Stock page',show:'a show screen',shows:'Shows page',home:'Home'}[curPg]||(curPg||'app');
+}
+function garageCheck(why){
+  if(!S||!S.inventory)return null;
+  const now=garageNow(S); let seen=null;
+  try{ seen=JSON.parse(localStorage.getItem(GARAGE_SEEN_KEY)||'null'); }catch(e){}
+  const store=()=>{ try{ localStorage.setItem(GARAGE_SEEN_KEY,JSON.stringify(now)); }catch(e){} };
+  if(!seen||typeof seen!=='object'||_garageLoggedAt===JSON.stringify(now)){ store(); _garageWhy=''; _garageLoggedAt=''; return null; }
+  const ch={}; SKUS.forEach(s=>{ const d=now[s.key]-(parseInt(seen[s.key])||0); if(d)ch[s.key]=d; });
+  if(!Object.keys(ch).length){ _garageWhy=''; return null; }
+  const L=garageLogOf(S), e={ts:new Date().toISOString(),why:why||garageWhyGuess(),changes:ch,after:now};
+  L.push(e); if(L.length>300)L.splice(0,L.length-300);
+  store(); _garageWhy=''; return e;
+}
+function garageHistoryHTML(){
+  const L=((S.settings||{}).garageLog||[]).slice(-25).reverse(); if(!L.length)return '';
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">📜 Garage History · every change, newest first</div>
+    ${L.map(e=>`<div style="font-size:11px;padding:5px 0;border-bottom:1px solid var(--border)">
+      <div><strong>${SKUS.filter(s=>e.changes[s.key]).map(s=>s.short+' '+(e.changes[s.key]>0?'+':'−')+Math.abs(e.changes[s.key])).join(' · ')}</strong></div>
+      <div style="color:var(--muted)">${_esc(new Date(e.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))} · ${_esc(e.why||'')}</div></div>`).join('')}
+  </div>`;
+}
 function saveS(){
   // v41: a closed show whose counts were fixed afterwards pulls the garage along with it.
   let moved=[]; try{ moved=auditSyncReturns(); }catch(e){ console.warn('auditSync',e); }
   moved.forEach(m=>auditLogPush({ts:new Date().toISOString(),msg:m}));
+  if(moved.length)_garageWhy='a closed show\'s count was changed: '+moved.join(' · ');
+  try{ garageCheck(); }catch(e){ console.warn('garageCheck',e); }
   try{ commissionSyncAll(); }catch(e){ console.warn('commissionSync',e); }
   S._updatedAt=new Date().toISOString();
   if(S._readOnlyBlank){ toast('⚠️ Not saved: your real data is kept safe. Restore it from Setup → Advanced → Device Backups first.',6000); renderCur(); return; }
@@ -3504,7 +3559,13 @@ function auditShow(sh){
   if(sh.status==='active'){ const endK=showEndKey(sh); if(endK&&endK<today)add('gold',days.length-1,'staleActive','Last day was '+endK+' but the show is still open. Its stock is still "at the show" on paper until you close it.'); }
   return out;
 }
-function auditAll(st){
+// v89: the owner can hide an audit item for good (Hide this). Hidden keys live
+// in settings.audit.hidden: showId|code for show items, rep|id for reps.
+function auditHideKey(x){ return x.code==='repOverpaid'?x.key:((x.showId||'garage')+'|'+x.code); }
+function auditHidden(st){ const a=auditState(st); if(!a.hidden||typeof a.hidden!=='object')a.hidden={}; return a.hidden; }
+function auditHide(k){ auditHidden(S)[k]=new Date().toISOString(); saveS(); toast('Hidden. It will not come back.'); openAuditModal(); }
+function auditAll(st){ st=st||S; const h=((((st||{}).settings||{}).audit||{}).hidden)||{}; return auditAllRaw(st).filter(x=>!h[auditHideKey(x)]&&!(x.showId&&h[x.showId+'|*'])); }
+function auditAllRaw(st){
   st=st||S; const out=[];
   SKUS.forEach(s=>{ const v=parseInt((st.inventory||{})[s.key])||0; if(v<0)out.push({sev:'red',showId:null,di:null,code:'garageNeg',msg:'Garage shows '+v+' '+s.short+'. You cannot have fewer than zero.',key:'garage|'+s.key}); });
   (st.shows||[]).forEach(sh=>auditShow(sh).forEach(x=>out.push(x)));
@@ -3550,7 +3611,7 @@ function openAuditModal(){
   const issues=auditAll(S).sort((a,b)=>(a.sev==='red'?0:1)-(b.sev==='red'?0:1));
   const rows=issues.map(x=>`<div class="wb ${x.sev==='red'?'red':'gold'}" style="margin-bottom:8px;font-size:12px">
     ${x.show?`<div style="font-weight:900;margin-bottom:3px">${_esc(x.show)}</div>`:''}${_esc(x.msg)}
-    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${(x.fixes||[]).map(f=>`<button class="btn btn-xs btn-gold" onclick="${f.js}">${_esc(f.label)}</button>`).join('')}${x.showId?`<button class="btn btn-xs btn-ghost" onclick="mClose();auditGo('${x.showId}',${x.di==null?0:x.di})">Open it ›</button>`:''}</div></div>`).join('');
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${(x.fixes||[]).map(f=>`<button class="btn btn-xs btn-gold" onclick="${f.js}">${_esc(f.label)}</button>`).join('')}${x.showId?`<button class="btn btn-xs btn-ghost" onclick="mClose();auditGo('${x.showId}',${x.di==null?0:x.di})">Open it ›</button>`:''}<button class="btn btn-xs btn-ghost" onclick="auditHide('${_esc(auditHideKey(x))}')">Hide this</button></div></div>`).join('');
   const log=(auditState().log||[]).slice(-8).reverse().map(e=>`<div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--border)">${_esc((e.ts||'').slice(0,16).replace('T',' '))} · ${_esc(e.msg||'')}</div>`).join('');
   mOpen(`<div class="mh"><div class="mt">🛡️ Audit: stock + money</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Runs every time anything is saved. <b>Stock:</b> every table, booth and truck adds up and every day that opened got counted. <b>Money:</b> every day that sold has its money in, every show charges your lunch and gas only if you were there, and every rep was paid what was entered. Tap a gold button to fix it on the spot</div>
@@ -5265,14 +5326,15 @@ function rStock(){
   <div style="display:flex;gap:8px;margin:12px 0">
     <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock · from the garage or between shows</button>
   </div>
+  ${view==='garage'?garageHistoryHTML():''}
   ${(S.transfers||[]).length?`<div class="card" style="margin-bottom:12px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:8px">🔄 Transfer Log</div>
     ${transferBatches().slice(0,20).map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)"><span style="min-width:0;flex:1"><strong>${transferBatchLabel(b)}</strong> · ${b.fromName} → ${b.toName}${b.boothName?' ('+_esc(b.boothName)+')':''}<span style="color:var(--muted)"> · ${b.dayDate?'for '+b.dayDate:(b.date||'')}</span></span><span title="Undo" style="cursor:pointer;color:var(--muted);font-weight:900;padding-left:8px" onclick="delTransferBatch('${b.batch}')">↩︎</span></div>`).join('')}
   </div>`:''}
   <div style="height:10px"></div>`;
 }
-function adjInv(k,d){S.inventory[k]=Math.max(0,(S.inventory[k]||0)+d);saveS();toast(k+': '+(S.inventory[k])+' units');}
-function setInv(k,v){S.inventory[k]=Math.max(0,parseInt(v)||0);saveS();}
+function adjInv(k,d){_garageWhy=(d>0?'+':'−')+' button on the Stock page';S.inventory[k]=Math.max(0,(S.inventory[k]||0)+d);saveS();toast(k+': '+(S.inventory[k])+' units');}
+function setInv(k,v){_garageWhy='typed on the Stock page';S.inventory[k]=Math.max(0,parseInt(v)||0);saveS();}
 function showRestock(){
   mOpen(`<div class="mh"><div class="mt">+ Restock Inventory</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter units to ADD to current inventory.</div>
@@ -5286,7 +5348,7 @@ function showSetAllInv(){
   ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name}</label><input class="fi" type="number" id="sa_${s.key}" value="${S.inventory[s.key]||0}" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applySetAll()">Save All Counts</button>`);
 }
-function applySetAll(){SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);if(!isNaN(v))S.inventory[s.key]=Math.max(0,v);});mClose();saveS();toast('Inventory updated!');}
+function applySetAll(){_garageWhy='Set All Counts at Once';SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);if(!isNaN(v))S.inventory[s.key]=Math.max(0,v);});mClose();saveS();toast('Inventory updated!');}
 
 // ---- Borrowed-from-Batman editors (Borrowed / Returned move the garage too; Set Exact is debt only) ----
 function showAddBatman(){
@@ -6912,6 +6974,21 @@ function bmFixOct19Return(d){
   L.push({id:'bmh_v88_oct19',ts:new Date().toISOString(),date:'2026-10-19',type:'set',items,owed,
     note:'Oct 19 return put back (v88): this copy was from before it. Garage not changed.',src:'app'});
   auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:'Batman owed put back to after the Oct 19 return (v88): 32oz 0, 16oz 0, 8oz 0, 2oz 96, C5-S 274, C5-L 0.'});
+  return true;
+}
+// v89: see the garage_count_oct22_v89 note in applyOneTimeUpdates.
+// true = done or not needed; false = wait (blank device before cloud sync).
+function garageCountOct22(d){
+  const inv=d.inventory; if(!inv||!SKUS.some(s=>(parseInt(inv[s.key])||0)>0))return false;
+  if(!looksUsed(d))return false; // fresh device before cloud sync: wait for the real data
+  const AT='2026-10-23T00:39:00.000Z', to={'32oz':118,'16oz':141,'8oz':263,'2oz':352,c5s:517,c5l:300};
+  if((d.transfers||[]).some(t=>t&&String(t.ts||'')>AT))return true;
+  if((d.shows||[]).some(sh=>sh&&String(sh.startDate||'')>='2026-10-23'&&(sh.status==='active'||sh.status==='completed'||sh.packedInventory)))return true;
+  if(SKUS.every(s=>(parseInt(inv[s.key])||0)===to[s.key]))return true;
+  const ch={}; SKUS.forEach(s=>{ const dv=to[s.key]-(parseInt(inv[s.key])||0); if(dv)ch[s.key]=dv; inv[s.key]=to[s.key]; });
+  garageLogOf(d).push({ts:new Date().toISOString(),why:'your Oct 22 7:39 PM hard count put back (v89)',changes:ch,after:Object.assign({},to)});
+  auditState(d).log.push({ts:new Date().toISOString(),msg:'Garage put back to the Oct 22 7:39 PM hard count (v89): '+SKUS.filter(s=>ch[s.key]).map(s=>s.short+' '+(ch[s.key]>0?'+':'')+ch[s.key]).join(', ')});
+  _garageLoggedAt=JSON.stringify(to); // already logged above; garageCheck must not log it twice
   return true;
 }
 // v77: see the expense_audit_v77 note in applyOneTimeUpdates.
@@ -10219,6 +10296,7 @@ function _applyStateObj(parsed){
   if(!syncQuarantineSet('restored',parsed))
     throw new Error('this device could not record the sync hold (storage full or blocked), so nothing was restored');
   S=parsed;
+  try{ garageCheck('restored a backup'); }catch(e){}
   localStorage.setItem('dd_bs_v7',JSON.stringify(S));
   renderCur();
 }
@@ -10267,7 +10345,7 @@ try{
   document.addEventListener('click',e=>{ const t=e.target; if(t&&t.__sel){ t.__sel=false; try{ t.select(); }catch(_){} } }); // select again after the tap, which moves the caret
   document.addEventListener('focusout',e=>{ const t=e.target; if(_num(t)&&t.dataset&&t.dataset.zero){ delete t.dataset.zero; if(t.value===''){ t.value='0'; try{ t.dispatchEvent(new Event('input',{bubbles:true})); }catch(_){} } } });
 }catch(e){}
-function mOpen(h){$$('mb').innerHTML=h;$$('mo').classList.add('on');document.body.style.overflow='hidden';}
+function mOpen(h){ try{ const m=/class="mt">([^<]*)/.exec(h); if(m)_lastModal={t:m[1].trim(),at:Date.now()}; }catch(e){} $$('mb').innerHTML=h;$$('mo').classList.add('on');document.body.style.overflow='hidden';}
 function mClose(){$$('mo').classList.remove('on');document.body.style.overflow='';}
 function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
 
@@ -10472,6 +10550,7 @@ function adoptCloud(cloud,row){
   mrgInheritSeedMarkers(cloud,typeof S!=='undefined'?S:null);
   localStorage.setItem('dd_bs_v7',JSON.stringify(cloud));
   S=loadS();
+  try{ if(garageCheck('loaded the cloud copy'))localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('garageCheck',e); }
   try{ if(commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
   if(row){
     _cloudRow=row; _cloudVerified=true; _cloudDivergent=null; _cloudBlocked='';
@@ -13879,6 +13958,7 @@ function pkgSettingsCard(){
 // ===================================================
 try{
   S=loadS();
+  try{ if(!S._readOnlyBlank&&garageCheck(_garageWhy||'app opened (app update)'))localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('garageCheck',e); }
   try{ if(!S._readOnlyBlank&&commissionSyncAll())localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){ console.warn('commissionSync',e); }
   try{ go('home'); }catch(e){ console.error('home',e); try{ go('shows'); }catch(_){ throw e; } }
   if(_loadWarning)setTimeout(()=>toast('⚠️ '+_loadWarning,9000),600);
