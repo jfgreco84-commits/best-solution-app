@@ -2,7 +2,7 @@
 
 **NEWEST: [Sync: show moved to Missed no longer blocks syncing, Oct 23 2026](2026-10-23-sync-missed-show.md)** (finished-shows guard only for copies that do not descend from the cloud row; reason shown on Setup; PR #88 "behind" prompt removed)
 
-**Before that: [v88 Batman debt put back to after the Oct 19 return, Oct 22 2026](2026-10-22-v88-batman-oct19-fix.md)** (cloud copy predated the return; owed set to 2oz 96, C5-S 274, rest 0 = 370; garage not changed)
+**Previous: [v88 Batman debt put back to after the Oct 19 return, Oct 22 2026](2026-10-22-v88-batman-oct19-fix.md)** (cloud copy predated the return; owed set to 2oz 96, C5-S 274, rest 0 = 370; garage not changed)
 
 **Before that: [Sync: device behind the cloud can load it, Oct 22 2026](2026-10-22-sync-behind-cloud.md)** (phone with fewer finished shows than the cloud was stuck on "working offline"; Sync Now now offers Load the cloud copy)
 
