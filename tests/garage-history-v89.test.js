@@ -79,4 +79,20 @@ R.section('4. v90: the Fair to Remember pack does not block putting the count ba
   d.shows.push({id:'other',name:"Chicago Women's Expo",startDate:'2026-10-24',status:'active',packedInventory:{c5s:5},days:[]});
   d.inventory={c5s:900};
   chk('4e. another show packed: left alone',[x.garageCountOct22(d,/fair to remember/i),d.inventory.c5s],[true,900]); }
+R.section('5. v91: Fair to Remember packed again, garage untouched');
+{ const x=boot().ctx; const d=JSON.parse(JSON.stringify(x.S));
+  let sh=d.shows.find(s=>/fair to remember/i.test(s.name||'')&&s.startDate==='2026-10-23');
+  chk('5a. fixture has the show',!!sh,true);
+  sh.status='planned'; sh.packedInventory=null; (sh.days||[]).forEach(x=>{x.morningCount=null;x.eveningCount=null;});
+  d.inventory=Object.assign({},COUNT);
+  chk('5b. applied',x.ftrFallPackV91(d),true);
+  chk('5c. show active with 244',[sh.status,Object.values(sh.packedInventory).reduce((a,b)=>a+b,0)],['active',244]);
+  chk('5d. garage untouched',d.inventory,COUNT);
+  const before=JSON.stringify(sh); x.ftrFallPackV91(d);
+  chk('5e. second run changes nothing',JSON.stringify(sh),before);
+  x.S=d; chk('5f. At Shows now shows 244',Object.values(x.atShowsInv()).reduce((a,b)=>a+b,0),244); }
+{ const x=boot().ctx; const d=JSON.parse(JSON.stringify(x.S));
+  const sh=d.shows.find(s=>/fair to remember/i.test(s.name||'')&&s.startDate==='2026-10-23');
+  sh.status='active'; sh.packedInventory={c5s:5};
+  x.ftrFallPackV91(d); chk('5g. already packed: left alone',sh.packedInventory,{c5s:5}); }
 R.done();
