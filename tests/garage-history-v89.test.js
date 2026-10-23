@@ -64,4 +64,19 @@ const run=(mut)=>{ const x=boot().ctx; const d=JSON.parse(JSON.stringify(x.S));
   d.shows=(d.shows||[]).filter(sh=>!(String(sh.startDate||'')>='2026-10-23'&&(sh.status==='active'||sh.status==='completed'||sh.packedInventory)));
   delete d._applied.garage_count_oct22_v89; x.applyOneTimeUpdates(d);
   chk('3g. runs inside applyOneTimeUpdates, last',[d.inventory.c5s,d._applied.garage_count_oct22_v89],[517,true]); }
+R.section('4. v90: the Fair to Remember pack does not block putting the count back');
+{ const {d}=run(d=>d.shows.push({id:'ftr',name:'A Fair to Remember, Fall',startDate:'2026-10-23',status:'active',packedInventory:{c5s:70},days:[]}));
+  chk('4a. v89 rule still skips (show packed)',d.inventory.c5s,100); }
+{ const x=boot().ctx; const d=JSON.parse(JSON.stringify(x.S));
+  d.inventory={'32oz':106,'16oz':121,'8oz':216,'2oz':292,c5s:447,c5l:265}; d.transfers=[]; d.settings=d.settings||{}; d.settings.garageLog=[];
+  d.shows=(d.shows||[]).filter(sh=>!(String(sh.startDate||'')>='2026-10-23'&&!/fair to remember/i.test(sh.name||'')&&(sh.status==='active'||sh.status==='completed'||sh.packedInventory)));
+  d.shows.push({id:'ftr2',name:'A Fair to Remember, Fall',startDate:'2026-10-23',status:'active',packedInventory:{'32oz':12,'16oz':20,'8oz':47,'2oz':60,c5s:70,c5l:35},days:[]});
+  const r=x.garageCountOct22(d,/fair to remember/i);
+  chk('4b. garage back to the count',[r,d.inventory],[true,COUNT]);
+  chk('4c. show keeps its 244',Object.values(d.shows.find(s=>s.id==='ftr2').packedInventory).reduce((a,b)=>a+b,0),244);
+  chk('4d. logged as v90',/v90/.test(d.settings.garageLog.slice(-1)[0].why),true); }
+{ const x=boot().ctx; const d=JSON.parse(JSON.stringify(x.S)); d.transfers=[];
+  d.shows.push({id:'other',name:"Chicago Women's Expo",startDate:'2026-10-24',status:'active',packedInventory:{c5s:5},days:[]});
+  d.inventory={c5s:900};
+  chk('4e. another show packed: left alone',[x.garageCountOct22(d,/fair to remember/i),d.inventory.c5s],[true,900]); }
 R.done();

@@ -10,4 +10,6 @@
 - One-time **`audit_hide_fox_andre_v89`**: hides every item for Oct 2026+ Fox & Found shows, and Andre's overpaid item.
 - One-time **`garage_count_oct22_v89`** (runs last in `applyOneTimeUpdates`): sets the garage to the Oct 22 7:39 PM CT hard count from the owner's screenshots (32oz 118, 16oz 141, 8oz 263, 2oz 352, C5-S 517, C5-L 300). Skipped if a transfer happened after it or a show from Oct 23 on is packed. Waits on a fresh device. Logged in Garage History and the audit log.
 
-**Verified:** `tests/garage-history-v89.test.js` 17/17; full suite below.
+**v90 (same day):** the count is what stayed in the garage after TJ's 244 for A Fair to Remember went out; that show was packed after the count, so v89 skipped. One-time `garage_count_oct22_v90` puts the garage back to the count, letting only the Fair to Remember pack through (any transfer or other Oct 23+ show still skips it).
+
+**Verified:** `tests/garage-history-v89.test.js` 22/22.
