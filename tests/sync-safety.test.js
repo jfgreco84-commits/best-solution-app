@@ -406,32 +406,29 @@ const resolve=(w,a,b)=>w.run('typeof cloudResolve==="function"?cloudResolve('+JS
     R.check(tag+'cloud still protocol 99',db.row.data_value._syncProtocol,99);
   }
 
-  R.section('9. Device behind the cloud on finished shows: Sync Now offers the cloud copy (Oct 22 phone)');
+  R.section('9b. A show moved to Missed (or reopened) on a synced device still syncs (Oct 23 phone)');
   { const db=fakeSb(ROW); const A=await synced(db);
-    A.run('S.batmanBorrow={c5s:274,"2oz":96};saveS()'); await settle();
-    const writes0=db.writes.length;
-    R.check('setup: cloud has the Batman return',db.row.data_value.batmanBorrow.c5s,274);
-    // the device loses a finished show and its Batman return (stale copy)
-    A.run('S.shows.find(x=>x.status==="completed").status="active";S.batmanBorrow={c5s:1054,"2oz":343};saveS()'); await settle();
-    R.check('stale copy is not pushed',db.writes.length,writes0);
-    R.check('sync shows error',A.run('_syncState'),'error');
-    await A.run('cloudSyncNow()'); await settle();
-    R.check('Sync Now raises the "behind" choice instead of a dead end',kindOf(A),'behind');
-    R.check('still nothing written',db.writes.length,writes0);
-    const r=await resolve(A,'cloud');
-    R.check('owner loads the cloud copy',r.ok,true);
-    R.check('finished shows back to 20',A.run('doneShows(S)'),20);
-    R.check('Batman return is back',A.run('S.batmanBorrow.c5s'),274);
-    R.check('synced again',A.run('_syncState'),'synced');
+    const w0=db.writes.length;
+    // owner taps "did not happen" in the auditor: a finished show becomes planned
+    A.run('const sh=S.shows.find(x=>x.status==="completed");sh.status="planned";S.inventory["32oz"]=118;S.batmanBorrow={c5s:274,"2oz":96};saveS()'); await settle();
+    R.check('the edit is written',db.writes.length,w0+1);
+    R.check('cloud now has 19 finished',doneIn(db.row.data_value),19);
+    R.check('cloud has the garage count',db.row.data_value.inventory['32oz'],118);
+    R.check('cloud has the Batman fix',db.row.data_value.batmanBorrow.c5s,274);
+    R.check('synced',A.run('_syncState'),'synced');
+    await A.run('cloudHydrate()'); await settle();
+    R.check('a fresh open stays synced, no prompt',[A.run('_syncState'),kindOf(A)],['synced',null]);
   }
-  { // same thing on a fresh open of the app (hydrate on load)
-    const db=fakeSb(ROW); const A=await synced(db);
-    A.run('S.shows.find(x=>x.status==="completed").status="active";saveS()'); await settle();
-    const B=wired(db,undefined,undefined,A.store);
-    await B.run('cloudHydrate()'); await settle();
-    R.check('on load: "behind" choice raised',kindOf(B),'behind');
-    R.check('on load: overwrite still refused',(await resolve(B,'device','OVERWRITE CLOUD')).ok,false);
-    R.check('on load: cloud still 20 finished',doneIn(db.row.data_value),20);
+  { // a device that does NOT descend from the row is still held to the count
+    const db=fakeSb(ROW); const A=await synced(db); const B=await synced(db);
+    B.run('S.note2=1;saveS()'); await settle();
+    A.run('const sh=S.shows.find(x=>x.status==="completed");sh.status="planned";saveS()'); await settle();
+    R.check('stale device with fewer finished: cloud keeps 20',doneIn(db.row.data_value),20);
+    R.check('and B\'s edit survives',db.row.data_value.note2,1);
+  }
+  { // the reason shows on the Setup card
+    const db=fakeSb(ROW); const w=wired(db); w.run('_cloudBlocked="test reason";setSync("error")');
+    R.check('Setup card names the reason',/Sync error[^<]*test reason/.test(w.run('cloudCardHTML()')),true);
   }
 
   R.done();
