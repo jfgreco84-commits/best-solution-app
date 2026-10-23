@@ -13,3 +13,5 @@
 **v90 (same day):** the count is what stayed in the garage after TJ's 244 for A Fair to Remember went out; that show was packed after the count, so v89 skipped. One-time `garage_count_oct22_v90` puts the garage back to the count, letting only the Fair to Remember pack through (any transfer or other Oct 23+ show still skips it).
 
 **Verified:** `tests/garage-history-v89.test.js` 22/22.
+
+**v91 (same evening):** after v90 the garage read 1,691 but At Shows read 0. A Fair to Remember (Fall, Oct 23-24) was packed for TJ on the afternoon of Oct 22, before the 7:39 PM count. Loading the stale cloud copy undid that pack, so the show sat at "planned". (v90 itself was harmless: the garage already equalled the count.) One-time `ftr_fall_pack_v91` marks the show packed again (32oz 12, 16oz 20, 8oz 47, 2oz 60, C5-S 70, C5-L 35) without touching the garage. It runs only while the show is still planned with no counts or money. `tests/garage-history-v89.test.js` 29/29.

@@ -546,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v90';
+const APP_VERSION='v91';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2901,6 +2901,16 @@ function applyOneTimeUpdates(d){
   if(!d._applied['garage_count_oct22_v90']){
     try{ const r=garageCountOct22(d,/fair to remember/i); if(r)d._applied['garage_count_oct22_v90']=true; }
     catch(e){ console.error('garage_count_oct22_v90',e); }
+  }
+
+  // v91 (Froggy, Oct 22): TJ took 244 to A Fair to Remember (Fall, Oct 23-24),
+  // packed in the app that afternoon. Loading the stale cloud copy undid the
+  // pack, so the show sat at "planned" with nothing at the show. The garage is
+  // already right (the 7:39 PM count was taken after TJ left), so the show is
+  // marked packed again WITHOUT taking anything from the garage.
+  if(!d._applied['ftr_fall_pack_v91']){
+    try{ if(ftrFallPackV91(d))d._applied['ftr_fall_pack_v91']=true; }
+    catch(e){ console.error('ftr_fall_pack_v91',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -6984,6 +6994,23 @@ function bmFixOct19Return(d){
   L.push({id:'bmh_v88_oct19',ts:new Date().toISOString(),date:'2026-10-19',type:'set',items,owed,
     note:'Oct 19 return put back (v88): this copy was from before it. Garage not changed.',src:'app'});
   auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:'Batman owed put back to after the Oct 19 return (v88): 32oz 0, 16oz 0, 8oz 0, 2oz 96, C5-S 274, C5-L 0.'});
+  return true;
+}
+// v91: see the ftr_fall_pack_v91 note in applyOneTimeUpdates. true = done or
+// not needed; false = wait (the show is not on this device yet).
+function ftrFallPackV91(d){
+  const sh=(d.shows||[]).find(x=>x&&/fair to remember/i.test(x.name||'')&&String(x.startDate||'')==='2026-10-23');
+  if(!sh)return !looksUsed(d)?false:true;
+  if(sh.status!=='planned'||sh.packedInventory)return true;
+  if((sh.days||[]).some(x=>x&&(x.morningCount||x.eveningCount||calcPmt(x.payments||{})>0)))return true;
+  const pk={'32oz':12,'16oz':20,'8oz':47,'2oz':60,c5s:70,c5l:35};
+  sh.status='active'; sh.packedInventory={...pk};
+  if(!truckMode(sh)&&sh.days&&sh.days[0])sh.days[0].morningCount={...pk};
+  if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(d.prices||{}));
+  const ts=new Date().toISOString();
+  if(!Array.isArray(sh.invLog))sh.invLog=[];
+  sh.invLog.push({ts,type:'packed (v91)',changes:['244 TJ took on Oct 22 put back on the show: 32oz 12, 16oz 20, 8oz 47, 2oz 60, C5-S 70, C5-L 35. Garage not changed (it was counted after TJ left).'],by:'app update'});
+  auditState(d).log.push({ts,showId:sh.id,show:sh.name,msg:'A Fair to Remember (Fall) packed again for TJ (v91): 244 units, garage not changed.'});
   return true;
 }
 // v89: see the garage_count_oct22_v89 note in applyOneTimeUpdates.
