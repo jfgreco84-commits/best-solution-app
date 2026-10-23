@@ -20,6 +20,7 @@ node tests/burgoo-restock-fix.test.js
 node tests/inventory-alert.test.js
 node tests/batman-history.test.js
 node tests/batman-oct19-fix.test.js
+node tests/garage-history-v89.test.js
 node tests/fox-found-oct-pack.test.js
 node tests/womens-expo.test.js
 node tests/expense-audit.test.js
