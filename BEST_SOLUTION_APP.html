@@ -546,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v91';
+const APP_VERSION='v92';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2901,6 +2901,20 @@ function applyOneTimeUpdates(d){
   if(!d._applied['garage_count_oct22_v90']){
     try{ const r=garageCountOct22(d,/fair to remember/i); if(r)d._applied['garage_count_oct22_v90']=true; }
     catch(e){ console.error('garage_count_oct22_v90',e); }
+  }
+
+  // v92 (Froggy, Oct 24): Alivia did not come Saturday at the Chicago Women's Expo and works
+  // Sunday. She stays on the crew, is marked not here on day 1, and her day 1 auto pay goes.
+  // Pay typed for her by hand on day 1 is kept. Waits until the show is on this device.
+  if(!d._applied['cwe_alivia_sat_off_v92']){
+    try{ const sh=(d.shows||[]).find(x=>x&&/women.?s expo/i.test(x.name||'')&&String(x.startDate||'')==='2026-10-24'), d0=sh&&(sh.days||[])[0];
+      if(d0&&(d.reps||[]).some(r=>r&&r.id==='rep_alivia')){
+        sh.repIds=sh.repIds||[]; if(sh.repIds.indexOf('rep_alivia')<0)sh.repIds.push('rep_alivia');
+        d0.offCrew=[...new Set([...(Array.isArray(d0.offCrew)?d0.offCrew:[]),'rep_alivia'])];
+        if(!(sh.repPayManual&&sh.repPayManual.rep_alivia)&&d0.repPay)delete d0.repPay.rep_alivia;
+        invLogPush(sh,{ts:new Date().toISOString(),di:0,date:d0.date,type:'crew (v92)',changes:['Alivia not here Saturday, on the crew Sunday'],by:'app update'});
+        d._applied['cwe_alivia_sat_off_v92']=true; } }
+    catch(e){ console.error('cwe_alivia_sat_off_v92',e); }
   }
 
   // v91 (Froggy, Oct 22): TJ took 244 to A Fair to Remember (Fall, Oct 23-24),
@@ -7839,9 +7853,22 @@ function payHowText(sh,di,id){
   return Math.round(repCommRate(id)*100)+'% of '+fmt(pp.base)+(r.how&&/split/.test(r.how)?' (their share)':''); }
 function repPayIsManual(sh,id){ return !!(sh&&sh.repPayManual&&sh.repPayManual[id]); }
 // Who worked a show with no booths: its reps, plus the owner unless it is a rep-only show.
-function tableCrew(sh){ const own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
-  const ids=[...new Set([...(sh.repIds||[]),...showRepIds(sh)])].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf; });
-  if(ownId&&(!sh.repOnlyShow||(sh.repIds||[]).indexOf(ownId)>=0))ids.unshift(ownId); return ids; }
+// v92: pay already on the show does not put someone on the crew. It used to, so a rep taken
+// off the crew kept their auto pay (and kept splitting the 35%) forever. Sales still count.
+// v92: with a day (di), a rep marked "not here" that day (day.offCrew) is left out.
+function tableCrew(sh,di){ const own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
+  const off=di!=null?dayOffCrew(sh,di):[];
+  const sold=[]; (sh.days||[]).forEach(d=>{ (d.repSales||[]).forEach(rs=>{ if(rs&&rs.repId)sold.push(rs.repId); }); sold.push(...drawerSellers(d)); });
+  const ids=[...new Set([...(sh.repIds||[]),...sold])].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf; });
+  if(ownId&&(!sh.repOnlyShow||(sh.repIds||[]).indexOf(ownId)>=0))ids.unshift(ownId); return ids.filter(id=>off.indexOf(id)<0); }
+function dayOffCrew(sh,di){ const d=(sh.days||[])[di]; return (d&&Array.isArray(d.offCrew))?d.offCrew:[]; }
+// v92: a rep on the show's crew who did not come one day. Their auto pay for that day goes.
+function dayOffToggle(shId,di,repId){ const sh=(S.shows||[]).find(s=>s.id===shId); const d=sh&&(sh.days||[])[di]; if(!d)return;
+  const off=dayOffCrew(sh,di).slice(), i=off.indexOf(repId), away=i<0;
+  if(away)off.push(repId); else off.splice(i,1);
+  if(off.length)d.offCrew=off; else delete d.offCrew;
+  invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'crew',changes:[sellerName(repId)+(away?' not here this day':' here this day')],by:'owner'});
+  commissionSyncPay(sh); saveS(); toast(away?'✅ '+sellerName(repId)+' off this day':'✅ '+sellerName(repId)+' back on this day'); renderCur(); }
 function commissionDay(sh,di){
   const d=(sh.days||[])[di]; if(!d)return null;
   const rate=showCommRate(sh), own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id, nr=payRulesNew(sh);
@@ -7853,7 +7880,7 @@ function commissionDay(sh,di){
     const en=b.id?(dayBoothRead(d,b.id)||{}):d;
     const vol=calcPmt(en.payments||{}); const sold=b.id?boothSold(d,b.id):(d.morningCount&&d.eveningCount?daySold(d):null);
     const units=sold?SKUS.reduce((t,s)=>t+(sold[s.key]||0),0):null;
-    const crew=b.id?dayBoothCrew(sh,di,b.id):(nr?tableCrew(sh):showRepIds(sh));
+    const crew=b.id?dayBoothCrew(sh,di,b.id):(nr?tableCrew(sh,di):showRepIds(sh));
     const comm=round(vol*rate), people=[];
     const sellers=drawerSellers(en).filter(id=>calcPmt(en.sellerPayments[id]||{})>0);
     const ownerIn=ownId&&crew.indexOf(ownId)>=0;
@@ -8442,17 +8469,19 @@ function rDay(sh,di){
       // Per-rep sales tracking is GONE — the day's money is one total (Money column above).
       // The only per-person thing on a day is DAY PAY: the flat $ each rep gets for working it.
       const payReps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active&&(!sh.payFromCommission||repDayPay(d,r.id)>0));
+      // v92: anyone with pay on this day is listed, so the rows always add up to the total
+      Object.keys(d.repPay||{}).forEach(id=>{ if(repDayPay(d,id)>0&&!payReps.some(r=>r.id===id))payReps.push((S.reps||[]).find(r=>r.id===id)||{id,name:sellerName(id)}); });
       if(!payReps.length)return'';
       const dayPayT=calcDayPay(d);
       const repRows=payReps.map(rep=>{
         const rp=repDayPay(d,rep.id);
         return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:6px">
-          <div><div style="font-weight:800;font-size:13px">${rep.name}</div>${payRulesOn(sh)?`<div style="font-size:10px;color:var(--muted)">${_esc(payHowText(sh,di,rep.id))}</div>`:''}</div>
+          <div><div style="font-weight:800;font-size:13px">${rep.name}</div>${(sh.repIds||[]).indexOf(rep.id)<0||rep.active===false?`<div style="font-size:10px;color:var(--red)">not on the crew, still paid this day. Edit Day Pay or Change crew</div>`:payRulesOn(sh)&&!hasBooths(sh)&&dayOffCrew(sh,di).indexOf(rep.id)>=0?`<div style="font-size:10px;color:var(--muted)">not here this day · <a href="#" onclick="dayOffToggle('${sh.id}',${di},'${rep.id}');return false" style="color:var(--blue)">Was here</a></div>`:payRulesOn(sh)?`<div style="font-size:10px;color:var(--muted)">${_esc(payHowText(sh,di,rep.id))}${hasBooths(sh)?'':` · <a href="#" onclick="dayOffToggle('${sh.id}',${di},'${rep.id}');return false" style="color:var(--blue)">Not here today</a>`}</div>`:''}</div>
           <div style="font-size:13px;font-weight:900;color:${rp>0?'var(--red)':'var(--muted)'}">${rp>0?fmt(rp):'not paid yet'}</div>
         </div>`;
       }).join('');
       // v80: who the app thinks worked decides the split, so say it out loud where it can be fixed
-      const _own=(S.reps||[]).find(r=>r.isSelf), _ownIn=payRulesOn(sh)&&!hasBooths(sh)&&tableCrew(sh).indexOf(_own&&_own.id)>=0;
+      const _own=(S.reps||[]).find(r=>r.isSelf), _ownIn=payRulesOn(sh)&&!hasBooths(sh)&&tableCrew(sh,di).indexOf(_own&&_own.id)>=0;
       const crewNote=!payRulesOn(sh)||hasBooths(sh)?'':`<div style="font-size:11px;color:${_ownIn?'var(--gold)':'var(--muted)'};margin:2px 0 6px">${_ownIn?'👑 You are marked as working this show, so the 35% is split with you. Not there? ':'Rep-only show: you are not counted, so each rep gets their full rate. Were you there? '}<a href="#" onclick="openAssignReps('${sh.id}');return false" style="color:var(--blue)">Change crew</a></div>`;
       return`<div class="div"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -9991,9 +10020,12 @@ function repPayMarkManual(sh,id){ if(!payRulesOn(sh))return;
 // ---- DAY PAY ENTRY ----
 // Two ways in, same data (day.repPay): per DAY for everyone (openDayPay, the daily workflow),
 // or per REP across all the show's days (openRepDayPay, from the show's rep list).
+// v92: the crew, plus anyone off the crew who still has pay on this day (so it can be cleared)
+function dayPayIds(sh,d){ const ids=(sh.repIds||[]).filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf&&r.active; });
+  Object.keys((d&&d.repPay)||{}).forEach(id=>{ if(repDayPay(d,id)>0&&ids.indexOf(id)<0)ids.push(id); }); return ids; }
 function openDayPay(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; if(sh.payFromCommission){toast('💵 Pay on this show is the commission. See Teams → Payout Sheet.');return;}
-  const reps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+  const reps=dayPayIds(sh,d).map(id=>(S.reps||[]).find(r=>r.id===id)||{id,name:sellerName(id)});
   if(!reps.length){toast('Assign reps to this show first');return;}
   mOpen(`<div class="mh"><div class="mt">💵 Day Pay — ${d.date||'Day '+(di+1)}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${sh.name} — enter the flat $ each rep gets for THIS day. No percentages. Blank = not paid this day.</div>
@@ -10003,7 +10035,7 @@ function openDayPay(shId,di){
 function saveDayPay(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
   if(!d.repPay)d.repPay={};
-  (sh.repIds||[]).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(), was=d.repPay[rid];
+  dayPayIds(sh,d).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(), was=d.repPay[rid];
     if(v==='')delete d.repPay[rid]; else d.repPay[rid]=Math.max(0,parseFloat(v)||0);
     if(Math.abs((parseFloat(was)||0)-(parseFloat(d.repPay[rid])||0))>0.004)repPayMarkManual(sh,rid); });
   mClose();saveS();toast('✅ Day pay saved · '+fmt(calcDayPay(d))+' this day');renderCur();
