@@ -10792,7 +10792,7 @@ let sb=null,_cloudUser=null,_cloudTimer=null,_syncState='off';
 // v67: how many finished shows the cloud copy had when this device last read it.
 // A device holding fewer is a wiped or fresh copy and must never push over it.
 let _cloudDoneSeen=0;
-const SYNC_PROTOCOL=2; // forward-compat marker only; NOT a defence against old clients (see SYNC SAFETY)
+const SYNC_PROTOCOL=3; // v96: 3 = the SET size (v95). Raise it with every new size or field an older app would drop: an older app refuses a newer cloud copy instead of saving over it.
 // v70 SYNC SAFETY. The cloud is one document. A device may write it only when
 // it can PROVE the write does not drop anything the cloud has:
 //   1. a successful read of the row this session (_cloudVerified);
@@ -10896,7 +10896,17 @@ function sameDoc(a,b){ try{ return _syncStrip(a)===_syncStrip(b); }catch(e){ ret
 
 // Returns {ok,reason?,error?} so a caller that must KNOW whether the write
 // landed can find out.
-async function cloudPush(){
+// v96: one push at a time. Two saves a second apart on show-site signal used to
+// send two writes against the same cloud version; the second was refused as
+// "another device saved first" and sync stopped. A push asked for while one is
+// running waits for it and then sends the newest copy, once.
+let _pushChain=Promise.resolve(), _pushQueued=null;
+function cloudPush(){
+  if(_pushQueued)return _pushQueued;
+  const p=_pushChain.then(()=>{ _pushQueued=null; return _cloudPushOnce(); });
+  _pushQueued=p; _pushChain=p.catch(()=>{}); return p;
+}
+async function _cloudPushOnce(){
   if(!sb||!_cloudUser)return {ok:false,reason:'not signed in'};
   if(syncQuarantine()){ cloudBlock('restored copy held on this device'); return {ok:false,reason:'quarantined'}; }
   if(_cloudDivergent){ setSync('error'); return {ok:false,reason:'diverged: resolve first'}; }
@@ -10912,6 +10922,9 @@ async function cloudPush(){
   S._syncProtocol=SYNC_PROTOCOL;
   const atSent=S._updatedAt, doc=JSON.parse(JSON.stringify(S));
   delete doc._syncBase; // per-device bookkeeping, never shared
+  // v96: remember what is being sent. If the write lands but the answer is lost,
+  // the next read sees this device's own copy and carries on instead of asking.
+  if(S._syncBase){ S._syncBase.pending=atSent; try{ localStorage.setItem('dd_bs_v7',JSON.stringify(S)); }catch(e){} }
   setSync('syncing');
   try{
     const now=new Date().toISOString(), row=_cloudRow;
@@ -11024,6 +11037,7 @@ async function cloudHydrate(){
   backupCloudSnap(cloud);
   _cloudDoneSeen=Math.max(_cloudDoneSeen,doneShows(cloud));
   if(quar){ cloudDiverge('restored',cloud,row); return; }
+  { const b0=syncBaseGet(); if(b0&&b0.pending&&cloud&&cloud._updatedAt===b0.pending)syncBaseSet(row,b0.pending); } // v96: the cloud holds this device's own last write
   const base=syncBaseGet();
   const cloudMoved=!base||base.token!==row.token||(row.rev!=null&&base.rev!=null&&base.rev!==row.rev);
   const localDirty=!base||(S._updatedAt||'')!==base.at;
