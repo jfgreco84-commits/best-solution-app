@@ -546,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v93';
+const APP_VERSION='v94';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -4883,6 +4883,7 @@ function secMileage(C){
       line('One-way distance',`${fmtN(sh.miles||0)} mi`),
       line('Round trips',`${trips}${tripsSet?'':' <i>(1 per show day)</i>'}`),
       route?line('Miles driven',`${fmtN(mi)} mi <i>(real route)</i>`):line('Miles driven',`${fmtN(sh.miles||0)} × 2 × ${trips} = ${fmtN(mi)} mi`),
+      vehRows(sh,S.settings)?line('Who drove',vehLineHTML(sh)):
       sh.repOnlyShow?line('Deduction',`rep drove their own car: the gas you paid them (${fmt(gas)}) is deducted as gas${irsMi>0?`, plus ${fmtN(irsMi)} mi on your truck × ${rt(rate)} = <b class="mi-g">${fmt(irsMi*rate)}</b>`:''}`)
         :line('IRS deduction',`${fmtN(mi)} mi × ${rt(rate)} = <b class="mi-g">${fmt(mi*rate)}</b>`),
       manualGas?line('Gas','<b>'+fmt(gas)+'</b> <i>(entered)</i>')
@@ -5678,10 +5679,26 @@ function showMpg(sh){ return (sh.mpg!=null && sh.mpg!=='') ? (parseFloat(sh.mpg)
 function showGasPrice(sh){ return (sh.gasPrice!=null && sh.gasPrice!=='') ? (parseFloat(sh.gasPrice)||0) : gasDefaultPrice(sh); } // v93: an Illinois show blends in Setup's IL price
 function showGas(sh){
   if(sh.gasOverride!=null && sh.gasOverride!=='') return parseFloat(sh.gasOverride)||0;
+  const vv=vehRows(sh,S.settings); if(vv)return vv.reduce((t,v)=>t+v.gas,0)*showGasPrice(sh); // v94: each vehicle at its own mpg
   const mpg=showMpg(sh)||RAM_MPG, gp=showGasPrice(sh);
   return showMiles(sh)/mpg*gp; // v77: same miles the screen shows (totalMiles when the route is not a simple back-and-forth)
 }
-function showMiles(sh){ const t=parseFloat(sh&&sh.totalMiles); if(isFinite(t)&&t>0)return t; return (parseFloat(sh.miles)||0)*2*showRoundTrips(sh); } // v55: totalMiles = the owner's real route when it is not a simple back-and-forth
+function showMiles(sh){ const vv=vehRows(sh,S.settings); if(vv)return vv.reduce((t,v)=>t+v.mi,0);
+  const t=parseFloat(sh&&sh.totalMiles); if(isFinite(t)&&t>0)return t; return (parseFloat(sh.miles)||0)*2*showRoundTrips(sh); } // v55: totalMiles = the owner's real route when it is not a simple back-and-forth
+// ---- v94: who drove what. sh.vehicles = [{id, who (rep id, 'self' or ''), whoName, car:'ram'|'own', carName, mpg, miles (one way), trips}]
+// Empty = the old default: Froggy alone in the Ram. Every mile on the Ram gets the IRS rate whoever drove it;
+// gas for anyone's own car is a plain expense. Pure (settings passed in) so the snapshot engine uses it too.
+function vehRows(sh,st){
+  if(!sh||!Array.isArray(sh.vehicles)||!sh.vehicles.length)return null; st=st||{};
+  const ramMpg=parseFloat(st.mpg)||RAM_MPG;
+  const tripsDef=(sh.roundTrips!=null&&sh.roundTrips!=='')?(parseFloat(sh.roundTrips)||0):(sh.numDays||1);
+  return sh.vehicles.filter(Boolean).map(v=>{ const ram=v.car!=='own';
+    const one=(v.miles!=null&&v.miles!=='')?(parseFloat(v.miles)||0):(parseFloat(sh.miles)||0);
+    const trips=(v.trips!=null&&v.trips!=='')?(parseFloat(v.trips)||0):tripsDef;
+    const mpgSet=v.mpg!=null&&v.mpg!==''&&parseFloat(v.mpg)>0, mpg=mpgSet?parseFloat(v.mpg):ramMpg; // a car with no mpg yet is figured at the Ram's, never as free
+    const mi=one*2*trips;
+    return {v,ram,one,trips,mpg,mpgSet,mi,gas:mpg>0?mi/mpg:0}; }); // gas = gallons here; x price at the call site
+}
 // ---- v93: gas by area and date, 17 mpg Ram, IRS rate by date ----
 // Regular unleaded, AAA / GasBuddy readings as reported in the news (see the v93 handoff for every source).
 // wi = Milwaukee-Waukesha metro (WI statewide where no metro figure was reported), wiw = west-central WI
@@ -5740,14 +5757,20 @@ function irsRateOn(key,st){ st=st||(S&&S.settings)||{}; key=String(key||'');
 function showIrsRate(sh){ return irsRateOn(sh&&sh.startDate); }
 // Miles the IRS deduction can use: miles in Froggy's own vehicle. A rep-only show is the rep's car, so 0
 // unless Edit Show says how far he drove himself (dropping stock off, picking it up).
-function showIrsMiles(sh){ if(sh&&sh.repOnlyShow)return parseFloat(sh.ownerMiles)||0; return showMiles(sh); }
+function vehLineHTML(sh){ const vv=vehRows(sh,S.settings); if(!vv)return ''; const gp=showGasPrice(sh);
+  return vv.map(r=>{ const v=r.v, who=(S.reps||[]).find(x=>x.id===v.who); const name=who?who.name:(v.whoName||(v.who==='self'?'You':'Someone'));
+    return `${_esc(name)} · ${r.ram?'🛻 your Ram':'🚙 '+_esc(v.carName||'own car')} · ${fmtN(r.mi)} mi @ ${r.mpg} mpg${r.mpgSet||r.ram?'':' (mpg not set)'} = ${fmt(r.gas*gp)}${r.ram?' · IRS '+fmt(r.mi*showIrsRate(sh)):''}`; }).join('<br>'); }
+function showIrsMiles(sh){ const vv=vehRows(sh,S.settings); if(vv)return vv.filter(v=>v.ram).reduce((t,v)=>t+v.mi,0); // v94: Ram miles, whoever drove
+  if(sh&&sh.repOnlyShow)return parseFloat(sh.ownerMiles)||0; return showMiles(sh); }
 function showIrsDeduct(sh){ return showIrsMiles(sh)*showIrsRate(sh); }
 // Gas booked on a show that went in your own truck (what the mileage rate replaces on the tax return).
 // Fuel lines for someone else's car (Cranberry: TJ's Terrain, Anthony's Impala) and a rep-only show's gas are not.
 function _isOtherCarFuel(e){ return /_gas_(terrain|impala)$/.test(String(e&&e.id||''))||/terrain|impala|rep'?s (car|truck)|their car/i.test(String(e&&e.desc||'')); }
-function showOwnGas(sh,t){ if(!sh||sh.repOnlyShow)return 0; t=t||calcShow(sh); let g=t.gasAuto||0;
+function showOwnGas(sh,t){ if(!sh)return 0; const vv=vehRows(sh,S.settings);
+  if(!vv&&sh.repOnlyShow)return 0; t=t||calcShow(sh); let g=t.gasAuto||0;
   (sh.days||[]).forEach(d=>{ if(d&&d.expenses)g+=parseFloat(d.expenses.gas)||0; });
   (sh.showExpenses||[]).forEach(e=>{ if(e&&e.cat==='fuel'&&!_isOtherCarFuel(e))g+=parseFloat(e.amount)||0; });
+  if(vv){ const all=vv.reduce((a,v)=>a+v.gas,0), ram=vv.filter(v=>v.ram).reduce((a,v)=>a+v.gas,0); return all>0?g*ram/all:0; } // v94: the Ram's share of the gas
   return g; }
 function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax||0.28); }
 // Card/Square sales = taxable base. Counts only card-type payments (Square + Debit), NOT cash/Venmo/Zelle/etc.
@@ -5845,7 +5868,7 @@ function resizeShowDays(sh,newND){
   sh.numDays=newND; sh.dates=dates; return newND;
 }
 function showEditCosts(id){
-  const sh=S.shows.find(s=>s.id===id);if(!sh)return; window.__ecId=id;
+  const sh=S.shows.find(s=>s.id===id);if(!sh)return; window.__ecId=id; window.__ecVeh=JSON.parse(JSON.stringify(Array.isArray(sh.vehicles)?sh.vehicles:[]));
   const autoGas=showGas(Object.assign({},sh,{gasOverride:null})); // v93: same miles, mpg and price as the preview
   const gpct=Math.round((S.settings.tax||0.28)*100);
   const esc=v=>(v||'').replace(/"/g,'&quot;');
@@ -5875,10 +5898,15 @@ function showEditCosts(id){
     <div class="fg"><label class="fl">Gas $/gallon (this show)</label><input class="fi" type="number" id="ec_gasprice" step="0.01" min="0" value="${(sh.gasPrice!=null&&sh.gasPrice!=='')?sh.gasPrice:''}" placeholder="${gasDefaultPrice(sh).toFixed(2)}" oninput="ecUpdateTravelPreview()"></div>
     <div class="fg"><label class="fl">MPG (this vehicle)</label><input class="fi" type="number" id="ec_mpg" step="0.1" min="0" value="${(sh.mpg!=null&&sh.mpg!=='')?sh.mpg:''}" placeholder="${S.settings.mpg||RAM_MPG}" oninput="ecUpdateTravelPreview()"></div>
   </div>
+  <div class="fg"><label class="fl">🚗 Who drove what</label>
+    <div id="ec_veh"></div>
+    <button type="button" class="btn btn-ghost btn-sm btn-full" onclick="ecVehAdd()">➕ Add a driver / vehicle</button>
+    <div style="font-size:11px;color:var(--muted);margin-top:5px">Leave empty if it was just you in the Ram. Every mile on your Ram gets the IRS rate, whoever drove it. Gas for someone's own car is deducted as gas.</div>
+  </div>
   <div id="ec_travel_preview" style="font-size:12px;color:var(--gold);margin:-2px 0 10px;font-weight:700"></div>
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
   ${gasMarketPrice(sh)!=null?`<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">⛽ Regular in this show's area that week: <b>$${gasMarketPrice(sh).toFixed(2)}</b>${(sh.gasPrice!=null&&sh.gasPrice!==''&&Math.abs(parseFloat(sh.gasPrice)-gasMarketPrice(sh))>0.005)?` · <a href="#" onclick="$$('ec_gasprice').value='${gasMarketPrice(sh).toFixed(2)}';ecUpdateTravelPreview();return false">use it</a>`:''}</div>`:''}
-  ${sh.repOnlyShow?`<div class="fg"><label class="fl">🚚 Miles on YOUR truck for this rep-only show (the rep took your Ram, or you dropped off / picked up stock)</label><input class="fi" type="number" id="ec_ownmiles" step="1" min="0" value="${(sh.ownerMiles!=null&&sh.ownerMiles!=='')?sh.ownerMiles:''}" placeholder="0 (the rep drove their own car)"></div>
+  ${sh.repOnlyShow&&!(Array.isArray(sh.vehicles)&&sh.vehicles.length)?`<div class="fg"><label class="fl">🚚 Miles on YOUR truck for this rep-only show (the rep took your Ram, or you dropped off / picked up stock)</label><input class="fi" type="number" id="ec_ownmiles" step="1" min="0" value="${(sh.ownerMiles!=null&&sh.ownerMiles!=='')?sh.ownerMiles:''}" placeholder="0 (the rep drove their own car)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Only miles on your own vehicle get the IRS mileage rate. The gas you paid for the rep's car is still deducted, dollar for dollar.</div>`:''}
   <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
   ${showGasLogged(sh)>0?`<div style="font-size:11px;color:var(--gold);margin:-6px 0 12px">⛽ This show has ${fmt(showGasLogged(sh))} of gas receipts logged from before; those receipts are its gas.</div>`:''}
@@ -5914,8 +5942,44 @@ function showEditCosts(id){
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">Rep pay is entered PER DAY on each day's screen (💵 Day Pay). Hours here just give you each person's $/hour on the show detail.</div>
   <div class="fg"><label class="fl">Show notes</label><textarea class="fi" id="ec_notes" placeholder="Anything to remember about this show…">${(sh.notes||'').replace(/</g,'&lt;')}</textarea></div>
   <button class="btn btn-gold btn-full" onclick="saveEditCosts('${id}')">Save Costs</button>`);
-  setTimeout(ecUpdateTravelPreview,40);
+  ecVehRender(); setTimeout(ecUpdateTravelPreview,40);
 }
+// v94: the "Who drove what" rows in Edit Show. Working copy in window.__ecVeh until Save.
+function _ecVehShow(){ return (S.shows||[]).find(x=>x&&x.id===window.__ecId)||{}; }
+function _ecVehPeople(){ const sh=_ecVehShow(), own=(S.reps||[]).find(r=>r.isSelf), crew=new Set(sh.repIds||[]);
+  const list=(S.reps||[]).filter(r=>r&&!r.isSelf&&(crew.has(r.id)||r.active!==false)).sort((a,b)=>(crew.has(b.id)-crew.has(a.id))||String(a.name).localeCompare(String(b.name)));
+  return [{id:own?own.id:'self',name:(own&&own.name)||'Me (Froggy)'}].concat(list.map(r=>({id:r.id,name:r.name}))); }
+function _ecVehName(v){ const p=_ecVehPeople().find(x=>x.id===v.who); return p?p.name:(v.whoName||'Someone'); }
+function ecVehRender(){ const el=$$('ec_veh'); if(!el)return; const vs=window.__ecVeh||[], sh=_ecVehShow();
+  const ppl=_ecVehPeople(), oneDef=parseFloat(($$('ec_miles')||{}).value)||parseFloat(sh.miles)||0;
+  const tripsDef=parseFloat(($$('ec_trips')||{}).value)||(parseInt(($$('ec_days')||{}).value)||sh.numDays||1);
+  el.innerHTML=vs.map((v,i)=>{ const own=v.car==='own';
+    return `<div style="border:1px solid var(--goldbd);border-radius:8px;padding:8px;margin-bottom:8px">
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <select class="fi" style="flex:1" onchange="ecVehSet(${i},'who',this.value)">${ppl.map(p=>`<option value="${p.id}"${p.id===v.who?' selected':''}>${_esc(p.name)}</option>`).join('')}<option value=""${!v.who?' selected':''}>Someone else…</option></select>
+        <button type="button" class="btn btn-ghost btn-xs" onclick="ecVehDel(${i})">✕</button></div>
+      ${!v.who?`<input class="fi" type="text" style="margin-bottom:6px" placeholder="Driver's name" value="${_esc(v.whoName||'')}" oninput="ecVehSet(${i},'whoName',this.value,1)">`:''}
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <button type="button" class="btn btn-sm ${own?'btn-ghost':'btn-gold'}" style="flex:1" onclick="ecVehSet(${i},'car','ram')">🛻 My Ram 1500</button>
+        <button type="button" class="btn btn-sm ${own?'btn-gold':'btn-ghost'}" style="flex:1" onclick="ecVehSet(${i},'car','own')">🚙 Their own car</button></div>
+      ${own?`<input class="fi" type="text" style="margin-bottom:6px" placeholder="What car (e.g. GMC Terrain)" value="${_esc(v.carName||'')}" oninput="ecVehSet(${i},'carName',this.value,1)">`:''}
+      <div style="display:flex;gap:6px">
+        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">MPG</div><input class="fi" type="number" step="0.1" min="0" value="${v.mpg!=null&&v.mpg!==''?v.mpg:''}" placeholder="${own?'needed':(S.settings.mpg||RAM_MPG)}" oninput="ecVehSet(${i},'mpg',this.value,1)"></div>
+        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">Miles one way</div><input class="fi" type="number" step="1" min="0" value="${v.miles!=null&&v.miles!==''?v.miles:''}" placeholder="${oneDef}" oninput="ecVehSet(${i},'miles',this.value,1)"></div>
+        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">Round trips</div><input class="fi" type="number" step="1" min="0" value="${v.trips!=null&&v.trips!==''?v.trips:''}" placeholder="${tripsDef}" oninput="ecVehSet(${i},'trips',this.value,1)"></div></div>
+      ${own&&!(parseFloat(v.mpg)>0)?'<div style="font-size:11px;color:var(--red,#f66);margin-top:4px">Enter their MPG. Until then it is figured at the Ram\'s.</div>':''}
+    </div>`; }).join('');
+  ecUpdateTravelPreview(); }
+function ecVehAdd(){ const vs=window.__ecVeh=window.__ecVeh||[]; const own=(S.reps||[]).find(r=>r.isSelf);
+  // first row is you in the Ram; after that a crew member nobody has put in a vehicle yet, in your Ram
+  const used=new Set(vs.map(v=>v.who)), sh=_ecVehShow(), next=(sh.repIds||[]).find(id=>!used.has(id)&&!(own&&id===own.id));
+  vs.push(!vs.length&&!sh.repOnlyShow?{id:'veh_'+Date.now(),who:own?own.id:'self',car:'ram'}:{id:'veh_'+Date.now(),who:next||'',car:'ram'}); ecVehRender(); }
+function ecVehDel(i){ (window.__ecVeh||[]).splice(i,1); ecVehRender(); }
+function ecVehSet(i,k,val,quiet){ const v=(window.__ecVeh||[])[i]; if(!v)return; v[k]=val;
+  if((k==='car'&&val==='own')||(k==='who'&&v.car==='own')){ const r=(S.reps||[]).find(x=>x.id===v.who); // a rep's own car is remembered
+    if(r&&r.car&&!v.carName)v.carName=r.car; if(r&&r.mpg&&(v.mpg==null||v.mpg===''))v.mpg=r.mpg; }
+  if(k==='car'&&val==='ram'){ delete v.carName; v.mpg=''; }
+  if(quiet)ecUpdateTravelPreview(); else ecVehRender(); }
 function ecSetTravel(mode){
   const days=parseInt(($$('ec_days')||{}).value)||1;
   if($$('ec_trips'))$$('ec_trips').value=(mode==='hotel')?1:days;
@@ -5931,8 +5995,11 @@ function ecUpdateTravelPreview(){
   const _sh=(S.shows||[]).find(x=>x&&x.id===window.__ecId)||{location:(($$('ec_loc')||{}).value||'')};
   const mpg=parseFloat(($$('ec_mpg')||{}).value)||(S.settings.mpg||RAM_MPG);
   const gp=parseFloat(($$('ec_gasprice')||{}).value)||gasDefaultPrice(_sh);
-  const totMiles=miles*2*trips; const gas=mpg>0?totMiles/mpg*gp:0;
-  el.innerHTML='Total miles: <b>'+Math.round(totMiles)+'</b> · est. gas: <b>'+fmt(gas)+'</b>';
+  let totMiles=miles*2*trips, gas=mpg>0?totMiles/mpg*gp:0, ram='';
+  const vv=vehRows({vehicles:window.__ecVeh||[],miles:miles,roundTrips:trips,numDays:trips},{mpg:mpg});
+  if(vv){ totMiles=vv.reduce((a,v)=>a+v.mi,0); gas=vv.reduce((a,v)=>a+v.gas,0)*gp; const rm=vv.filter(v=>v.ram).reduce((a,v)=>a+v.mi,0);
+    ram=' · on your Ram: <b>'+Math.round(rm)+'</b> mi = '+fmt(rm*irsRateOn((($$('ec_start')||{}).value)||_todayKey()))+' IRS'; }
+  el.innerHTML='Total miles: <b>'+Math.round(totMiles)+'</b> · est. gas: <b>'+fmt(gas)+'</b>'+ram;
 }
 function saveEditCosts(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
@@ -5949,6 +6016,12 @@ function saveEditCosts(id){
   const mpgv=v('ec_mpg'); sh.mpg = mpgv===''?null:(parseFloat(mpgv)||0);
   const g=v('ec_gas'); sh.gasOverride = g===''?null:(parseFloat(g)||0);
   if($$('ec_ownmiles')){ const om=v('ec_ownmiles'); sh.ownerMiles = om===''?null:Math.max(0,parseFloat(om)||0); }
+  // v94: who drove what. Blank numbers stay blank (they follow the show's miles / trips). A rep's own car is remembered on the rep.
+  if(Array.isArray(window.__ecVeh)&&window.__ecId===id){ const num=x=>(x==null||x==='')?'':Math.max(0,parseFloat(x)||0);
+    sh.vehicles=window.__ecVeh.map(x=>{ const o={id:x.id||('veh_'+Date.now()),who:x.who||'',car:x.car==='own'?'own':'ram',mpg:num(x.mpg),miles:num(x.miles),trips:num(x.trips)};
+      if(!o.who)o.whoName=String(x.whoName||'').trim(); if(o.car==='own')o.carName=String(x.carName||'').trim(); return o; });
+    sh.vehicles.forEach(o=>{ if(o.car!=='own')return; const r=(S.reps||[]).find(z=>z.id===o.who); if(!r||r.isSelf)return; if(o.carName)r.car=o.carName; if(o.mpg)r.mpg=o.mpg; });
+    if(!sh.vehicles.length)delete sh.vehicles; }
   sh.lodging=parseFloat(v('ec_lodging'))||0;
   const pr=v('ec_paper'); sh.paperRolls = pr===''?null:Math.max(0,parseFloat(pr)||0);
   // per-day open/close (inputs exist for each rendered day; only write to days that still exist)
@@ -6865,6 +6938,12 @@ function mileageLogRows(){
   (S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||''))).forEach(sh=>{
     const why='Best Solution booth: '+(sh.name||'show'), to=sh.location||sh.name||'';
     const park=di=>{ const d=(sh.days||[])[di]; return d&&d.expenses?(parseFloat(d.expenses.parking)||0):0; };
+    const vv=vehRows(sh,S.settings);
+    if(vv){ const n=Math.max(1,parseInt(sh.numDays,10)||1), okDate=/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate||'');
+      vv.filter(r=>r.ram&&r.mi>0).forEach(r=>{ const who=(S.reps||[]).find(x=>x.id===r.v.who), by=who?(who.isSelf?'':' (driven by '+who.name+')'):(r.v.whoName?' (driven by '+r.v.whoName+')':'');
+        if(okDate&&r.trips===n&&r.one>0){ for(let i=0;i<n;i++)rows.push({date:_gasDayAdd(sh.startDate,i),from:home,to:to+' and back',why:why+by+(n>1?' (day '+(i+1)+')':''),miles:r.one*2,park:0}); }
+        else rows.push({date:sh.startDate,from:home,to:to+' and back',why:why+by+' ('+r.trips+' round trip'+(r.trips===1?'':'s')+')',miles:r.mi,park:0}); });
+      return; }
     if(sh.repOnlyShow){ const om=parseFloat(sh.ownerMiles)||0; if(om>0)rows.push({date:sh.startDate,from:home,to:to,why:why+' (stock drop-off / pickup, rep worked it)',miles:om,park:0}); return; }
     if(Array.isArray(sh.routeLegs)&&sh.routeLegs.length){ sh.routeLegs.forEach(l=>rows.push({date:l.date,from:l.from,to:l.to,why:why,miles:parseFloat(l.miles)||0,park:0})); return; }
     const total=showMiles(sh); if(!(total>0))return;
@@ -6901,6 +6980,7 @@ function exportMileageLog(){
   const mi=rows.reduce((t,r)=>t+r.miles,0), de=rows.reduce((t,r)=>t+r.deduct,0), pk=rows.reduce((t,r)=>t+r.park,0);
   out.push([]); out.push(['TOTAL','','','',Math.round(mi),'',de.toFixed(2),pk.toFixed(2)]);
   out.push([]); out.push(['Write your Ram odometer on Jan 1 and Dec 31. Your tax preparer needs total miles for the year next to these business miles (Schedule C, Part IV).']);
+  out.push(['Every mile on the Ram is listed, including trips a rep drove it for a show. Reps\' own cars are not your vehicle: the gas you paid for them is a separate expense.']);
   out.push(['Supply runs, post office trips for online orders and product pickups go in Mileage > Log a business trip so they land here too.']);
   dlFile('best-solution-mileage-log-'+_stamp()+'.csv',_csvRows(out),'text/csv');
 }
@@ -7756,7 +7836,8 @@ function rShow(){
     <div class="sr"><span class="srl">One-Way Miles</span><span class="srv">${sh.miles||0} mi</span></div>
     <div class="sr"><span class="srl">Round Trips</span><span class="srv">${showRoundTrips(sh)}${(sh.roundTrips!=null&&sh.roundTrips!=='')?'':' (auto: 1/day)'}</span></div>
     <div class="sr"><span class="srl">Total Miles Driven</span><span class="srv">${fmtN(showMiles(sh))} mi</span></div>
-    <div class="sr"><span class="srl">IRS Mileage Deduction${sh.repOnlyShow?' (rep drove: '+fmtN(showIrsMiles(sh))+' mi in your truck)':' ($'+showIrsRate(sh).toFixed(3).replace(/0$/,'')+'/mi)'}</span><span class="srv green">${fmt(showIrsDeduct(sh))}</span></div>
+    ${vehRows(sh,S.settings)?`<div style="font-size:11px;color:var(--muted);margin:2px 0 6px;line-height:1.5">🚗 ${vehLineHTML(sh)}</div>`:''}
+    <div class="sr"><span class="srl">IRS Mileage Deduction${vehRows(sh,S.settings)?' ('+fmtN(showIrsMiles(sh))+' mi on your Ram)':sh.repOnlyShow?' (rep drove: '+fmtN(showIrsMiles(sh))+' mi in your truck)':' ($'+showIrsRate(sh).toFixed(3).replace(/0$/,'')+'/mi)'}</span><span class="srv green">${fmt(showIrsDeduct(sh))}</span></div>
     <div class="sr"><span class="srl">⛽ Gas${showGasLogged(sh)>0?' (receipts logged)':((sh.gasOverride!=null&&sh.gasOverride!=='')?' (actual, Edit Show)':' (estimate: '+fmtN(showMiles(sh))+' mi @ '+showMpg(sh)+' mpg × $'+showGasPrice(sh).toFixed(2)+')')}</span><span class="srv">${fmt(showGasLogged(sh)>0?showGasLogged(sh):showGas(sh))}</span></div>
     <div class="sr"><span class="srl">Lodging / Hotel</span><span class="srv">${fmt(sh.lodging||0)}</span></div>
     ${t.cardFees>0?`<div class="sr"><span class="srl">Card Fees (${((S.settings.sqFee||0)*100).toFixed(1)}% of card)</span><span class="srv red">-${fmt(t.cardFees)}</span></div>`:''}
@@ -11069,9 +11150,11 @@ function bxView(st){
   V.mpg=sh=>(sh.mpg!=null&&sh.mpg!=='')?N(sh.mpg):V.setting('mpg',RAM_MPG);
   V.gasPrice=sh=>(sh.gasPrice!=null&&sh.gasPrice!=='')?N(sh.gasPrice):gasDefaultPrice(sh,{gasPrice:V.setting('gasPrice',3.50),gasPriceIL:V.setting('gasPriceIL',0)});
   V.irsRate=sh=>irsRateOn(sh&&sh.startDate,{irsRate:V.setting('irsRate',0.76)});
-  V.irsMiles=sh=>sh&&sh.repOnlyShow?N(sh.ownerMiles):V.miles(sh);
-  V.miles=sh=>{ const t=N(sh.totalMiles); return t>0?t:N(sh.miles)*2*V.roundTrips(sh); };
+  V.irsMiles=sh=>{ const vv=V.veh(sh); if(vv)return vv.filter(v=>v.ram).reduce((a,v)=>a+v.mi,0); return sh&&sh.repOnlyShow?N(sh.ownerMiles):V.miles(sh); };
+  V.veh=sh=>vehRows(sh,{mpg:V.setting('mpg',RAM_MPG)});
+  V.miles=sh=>{ const vv=V.veh(sh); if(vv)return vv.reduce((a,v)=>a+v.mi,0); const t=N(sh.totalMiles); return t>0?t:N(sh.miles)*2*V.roundTrips(sh); };
   V.gas=sh=>{ if(sh.gasOverride!=null&&sh.gasOverride!=='')return N(sh.gasOverride);
+    const vv=V.veh(sh); if(vv)return vv.reduce((a,v)=>a+v.gas,0)*V.gasPrice(sh);
     const m=V.mpg(sh)||RAM_MPG; return V.miles(sh)/m*V.gasPrice(sh); };
   V.taxRate=sh=>(sh.taxRate!=null&&sh.taxRate!=='')?N(sh.taxRate):V.setting('tax',0.28);
   V.cardTaxRate=sh=>(sh&&sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?N(sh.cardTaxRate):V.setting('cardTax',0);

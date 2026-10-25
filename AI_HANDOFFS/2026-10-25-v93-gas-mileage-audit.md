@@ -143,3 +143,27 @@ Gaps filled by interpolation: Jul 15-26 and Aug 2-9 in WI, Oct 4 in WI. Exact pu
 - **Lunch.** $20 a day on local one-day shows is your own meal, not deductible. Meals count (50%) only on
   overnight trips like Cranberry. Fine for cash tracking, wrong for taxes; tell the preparer.
 - **Odometer.** Write the Ram's odometer Jan 1 and Dec 31. Schedule C asks for total miles next to business miles.
+
+## v94 (same PR): who drove what, on every show
+
+Froggy: "on each show a selection where I can select who drove what vehicle, enter the miles per gallon, and
+what vehicle they drove. A lot of times they will be driving my Dodge Ram 1500."
+
+- **Edit Show → 🚗 Who drove what.** One row per vehicle: driver (Froggy, the crew first, any rep, or
+  "Someone else" with a name), **🛻 My Ram 1500** or **🚙 Their own car** (with the car's name), MPG,
+  one-way miles and round trips. Blank miles / trips follow the show; a blank Ram MPG is Setup's 17.
+  The preview shows total miles, gas, and the Ram's miles with their IRS dollars.
+- **Data:** `sh.vehicles=[{id, who, whoName?, car:'ram'|'own', carName?, mpg, miles, trips}]`. No rows =
+  the old default (Froggy alone in the Ram), so every existing show is unchanged. `vehRows(sh, settings)`
+  is pure and shared by the app and the snapshot engine (`V.veh`).
+- **Math:** miles = every vehicle; gas = each vehicle's miles / its own mpg × the show's gas price;
+  **IRS miles = every mile on the Ram, whoever drove it** (a rep-only show with TJ in the Ram now gets the
+  deduction); the Ram's share of the gas is what the mileage rate replaces on the tax return, everyone
+  else's gas stays a plain expense. A car with no MPG entered is figured at the Ram's, never as free, and
+  is flagged red in Edit Show.
+- **A rep's own car is remembered** (`rep.car`, `rep.mpg`), so picking "Their own car" for TJ next time
+  fills in his Terrain and MPG.
+- Shown on the show's details (one line per vehicle), on the Mileage screen, and in the IRS mileage log
+  (Ram trips only, "driven by T.J." when a rep drove it).
+
+Tests: `node tests/vehicles-v94.test.js` (19 checks).
