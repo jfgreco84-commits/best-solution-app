@@ -25,7 +25,7 @@ const {boot,reporter}=require('./harness.js');
 const R=reporter();
 const chk=R.check;
 
-const SK=['32oz','16oz','8oz','2oz','c5s','c5l'];
+const SK=['32oz','16oz','8oz','2oz','c5s','c5l','set'];
 const cnt=o=>{const r={};SK.forEach(k=>r[k]=o[k]||0);return r;};
 const tot=o=>SK.reduce((t,k)=>t+((o&&o[k])||0),0);
 
@@ -96,7 +96,7 @@ R.section('1. The picker knows the garage, and takes every size at once');
   chk('1i. the button brings it all',m.indexOf('Bring it all')>=0,true);
   chk('1j. the garage is only offered as a source, never a destination',
       /id="tr_to"[^>]*>[^]*?<\/select>/.exec(m)[0].indexOf('value="garage"')>=0,false);
-  chk('1k. one quantity box per size, all six',SK.filter(k=>m.indexOf('id="tr_q_'+k+'"')>=0).length,6);
+  chk('1k. one quantity box per size, all seven (with SET)',SK.filter(k=>m.indexOf('id="tr_q_'+k+'"')>=0).length,7);
   chk('1l. no single-product picker any more',m.indexOf('id="tr_sku"')>=0,false);
   chk('1m. each row shows what the garage holds',m.indexOf('Garage: 200')>=0,true);
 

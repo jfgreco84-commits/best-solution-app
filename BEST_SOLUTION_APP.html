@@ -228,7 +228,7 @@
     .bs-l>span:last-child{color:var(--text);font-variant-numeric:tabular-nums}
     .bs-tot{border-top:2px solid var(--border);border-bottom:none;font-weight:800;color:var(--text);padding-top:8px;font-size:14px}
     .bs-gold{color:var(--gold)}
-    .bs-us{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+    .bs-us{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
     .bs-u{background:var(--card2);border-radius:8px;padding:6px 0;text-align:center}
     .bs-u b{display:block;font-size:14px;font-weight:900;color:var(--gold)}
     .bs-u span{font-size:10px;color:var(--muted);font-weight:700}
@@ -536,7 +536,10 @@ const SKUS=[
   {key:'8oz', name:'8oz Best Solution', short:'8oz', emoji:'🧴',cost:4.00,defP:15.00},
   {key:'2oz', name:'2oz Best Solution', short:'2oz', emoji:'🧴',cost:2.25,defP:8.00},
   {key:'c5s', name:'C5 Small (2oz)',    short:'C5-S',emoji:'✨',cost:3.00,defP:10.00},
-  {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00}
+  {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00},
+  // v93: Small Set = 1 x 2oz + 1 x C5-S, built from garage stock (buildSmallSets) and
+  // counted as its own column. Its cost is the two bottles; the add-ons are below.
+  {key:'set', name:'Small Set (2oz + C5-S)',short:'SET',emoji:'🎁',cost:5.25,defP:20.00}
 ];
 // COMM_CARD / COMM_CASH below are the TAX-base rates only (PMTS[].commRate). Do not repurpose for rep commission.
 // ===================================================
@@ -546,7 +549,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v92';
+const APP_VERSION='v93';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -557,10 +560,10 @@ const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c
 const COGS_SCHEDULE_DEFAULT=[
   {id:'cogs_historical', effectiveFrom:'1900-01-01', effectiveTo:'2026-07-31',
    label:'Historical (through Jul 31 2026)',
-   costs:{'32oz':6.00,'16oz':4.50,'8oz':4.00,'2oz':2.25,'c5s':3.00,'c5l':6.00}},
+   costs:{'32oz':6.00,'16oz':4.50,'8oz':4.00,'2oz':2.25,'c5s':3.00,'c5l':6.00,'set':5.25}},
   {id:'cogs_current_2026_08', effectiveFrom:'2026-08-01', effectiveTo:null,
    label:'Current (from Aug 1 2026)',
-   costs:{'32oz':4.50,'16oz':3.75,'8oz':3.25,'2oz':2.00,'c5s':2.80,'c5l':5.84}}
+   costs:{'32oz':4.50,'16oz':3.75,'8oz':3.25,'2oz':2.00,'c5s':2.80,'c5l':5.84,'set':4.80}}
 ];
 function cogsSchedule(st){ const a=((st||(typeof S!=='undefined'?S:null))||{}).cogsHistory;
   return (a&&a.length)?a:null; }
@@ -2925,6 +2928,14 @@ function applyOneTimeUpdates(d){
   if(!d._applied['ftr_fall_pack_v91']){
     try{ if(ftrFallPackV91(d))d._applied['ftr_fall_pack_v91']=true; }
     catch(e){ console.error('ftr_fall_pack_v91',e); }
+  }
+
+  // v93 (Froggy, Oct 25): Small Sets are their own product. The cost schedule,
+  // prices and garage get a SET entry (cost = that period's 2oz + C5-S), and the
+  // set add-ons become tracked supplies. Nothing already there is overwritten.
+  if(!d._applied['small_set_v93']){
+    try{ smallSetSeedV93(d); d._applied['small_set_v93']=true; }
+    catch(e){ console.error('small_set_v93',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -5356,7 +5367,7 @@ function rStock(){
       </div>
     </div>`;
   }).join('')}
-  ${view==='garage'?`<div style="text-align:center;margin-top:4px"><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>`:''}
+  ${view==='garage'?`<div style="display:flex;gap:8px;justify-content:center;margin-top:4px"><button class="btn btn-ghost" onclick="openBuildSets()">🎁 Build Small Sets</button><button class="btn btn-ghost" onclick="showSetAllInv()">📋 Set All Counts at Once</button></div>`:''}
   <div style="display:flex;gap:8px;margin:12px 0">
     <button class="btn btn-ghost btn-sm" style="flex:1;border-color:rgba(79,195,247,0.4);color:#7EB8F7" onclick="openTransferModal()">🔄 Transfer Stock · from the garage or between shows</button>
   </div>
@@ -5376,6 +5387,76 @@ function showRestock(){
   <button class="btn btn-gold btn-full" onclick="applyRestock()">Add to Inventory</button>`);
 }
 function applyRestock(){if(_sameTap('rst|'+_skuVals('rst_')))return;let n=0;SKUS.forEach(s=>{const v=parseInt($$('rst_'+s.key).value)||0;if(v>0){S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' units added!');}
+// ---- v93 Small Sets: 1 x 2oz + 1 x C5-S + 5x7 purple organza + microfiber cloth + pouch + mini screwdriver set ----
+// The bottles move from the garage into SET when sets are built. The add-ons are bought and logged as
+// Business Purchases, so they are NOT in COGS (v83: counted once). Their per-set cost is shown for pricing.
+// Pack prices are the Amazon orders, Oct 2026. Edit costs on the Supplies page.
+const SMALL_SET_ADDONS=[
+  {id:'sup_organza_5x7', name:'Organza Bag 5x7 (purple)', cost:0.159, unit:'ea', low:25, pack:'50 for $7.95'},
+  {id:'sup_microfiber',  name:'Microfiber Cloths',        cost:0.09,  unit:'ea', low:25, pack:'about 300 for $26.99'},
+  {id:'sup_mf_pouch',    name:'Microfiber Pouch',         cost:0.85,  unit:'ea', low:25, pack:'$16.99 pack, count not confirmed (20 assumed)'},
+  {id:'sup_screwdriver', name:'Mini Screwdriver Keychain Set', cost:0.36, unit:'ea', low:25, pack:'150 for $53.99'}
+];
+// Other organza sizes Froggy stocks (no auto charge: bags count once, as purchases).
+const ORGANZA_OTHER=[
+  {id:'sup_organza_6x9',  name:'Organza Bag 6x9 (8oz + C5-L)',        cost:0.199, unit:'ea', low:25},
+  {id:'sup_organza_8x12', name:'Organza Bag 8x12 (16oz/32oz + C5-L)', cost:0.199, unit:'ea', low:25}
+];
+function smallSetSeedV93(d){
+  (d.cogsHistory||[]).forEach(e=>{ if(e&&e.costs&&(e.costs.set==null||e.costs.set==='')){
+    const a=parseFloat(e.costs['2oz']), b=parseFloat(e.costs.c5s);
+    e.costs.set=(isFinite(a)&&isFinite(b))?Math.round((a+b)*100)/100:5.25; } });
+  d.prices=d.prices||{}; if(d.prices.set==null||d.prices.set==='')d.prices.set=20.00;
+  d.inventory=d.inventory||{}; if(d.inventory.set==null||d.inventory.set==='')d.inventory.set=0;
+  if(!Array.isArray(d.supplies))d.supplies=[];
+  SMALL_SET_ADDONS.concat(ORGANZA_OTHER).forEach(a=>{
+    const have=d.supplies.find(x=>x&&(x.id===a.id||String(x.name||'').toLowerCase()===a.name.toLowerCase()));
+    if(have){ if(have.cost==null||have.cost==='')have.cost=a.cost; return; }
+    d.supplies.push({id:a.id,name:a.name,qty:0,low:a.low,unit:a.unit,cost:a.cost,autoSizes:[]}); });
+}
+function smallSetAddonSupply(a){ return (S.supplies||[]).find(x=>x&&(x.id===a.id||String(x.name||'').toLowerCase()===a.name.toLowerCase()))||null; }
+function smallSetAddonCost(){ return SMALL_SET_ADDONS.reduce((t,a)=>{ const s=smallSetAddonSupply(a); const c=s&&s.cost!=null&&s.cost!==''?parseFloat(s.cost):a.cost; return t+(isFinite(c)?c:0); },0); }
+function smallSetBottleCost(){ return getCostOn('2oz',null,null,S)+getCostOn('c5s',null,null,S); }
+// n>0 builds n sets from the garage; n<0 breaks n sets back into bottles. Add-ons follow.
+function buildSmallSets(n){
+  n=parseInt(n,10)||0; if(!n)return {ok:false,reason:'Enter how many sets.'};
+  const inv=S.inventory; ['2oz','c5s','set'].forEach(k=>inv[k]=parseInt(inv[k])||0);
+  if(n>0&&(inv['2oz']<n||inv.c5s<n))return {ok:false,reason:'Not enough in the garage: 2oz '+inv['2oz']+', C5-S '+inv.c5s+'.'};
+  if(n<0&&inv.set<-n)return {ok:false,reason:'Only '+inv.set+' Small Sets in the garage.'};
+  inv['2oz']-=n; inv.c5s-=n; inv.set+=n;
+  const short=[];
+  SMALL_SET_ADDONS.forEach(a=>{ const s=smallSetAddonSupply(a); if(!s)return; const q=(parseInt(s.qty)||0)-n;
+    if(q<0)short.push(a.name+' '+(-q)); s.qty=Math.max(0,q); });
+  _garageWhy=n>0?('Built '+n+' Small Set'+(n>1?'s':'')):('Broke '+(-n)+' Small Set'+(n<-1?'s':'')+' back into 2oz + C5-S');
+  return {ok:true,short};
+}
+function openBuildSets(){
+  const inv=S.inventory||{}, bc=smallSetBottleCost(), ac=smallSetAddonCost(), tc=bc+ac;
+  const row=(l,v,c)=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0"><span>${l}</span><span style="${c||''}">${v}</span></div>`;
+  const mg=p=>row('Sell at '+fmt(p),fmt(p-tc)+' profit · '+Math.round((p-tc)/p*100)+'%','font-weight:800;color:var(--green)');
+  mOpen(`<div class="mh"><div class="mt">🎁 Build Small Sets</div><button class="mx" onclick="mClose()">×</button></div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Each set takes <b>1 x 2oz + 1 x C5-S</b> out of the garage and adds 1 to SET. The organza bag, cloth, pouch and screwdriver set come off Supplies.</div>
+  <div class="card" style="margin-bottom:10px">
+    ${row('Garage 2oz',inv['2oz']||0)}${row('Garage C5-S',inv.c5s||0)}${row('Small Sets built',inv.set||0,'font-weight:800;color:var(--gold)')}
+    ${SMALL_SET_ADDONS.map(a=>{const s=smallSetAddonSupply(a);return row(a.name,s?(s.qty||0)+' on hand':'not on Supplies','color:var(--muted)');}).join('')}
+  </div>
+  <div class="card" style="margin-bottom:10px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:4px">What one set costs you</div>
+    ${row('2oz + C5-S (in COGS)',fmt(bc))}
+    ${SMALL_SET_ADDONS.map(a=>{const s=smallSetAddonSupply(a);const c=s&&s.cost!=null&&s.cost!==''?parseFloat(s.cost):a.cost;return row(a.name+' <span style="color:var(--muted)">('+a.pack+')</span>',fmt(c));}).join('')}
+    ${row('<b>All in</b>','<b>'+fmt(tc)+'</b>')}
+    ${mg(20)}${mg(25)}${mg(30)}
+    <div style="font-size:10px;color:var(--muted);margin-top:4px">Add-ons are logged as Business Purchases, so the P&amp;L counts them once there, not per set.</div>
+  </div>
+  <div class="fg"><label class="fl">How many sets</label><input class="fi" type="number" id="bss_n" min="1" placeholder="e.g. 24"></div>
+  <div style="display:flex;gap:8px"><button class="btn btn-gold" style="flex:1" onclick="applyBuildSets(1)">🎁 Build</button><button class="btn btn-ghost" style="flex:1" onclick="applyBuildSets(-1)">↩️ Break apart</button></div>`);
+}
+function applyBuildSets(sign){
+  const n=Math.abs(parseInt(($$('bss_n')||{}).value,10)||0);
+  const r=buildSmallSets(sign*n); if(!r.ok){ toast('⚠️ '+r.reason,4000); return; }
+  mClose(); saveS();
+  toast((sign>0?'🎁 Built ':'↩️ Broke apart ')+n+' Small Set'+(n>1?'s':'')+(r.short.length?' · ⚠️ short on Supplies: '+r.short.join(', '):''),r.short.length?6000:3000);
+}
 function showSetAllInv(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Counts</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT count you have right now.</div>
@@ -5718,7 +5799,7 @@ function showGasLogged(sh){ let g=(sh.showExpenses||[]).filter(e=>e&&e.cat==='fu
   (sh.days||[]).forEach(d=>{ if(d&&d.expenses)g+=parseFloat(d.expenses.gas)||0; }); return g; }
 function showLunchCost(sh){ if(!showOverheadOn(sh))return 0; if(sh.repOnlyShow)return 0; /* v83: you were not there, so no lunch of yours (food receipts on the show still count on their own) */ return Math.max(0,Math.round((showOverheadDays(sh)*lunchPerDay()-showFoodLogged(sh))*100)/100); } // $20 a day; food receipts already logged count toward it
 function showBagCount(sh){ const u=(typeof showUnitsSold==='function')?showUnitsSold(sh):null; if(!u)return 0;
-  return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0); } // C5 rides in the polish bag
+  return Math.ceil((u['2oz']||0)/2)+(u['8oz']||0)+(u['16oz']||0)+(u['32oz']||0)+(u.set||0); } // C5 rides in the polish bag; a Small Set gets its own 5x7
 function showBagCost(sh){ return supplyFromPurchases()?0:showBagCount(sh)*bagUnitCost(); }
 function showFlatOverhead(sh){ return showPaperCost(sh)+showLinerCost(sh); } // paper towels + shelf liner (not on missed / passed shows). Lunch is booked as food, see showLunchCost.
 function showSupplyCost(sh){
@@ -10895,7 +10976,7 @@ function bxView(st){
     (sh.days||[]).forEach(d=>{ if(d&&d.expenses)t+=N(d.expenses.food); }); return t; };
   V.lunch=sh=>(!V.overheadOn(sh)||sh.repOnlyShow)?0:Math.max(0,Math.round((V.overheadDays(sh)*V.setting('lunchPerDay',20)-V.foodLogged(sh))*100)/100);
   V.bagCount=sh=>{ const u=V.unitsSold(sh);
-    return Math.ceil(N(u['2oz'])/2)+N(u['8oz'])+N(u['16oz'])+N(u['32oz']); };
+    return Math.ceil(N(u['2oz'])/2)+N(u['8oz'])+N(u['16oz'])+N(u['32oz'])+N(u.set); };
   V.flatOverhead=sh=>V.paperCost(sh)+V.linerCost(sh);
   V.autoSupplyUnits=sh=>{ const sold=V.unitsSold(sh), out={};
     (A.supplies||[]).forEach(sup=>{ if(sup.autoSizes&&sup.autoSizes.length){ let q=0;

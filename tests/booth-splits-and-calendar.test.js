@@ -33,7 +33,7 @@ const R=reporter();
 const chk=R.check;
 
 const FUTURE='2099-06-15';
-const SK=['32oz','16oz','8oz','2oz','c5s','c5l'];
+const SK=['32oz','16oz','8oz','2oz','c5s','c5l','set'];
 const PK=['cash','square','debit','venmo','zelle','cashapp','paypal'];
 const cnt=o=>{const r={};SK.forEach(k=>r[k]=o[k]||0);return r;};
 const pmt=o=>{const r={};PK.forEach(k=>r[k]=o[k]||0);return r;};
