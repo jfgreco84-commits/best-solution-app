@@ -549,7 +549,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v95';
+const APP_VERSION='v96';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -3031,8 +3031,9 @@ function saveS(){
   try{ commissionSyncAll(); }catch(e){ console.warn('commissionSync',e); }
   S._updatedAt=new Date().toISOString();
   if(S._readOnlyBlank){ toast('⚠️ Not saved: your real data is kept safe. Restore it from Setup → Advanced → Device Backups first.',6000); renderCur(); return; }
+  dailyCopy(); // v96: before this save, so the day's copy is how the day started
   if(!_saveLocal())return;
-  dailyCopy(); renderCur();
+  renderCur();
   if(moved.length)setTimeout(()=>toast('🛡️ Audit: '+moved.join(' · '),5000),2300);
   cloudQueuePush();}
 function renderCur(){
@@ -4143,13 +4144,24 @@ function bestShowCardHTML(sh,label){
     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px">${pmts}</div>
   </div>`;
 }
-function calcYTD(){
+// v96: the money year. A show belongs to the year it starts in; a purchase, an online sale and a
+// trip to their own date; no date means this year. Home always shows this year; the P&L can look
+// back (January: last year's numbers for the accountant).
+let _finYear=null;
+function finYear(){ return _finYear||_todayKey().slice(0,4); }
+function _inYear(date,Y){ const d=String(date||''); return (/^\d{4}-\d{2}-\d{2}/.test(d)?d.slice(0,4):_todayKey().slice(0,4))===String(Y||finYear()); }
+function yrShows(Y){ return (S.shows||[]).filter(sh=>sh&&_inYear(sh.startDate,Y)); }
+function yrOther(Y){ return (S.otherExpenses||[]).filter(e=>e&&_inYear(e.date,Y)); }
+function finYears(){ const y=new Set([_todayKey().slice(0,4)]); (S.shows||[]).forEach(sh=>{ if(sh&&(sh.status==='completed'||sh.status==='active')&&/^\d{4}/.test(sh.startDate||''))y.add(sh.startDate.slice(0,4)); }); return [...y].sort(); }
+function setFinYear(y){ _finYear=(y===_todayKey().slice(0,4))?null:String(y); renderCur(); }
+function calcYTD(Y){
+  Y=String(Y||finYear());
   let gross=0,cogs=0,expenses=0,units={};
   SKUS.forEach(s=>units[s.key]=0);
   let pmtTotals={cash:0,square:0,debit:0,venmo:0,paypal:0,cashapp:0,zelle:0};
   let miles=0,gas=0,taxResSum=0,cardFeesSum=0,salesTaxSum=0,irsDeduct=0,ownGas=0,allMiles=0;
   // GROSS counts money collected from COMPLETED shows AND completed days of in-progress (active) multi-day shows.
-  S.shows.filter(s=>s.status==='completed'||s.status==='active').forEach(sh=>{
+  yrShows(Y).filter(s=>s.status==='completed'||s.status==='active').forEach(sh=>{
     const t=calcShow(sh);gross+=t.gross;cogs+=t.cogs;expenses+=t.expenses;cardFeesSum+=t.cardFees||0;salesTaxSum+=t.salesTax||0;
     taxResSum+=t.taxRes;
     miles+=showIrsMiles(sh); allMiles+=showMiles(sh); irsDeduct+=showIrsDeduct(sh); ownGas+=showOwnGas(sh,t); // v93: business miles = your own truck only, IRS rate by date
@@ -4161,16 +4173,16 @@ function calcYTD(){
   });
   // Missed / passed shows: what was paid on them is gone, so it counts. Deposits on shows still
   // to come are paid ahead (v82) and count when the show is worked.
-  S.shows.filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).forEach(sh=>{ expenses+=unworkedSpend(sh); });
+  yrShows(Y).filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).forEach(sh=>{ expenses+=unworkedSpend(sh); });
   const paidAhead=paidAheadTotal();
   // Other expenses: supplies, equipment, misc — logged separately
-  const otherSpend=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const otherSpend=yrOther(Y).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   expenses+=otherSpend;
   // v79: online sales (mailed from the garage) are business income too: money in, bottle cost, postage.
-  const ol=(typeof olTotals==='function')?olTotals():{amount:0,cost:0,postage:0,units:0,orders:0};
+  const ol=(typeof olTotals==='function')?olTotals(Y):{amount:0,cost:0,postage:0,units:0,orders:0};
   gross+=ol.amount; cogs+=ol.cost; expenses+=ol.postage;
   // Total rep pay earned across all shows
-  const totalRepPay=(S.shows||[]).reduce((t,sh)=>t+showRepPayTotal(sh),0);
+  const totalRepPay=yrShows(Y).reduce((t,sh)=>t+showRepPayTotal(sh),0);
   // (rep pay already included in expenses via calcShow/boothPaid paths above)
   const profit=gross-salesTaxSum-cogs-expenses;
   // v48: the reserve is on the YEAR's net profit, so a losing show offsets a winning one
@@ -4179,7 +4191,7 @@ function calcYTD(){
   const totalUnits=Object.values(units).reduce((a,b)=>a+b,0);
   // v93: on the tax return the standard mileage rate REPLACES your own truck's gas (gas paid for a rep's car stays deductible)
   let tripPark=0;
-  (S.settings&&Array.isArray(S.settings.businessTrips)?S.settings.businessTrips:[]).forEach(t=>{ if(!t||String(t.date||'').slice(0,4)!==_todayKey().slice(0,4))return; const m=parseFloat(t.miles)||0; miles+=m; allMiles+=m; irsDeduct+=m*irsRateOn(t.date); tripPark+=parseFloat(t.park)||0; }); // v93: supply runs, post office, product pickups
+  (S.settings&&Array.isArray(S.settings.businessTrips)?S.settings.businessTrips:[]).forEach(t=>{ if(!t||!_inYear(t.date,Y))return; const m=parseFloat(t.miles)||0; miles+=m; allMiles+=m; irsDeduct+=m*irsRateOn(t.date); tripPark+=parseFloat(t.park)||0; }); // v93: supply runs, post office, product pickups
   const taxProfit=profit+ownGas-irsDeduct-tripPark;
   return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum,online:ol,paidAhead,irsDeduct,ownGas,taxProfit,allMiles};
 }
@@ -4342,7 +4354,7 @@ function depositAlerts(withinDays){
 }
 
 function rHome(){
-  const ytd=calcYTD();
+  const ytd=calcYTD(_todayKey().slice(0,4));
   const invCost=calcInvCost(S.inventory);
   const invRetail=calcInvRetail(S.inventory);
   const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
@@ -4357,7 +4369,7 @@ function rHome(){
   const completedTax=done.reduce((t,sh)=>t+calcShow(sh).taxRes,0); // completed-only tax (pairs with Completed Shows Net)
   const avgShowProfit=done.length?completedNet/done.length:0;
   const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
-  const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0; // gross ÷ shows that actually had sales
+  const avgShowGross=sellShows.length?(ytd.gross-((ytd.online&&ytd.online.amount)||0))/sellShows.length:0; // gross ÷ shows that actually had sales // v96: show gross only, online sales are not a show
   // Yearly overhead shown SEPARATELY (not mixed into show profit)
   const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).reduce((t,sh)=>t+boothPaid(sh),0); // v82: only money lost on missed/passed shows; paid-ahead deposits wait for their show
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
@@ -4481,14 +4493,14 @@ function rHome(){
     // v82: compare like with like. 2025's figure is net profit BEFORE tax, so the bar uses this year's net, not the after-tax keep.
     const pct=prevNet>0?Math.max(0,Math.min(100,Math.round((yearNet/prevNet)*100))):0;
     html+=`<div class="card gb" style="text-align:center;margin-bottom:8px">
-      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:1px">2026 so far — yours to keep</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:1px">${_todayKey().slice(0,4)} so far — yours to keep</div>
       <div style="font-size:40px;font-weight:900;color:${cleanKeep>=0?'var(--green)':'var(--red)'};line-height:1.15">${fmt(cleanKeep)}</div>
       <div style="font-size:11px;color:var(--muted)">after everything (product, booths, gas, supplies, crew, business purchases, sales tax) and the ${Math.round(S.settings.tax*100)}% tax reserve · same number as the P&amp;L tab</div>
       ${prevNet>0?`<div style="margin-top:8px"><div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--card2)"><div style="background:var(--green);width:${pct}%"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px"><span>Net ${fmt(yearNet)} = ${pct}% of 2025 net (${fmt(prevNet)})</span><span>${yearNet>=prevNet?'🏆 BEAT LAST YEAR!':fmt(Math.max(0,prevNet-yearNet))+' to go'}</span></div></div>`:''}
     </div>`;
   })();
   // ---- SEASON OVERVIEW (completed-show economics; overhead shown separately) ----
-  html+=`<div class="sec-lbl">2026 SEASON OVERVIEW</div>
+  html+=`<div class="sec-lbl">${_todayKey().slice(0,4)} SEASON OVERVIEW</div>
   <div class="g2" style="margin-bottom:8px">
     <div class="sbox gb"><div class="sl">YTD GROSS (collected)</div><div class="sv">${fmt(ytd.gross)}</div><div class="ss">money collected · ${sellShows.length} show${sellShows.length!==1?'s':''} w/ sales (incl. in-progress)</div></div>
     <div class="sbox"><div class="sl">AVG / SHOW GROSS</div><div class="sv sm w">${fmt(avgShowGross)}</div><div class="ss">Gross ÷ shows w/ sales</div></div>
@@ -4537,7 +4549,7 @@ function rHome(){
 // Shared dashboard context — same computations rHome uses, gathered for the
 // detail views. No business logic changed; these only READ existing functions.
 function homeCtx(){
-  const ytd=calcYTD();
+  const ytd=calcYTD(_todayKey().slice(0,4));
   const invCost=calcInvCost(S.inventory);
   const invRetail=calcInvRetail(S.inventory);
   const invUnits=SKUS.reduce((t,s)=>t+(S.inventory[s.key]||0),0);
@@ -4550,7 +4562,7 @@ function homeCtx(){
   const completedTax=done.reduce((t,sh)=>t+calcShow(sh).taxRes,0);
   const avgShowProfit=done.length?completedNet/done.length:0;
   const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
-  const avgShowGross=sellShows.length?ytd.gross/sellShows.length:0;
+  const avgShowGross=sellShows.length?(ytd.gross-((ytd.online&&ytd.online.amount)||0))/sellShows.length:0; // v96: show gross only, online sales are not a show
   const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).reduce((t,sh)=>t+boothPaid(sh),0); // v82: only money lost on missed/passed shows; paid-ahead deposits wait for their show
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
   // v79: ONE profit number. Home, P&L tab and exports all use the year's figures (calcYTD), overhead included.
@@ -4880,7 +4892,7 @@ function secInventory(C){
 function secMileage(C){
   if(!(C.ytd.allMiles>0)&&!((S.settings||{}).businessTrips||[]).length)return '';
   // Same shows calcYTD counts (completed + running), newest first, so the rows add up to the totals.
-  const list=(S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
+  const list=yrShows(_todayKey().slice(0,4)).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?1:-1);
   const dt=sh=>(sh.startDate&&/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))?new Date(sh.startDate+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
   const gasTotal=C.ytd.gas!=null?C.ytd.gas:C.ytd.miles/S.settings.mpg*S.settings.gasPrice;
   const rt=r=>'$'+r.toFixed(3).replace(/0$/,'');
@@ -4888,6 +4900,9 @@ function secMileage(C){
   const line=(l,v)=>`<div class="mi-d"><span>${l}</span><span>${v}</span></div>`;
   const rows=list.map(sh=>{
     const mi=showMiles(sh),gas=showGas(sh),trips=showRoundTrips(sh),irsMi=showIrsMiles(sh),rate=showIrsRate(sh),mkt=gasMarketPrice(sh);
+    // v96: the row shows the gas this show booked (estimate + receipts), the same number Gas Spent adds up
+    const gasRcpt=(sh.days||[]).reduce((t,d)=>t+((d&&d.expenses)?(parseFloat(d.expenses.gas)||0):0),0)+(sh.showExpenses||[]).filter(e=>e&&e.cat==='fuel').reduce((a,e)=>a+(parseFloat(e.amount)||0),0);
+    const gasBooked=(calcShow(sh).gasAuto||0)+gasRcpt;
     const route=parseFloat(sh.totalMiles)>0;
     const manualGas=sh.gasOverride!=null&&sh.gasOverride!=='';
     const tripsSet=sh.roundTrips!=null&&sh.roundTrips!=='';
@@ -4900,12 +4915,13 @@ function secMileage(C){
         :line('IRS deduction',`${fmtN(mi)} mi × ${rt(rate)} = <b class="mi-g">${fmt(mi*rate)}</b>`),
       manualGas?line('Gas','<b>'+fmt(gas)+'</b> <i>(entered)</i>')
         :line('Gas (est.)',`${fmtN(mi)} mi ÷ ${showMpg(sh)} mpg × $${showGasPrice(sh).toFixed(2)} = <b>${fmt(gas)}</b>`),
+      gasRcpt>0?line('Gas receipts',`<b>${fmt(gasRcpt)}</b>`):'',
       (mkt!=null&&Math.abs(mkt-showGasPrice(sh))>0.005)?line('Area price that week',`$${mkt.toFixed(2)} <i>(your show is set to $${showGasPrice(sh).toFixed(2)})</i>`):'',
       (parseFloat(sh.lodging)||0)>0?line('Lodging',fmt(parseFloat(sh.lodging))):''
     ].join(''):`<div class="mi-d"><span>No miles entered. Add them in ✏️ Edit Show.</span></div>`;
     return `<details class="mi-r${mi>0?'':' mi-none'}"><summary>
         <div class="mi-n">${_esc(sh.name)}<span class="mi-s">${dt(sh)}${sh.status==='active'?' · LIVE':''}</span></div>
-        <div class="mi-v">${mi>0?fmtN(mi):'—'}</div><div class="mi-v mi-g">${irsMi>0?fmt(irsMi*rate):'—'}</div><div class="mi-v">${gas>0?fmt(gas):'—'}</div>
+        <div class="mi-v">${mi>0?fmtN(mi):'—'}</div><div class="mi-v mi-g">${irsMi>0?fmt(irsMi*rate):'—'}</div><div class="mi-v">${gasBooked>0?fmt(gasBooked):'—'}</div>
       </summary><div class="mi-x">${det}</div></details>`;
   }).join('');
   return `<div class="card">
@@ -5160,8 +5176,8 @@ function olSaleCost(x){ return (x.items||[]).reduce((t,i)=>t+(parseInt(i.qty)||0
 function olSaleProfit(x){ return (parseFloat(x.amount)||0)-(parseFloat(x.postage)||0)-olSaleCost(x); }
 function olItemsText(x){ return (x.items||[]).map(i=>i.qty+' '+skuShort(i.sku)).join(', '); }
 function olMoveGarage(items,sign){ (items||[]).forEach(i=>{ S.inventory[i.sku]=(parseInt(S.inventory[i.sku])||0)+sign*(parseInt(i.qty)||0); }); }
-function olTotals(){
-  const L=olSales(), t={orders:L.length,units:0,amount:0,postage:0,cost:0,profit:0,bySku:{}};
+function olTotals(Y){
+  const L=Y?olSales().filter(x=>_inYear(x.date,Y)):olSales(), t={orders:L.length,units:0,amount:0,postage:0,cost:0,profit:0,bySku:{}};
   L.forEach(x=>{ t.units+=olUnits(x); t.amount+=parseFloat(x.amount)||0; t.postage+=parseFloat(x.postage)||0; t.cost+=olSaleCost(x);
     (x.items||[]).forEach(i=>t.bySku[i.sku]=(t.bySku[i.sku]||0)+(parseInt(i.qty)||0)); });
   t.profit=t.amount-t.postage-t.cost; return t;
@@ -5285,11 +5301,11 @@ function rSection(){
     workload:{t:'Workload',f:secWorkload},
     inventory:{t:'Master Inventory',f:secInventory},
     mileage:{t:'Mileage & Tax Deduction',f:secMileage},
-    booth:{t:'Booth Costs — 2026 Season',f:secBooth},
+    booth:{t:'Booth Costs — '+_todayKey().slice(0,4)+' Season',f:secBooth},
     expenses:{t:'Other Expenses',f:secExpenses},
     debt:{t:'Product Debt — '+((S.productDebt||{}).supplier||'Mark Martone'),f:secDebt},
     split:{t:'Money Split — Completed Shows',f:secSplit},
-    payments:{t:'Payment Breakdown — 2026 Season',f:secPayments},
+    payments:{t:'Payment Breakdown — '+_todayKey().slice(0,4)+' Season',f:secPayments},
     best:{t:'Top 10 Shows This Season',f:secBest},
     batman:{t:'Borrowed from Batman',f:secBatman},
     online:{t:'Online Sales',f:secOnline}
@@ -5584,7 +5600,7 @@ function rShows(){
   const tab=(showsTab==='completed')?'completed':(showsTab==='missed'?'missed':(showsTab==='passed'?'passed':'upcoming'));
   let list=tab==='completed'?completed:(tab==='missed'?missed:(tab==='passed'?passed:upcoming));
   let pf=null,B=null;
-  let h=viewToggleHTML(['shows','📋 Shows list'],['calendar','📅 Calendar'],'shows')+`<div class="sec-row"><div class="sec-title">🎪 Shows — 2026</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
+  let h=viewToggleHTML(['shows','📋 Shows list'],['calendar','📅 Calendar'],'shows')+`<div class="sec-row"><div class="sec-title">🎪 Shows — ${_todayKey().slice(0,4)}</div><button class="btn btn-gold btn-sm" onclick="showNewShowModal()">+ New Show</button></div>`;
   h+=`<div style="display:flex;gap:6px;margin-bottom:12px">
     <button class="btn ${tab==='upcoming'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='upcoming';pipeFilterReset();rShows()">📅 Upcoming (${upcoming.length})</button>
     <button class="btn ${tab==='completed'?'btn-gold':'btn-ghost'} btn-sm" style="flex:1;padding-left:4px;padding-right:4px" onclick="showsTab='completed';pipeFilterReset();rShows()">✅ Completed (${completed.length})</button>
@@ -5855,7 +5871,7 @@ function showOwnGas(sh,t){ if(!sh)return 0; const vv=vehRows(sh,S.settings);
   (sh.showExpenses||[]).forEach(e=>{ if(e&&e.cat==='fuel'&&!_isOtherCarFuel(e))g+=parseFloat(e.amount)||0; });
   if(vv){ const all=vv.reduce((a,v)=>a+v.gas,0), ram=vv.filter(v=>v.ram).reduce((a,v)=>a+v.gas,0); return all>0?g*ram/all:0; } // v94: the Ram's share of the gas
   return g; }
-function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax||0.28); }
+function showTaxRate(sh){ return (sh.taxRate!=null && sh.taxRate!=='') ? (parseFloat(sh.taxRate)||0) : (S.settings.tax!=null&&S.settings.tax!==''?(parseFloat(S.settings.tax)||0):0.28); }
 // Card/Square sales = taxable base. Counts only card-type payments (Square + Debit), NOT cash/Venmo/Zelle/etc.
 function showCardSales(sh){
   let t=0;
@@ -5953,7 +5969,7 @@ function resizeShowDays(sh,newND){
 function showEditCosts(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return; window.__ecId=id; window.__ecVeh=JSON.parse(JSON.stringify(Array.isArray(sh.vehicles)?sh.vehicles:[]));
   const autoGas=showGas(Object.assign({},sh,{gasOverride:null})); // v93: same miles, mpg and price as the preview
-  const gpct=Math.round((S.settings.tax||0.28)*100);
+  const gpct=Math.round((S.settings.tax!=null&&S.settings.tax!==''?(parseFloat(S.settings.tax)||0):0.28)*100);
   const esc=v=>(v||'').replace(/"/g,'&quot;');
   mOpen(`<div class="mh"><div class="mt">✏️ Edit Show</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="padding:8px 0 12px;font-size:13px;color:var(--muted)">Edit anything below, then Save.</div>
@@ -6396,9 +6412,9 @@ function delShowExp(id,idx){
 // P&L TAB
 // ===================================================
 function rPnL(){
-  const y=new Date().getFullYear();
-  const ytd=calcYTD();
-  const tax=S.settings.tax||0.28;
+  const Y=finYear(), y=Y;
+  const ytd=calcYTD(Y);
+  const tax=(S.settings.tax!=null&&S.settings.tax!==''?(parseFloat(S.settings.tax)||0):0.28);
   const taxAmt=ytd.taxRes; // % of the year's net profit (losses offset wins)
   const keep=Math.max(0,ytd.profit-taxAmt);
   const qtr=taxAmt/4;
@@ -6406,7 +6422,7 @@ function rPnL(){
   // Expense breakdown, v48: built from calcShow's own parts (+ future-show
   // deposits + business purchases) so the lines add up to Total Expenses.
   let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0,gasTotal=0,supplyTotal=0,lunchTotal=0,repTotal=0,workerTotal=0,feeTotal=0;
-  S.shows.forEach(sh=>{
+  yrShows(Y).forEach(sh=>{
     if(sh.status==='completed'||sh.status==='active'){
       const t=calcShow(sh);
       boothTotal+=t.booth; gasTotal+=t.gasAuto; supplyTotal+=t.supplyCost; lunchTotal+=t.lunch||0; repTotal+=t.repPay; workerTotal+=t.workerPay; feeTotal+=t.cardFees;
@@ -6422,11 +6438,11 @@ function rPnL(){
   const globalSupply=ytd.otherSpend||0;
 
   // Show-by-show P&L for completed shows
-  const done=S.shows.filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
+  const done=yrShows(Y).filter(s=>s.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
 
   // Category expense breakdown across all shows
   const catTotals={};
-  S.shows.forEach(sh=>{
+  yrShows(Y).forEach(sh=>{
     (sh.showExpenses||[]).forEach(e=>{
       catTotals[e.cat]=(catTotals[e.cat]||0)+(parseFloat(e.amount)||0);
     });
@@ -6435,7 +6451,7 @@ function rPnL(){
   const margin=ytd.gross>0?Math.round((ytd.profit/ytd.gross)*100):0;
   const expenseTotal=ytd.expenses;
 
-  let h=`<div class="sec-title" style="margin-bottom:12px">💰 P&amp;L — ${y}</div>`;
+  let h=`<div class="sec-title" style="margin-bottom:12px">💰 P&amp;L — ${y}</div>`+(finYears().length>1?`<div style="display:flex;gap:6px;margin:-4px 0 12px">${finYears().map(v=>`<button class="btn btn-sm ${v===Y?'btn-gold':'btn-ghost'}" style="flex:1" onclick="setFinYear('${v}')">${v}</button>`).join('')}</div>`:'');
 
   // Top summary
   h+=`<div class="card gb" style="margin-bottom:12px">
@@ -6970,8 +6986,8 @@ function _slug(s){ return String(s||'show').replace(/[^a-z0-9]+/gi,'-').toLowerC
 
 // ===== Accountant Package (one-tap year-end export) =====
 function exportAccountantPkg(){
-  const y=calcYTD(); const rows=[];
-  rows.push(['BEST SOLUTION — ACCOUNTANT PACKAGE','generated '+_todayKey()]);
+  const y=calcYTD(finYear()); const rows=[];
+  rows.push(['BEST SOLUTION — ACCOUNTANT PACKAGE — '+finYear(),'generated '+_todayKey()]);
   rows.push([]);
   rows.push(['SEASON SUMMARY (completed + active shows + online sales)']);
   rows.push(['Money collected (incl. sales tax)',y.gross.toFixed(2)]);
@@ -6984,21 +7000,21 @@ function exportAccountantPkg(){
   rows.push(['Net profit',y.profit.toFixed(2)]);
   rows.push(['Income tax reserve ('+Math.round((S.settings.tax||0)*100)+'%)',y.taxRes.toFixed(2)]);
   rows.push(['Business miles (your own truck, 2017 Ram 1500)',Math.round(y.miles)]);
-  rows.push(['IRS mileage deduction (72.5c/mi Jan-Jun 2026, 76c/mi from Jul 1)',(y.irsDeduct||0).toFixed(2)]);
+  rows.push([finYear()==='2026'?'IRS mileage deduction (72.5c/mi Jan-Jun 2026, 76c/mi from Jul 1)':'IRS mileage deduction (IRS rate on each trip date)',(y.irsDeduct||0).toFixed(2)]);
   rows.push(['Gas for your own truck inside total expenses (replaced by the mileage rate, do not deduct both)',(y.ownGas||0).toFixed(2)]);
   rows.push(['Net profit for the tax return using standard mileage (net profit + own truck gas - mileage)',(y.taxProfit||0).toFixed(2)]);
   rows.push([]);
   rows.push(['PER SHOW']);
   rows.push(['Show','Start Date','Status','Collected','Sales Tax Owed','COGS','Booth (paid basis)','Gas (auto)','Card Fees','Rep Pay','Worker Pay','Supplies','Lunch','Profit','Tax Reserve','Miles']);
-  (S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{
+  yrShows(finYear()).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{
     const t=calcShow(sh);
     rows.push([sh.name,sh.startDate||'',sh.status,t.gross.toFixed(2),(t.salesTax||0).toFixed(2),t.cogs.toFixed(2),(t.booth||sh.boothCost||0).toFixed(2),(t.gasAuto||0).toFixed(2),(t.cardFees||0).toFixed(2),t.repPay.toFixed(2),t.workerPay.toFixed(2),(t.supplyCost||0).toFixed(2),(t.lunch||0).toFixed(2),t.profit.toFixed(2),t.taxRes.toFixed(2),Math.round(showMiles(sh))]);
   });
   rows.push([]);
   rows.push(['BUSINESS EXPENSES (year-round ledger, not per-show)']);
   rows.push(['Date','Category','Amount','Note']);
-  (S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
-  rows.push(['TOTAL','',(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
+  yrOther(finYear()).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
+  rows.push(['TOTAL','',yrOther(finYear()).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
   rows.push([]);
   // v82: deposits on shows still to come are not in the net profit above; list them so the accountant can place them
   const ahead=(S.shows||[]).filter(isPaidAhead).filter(sh=>unworkedSpend(sh)>0.005).sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||'')));
@@ -7020,7 +7036,7 @@ function exportAccountantPkg(){
 // The IRS wants this written at the time (date, destination, business purpose, miles), so it is built from the shows.
 function mileageLogRows(){
   const home='Waterford, WI', rows=[];
-  (S.shows||[]).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||''))).forEach(sh=>{
+  yrShows(finYear()).filter(s=>s.status==='completed'||s.status==='active').sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||''))).forEach(sh=>{
     const why='Best Solution booth: '+(sh.name||'show'), to=sh.location||sh.name||'';
     const park=di=>{ const d=(sh.days||[])[di]; return d&&d.expenses?(parseFloat(d.expenses.parking)||0):0; };
     const vv=vehRows(sh,S.settings);
@@ -7037,7 +7053,7 @@ function mileageLogRows(){
       for(let i=0;i<n;i++)rows.push({date:_gasDayAdd(sh.startDate,i),from:home,to:to+' and back',why:why+(n>1?' (day '+(i+1)+')':''),miles:one*2,park:park(i)});
     } else rows.push({date:sh.startDate,from:home,to:to+' and back',why:why+' ('+n+' day'+(n>1?'s':'')+', '+trips+' round trip'+(trips===1?'':'s')+')',miles:total,park:(sh.days||[]).reduce((t,d,i)=>t+park(i),0)});
   });
-  (S.settings&&Array.isArray(S.settings.businessTrips)?S.settings.businessTrips:[]).forEach(t=>{ if(t&&parseFloat(t.miles)>0)rows.push({date:t.date,from:'Waterford, WI',to:(t.to||'')+' and back',why:t.why||'Business errand',miles:parseFloat(t.miles)||0,park:parseFloat(t.park)||0}); });
+  (S.settings&&Array.isArray(S.settings.businessTrips)?S.settings.businessTrips:[]).forEach(t=>{ if(t&&parseFloat(t.miles)>0&&_inYear(t.date,finYear()))rows.push({date:t.date,from:'Waterford, WI',to:(t.to||'')+' and back',why:t.why||'Business errand',miles:parseFloat(t.miles)||0,park:parseFloat(t.park)||0}); });
   rows.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
   rows.forEach(r=>{ r.rate=irsRateOn(r.date); r.deduct=r.miles*r.rate; });
   return rows;
@@ -7069,16 +7085,16 @@ function exportMileageLog(){
   out.push(['Supply runs, post office trips for online orders and product pickups go in Mileage > Log a business trip so they land here too.']);
   dlFile('best-solution-mileage-log-'+_stamp()+'.csv',_csvRows(out),'text/csv');
 }
-function seasonFutureSpend(){ return (S.shows||[]).filter(sh=>sh.status!=='completed'&&sh.status!=='active'&&!isPaidAhead(sh)).reduce((t,sh)=>t+unworkedSpend(sh),0); } // v82: missed/passed shows only
+function seasonFutureSpend(){ return yrShows(finYear()).filter(sh=>sh.status!=='completed'&&sh.status!=='active'&&!isPaidAhead(sh)).reduce((t,sh)=>t+unworkedSpend(sh),0); } // v82: missed/passed shows only
 function exportSeasonCSV(){
   const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Rep Pay','Worker Payouts','Net Profit','Tax Reserve']];
-  (S.shows||[]).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
+  yrShows(finYear()).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
     rows.push([sh.name,sh.status,(sh.dates||[]).join(' - '),sh.location||'',sh.numDays||1,showPotentialRev(sh).toFixed(2),showActualRev(sh).toFixed(2),showDiscountTotal(sh).toFixed(2),t.cogs.toFixed(2),t.expenses.toFixed(2),(t.repPay||0).toFixed(2),(t.workerPay||0).toFixed(2),t.profit.toFixed(2),(t.taxRes||0).toFixed(2)]); });
-  const y=calcYTD(); const seasonWorkerPay=(S.shows||[]).reduce((tt,sh)=>tt+(calcShow(sh).workerPay||0),0);
+  const y=calcYTD(finYear()); const seasonWorkerPay=yrShows(finYear()).reduce((tt,sh)=>tt+(calcShow(sh).workerPay||0),0);
   // v48: the rows add up to the total. Future shows only carry what was already paid.
   const fut=seasonFutureSpend(); rows.push(['Missed / passed shows: money already spent','','','','','','','','',fut.toFixed(2),'','',(-fut).toFixed(2),'']);
   const ahead=paidAheadTotal(); if(ahead>0.005)rows.push(['Paid ahead for upcoming shows: '+ahead.toFixed(2)+' (not in profit until each show is worked)','','','','','','','','','','','','0.00','']);
-  const oth=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0); rows.push(['Business purchases (Other Expenses)','','','','','','','','',oth.toFixed(2),'','',(-oth).toFixed(2),'']);
+  const oth=yrOther(finYear()).reduce((t,e)=>t+(parseFloat(e.amount)||0),0); rows.push(['Business purchases (Other Expenses)','','','','','','','','',oth.toFixed(2),'','',(-oth).toFixed(2),'']);
   const ol=y.online||{orders:0}; if(ol.orders)rows.push(['Online sales ('+ol.orders+' orders, mailed from the garage)','','','','','',ol.amount.toFixed(2),'',ol.cost.toFixed(2),ol.postage.toFixed(2),'','',(ol.amount-ol.cost-ol.postage).toFixed(2),'']);
   rows.push([]); rows.push(['SEASON TOTAL','','','','','','','',y.cogs.toFixed(2),y.expenses.toFixed(2),(y.totalRepPay||0).toFixed(2),seasonWorkerPay.toFixed(2),y.profit.toFixed(2),(y.taxRes||0).toFixed(2)]);
   dlFile('best-solution-season-'+_stamp()+'.csv',_csvRows(rows));
@@ -7154,8 +7170,8 @@ function exportRepCSV(){
 }
 function exportExpensesCSV(){
   const rows=[['Date','Category','Amount','Note']];
-  (S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
-  rows.push([]); rows.push(['TOTAL','',(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
+  yrOther(finYear()).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(e=>rows.push([e.date||'',e.category||'',(parseFloat(e.amount)||0).toFixed(2),e.note||'']));
+  rows.push([]); rows.push(['TOTAL','',yrOther(finYear()).reduce((t,e)=>t+(parseFloat(e.amount)||0),0).toFixed(2),'']);
   dlFile('best-solution-expenses-'+_stamp()+'.csv',_csvRows(rows));
 }
 function _money(n){return '$'+(Number(n)||0).toFixed(2);}
@@ -7172,15 +7188,15 @@ function _printHTML(title,body){
   setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
 function printFullReport(){
-  const y=calcYTD();
-  const showRows=(S.shows||[]).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).map(sh=>{const t=calcShow(sh);return '<tr><td>'+_esc(sh.name)+'</td><td>'+sh.status+'</td><td>'+_esc((sh.dates||[]).join(' - '))+'</td><td class="r">'+_money(showPotentialRev(sh))+'</td><td class="r">'+_money(showActualRev(sh))+'</td><td class="r">'+_money(t.cogs)+'</td><td class="r">'+_money(t.expenses)+'</td><td class="r">'+_money(t.profit)+'</td></tr>';}).join('');
-  const _fut=seasonFutureSpend(), _oth=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const y=calcYTD(finYear());
+  const showRows=yrShows(finYear()).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).map(sh=>{const t=calcShow(sh);return '<tr><td>'+_esc(sh.name)+'</td><td>'+sh.status+'</td><td>'+_esc((sh.dates||[]).join(' - '))+'</td><td class="r">'+_money(showPotentialRev(sh))+'</td><td class="r">'+_money(showActualRev(sh))+'</td><td class="r">'+_money(t.cogs)+'</td><td class="r">'+_money(t.expenses)+'</td><td class="r">'+_money(t.profit)+'</td></tr>';}).join('');
+  const _fut=seasonFutureSpend(), _oth=yrOther(finYear()).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   const showRowsAll=showRows+'<tr><td>Missed / passed shows: money already spent</td><td></td><td></td><td></td><td></td><td></td><td class="r">'+_money(_fut)+'</td><td class="r">'+_money(-_fut)+'</td></tr><tr><td>Business purchases (Other Expenses)</td><td></td><td></td><td></td><td></td><td></td><td class="r">'+_money(_oth)+'</td><td class="r">'+_money(-_oth)+'</td></tr><tr class="tot"><td>SEASON TOTAL</td><td></td><td></td><td></td><td class="r">'+_money(y.gross)+'</td><td class="r">'+_money(y.cogs)+'</td><td class="r">'+_money(y.expenses)+'</td><td class="r">'+_money(y.profit)+'</td></tr>';
   const repRows=(S.reps||[]).filter(r=>!r.isSelf).map(r=>{const e=repEarned(r.id),p=repPaid(r.id);return (e>0||p>0)?'<tr><td>'+_esc(r.name)+'</td><td class="r">'+_money(e)+'</td><td class="r">'+_money(p)+'</td><td class="r">'+_money(Math.max(0,e-p))+'</td></tr>':'';}).join('');
-  const expRows=(S.otherExpenses||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(e=>'<tr><td>'+_esc(e.date||'')+'</td><td>'+_esc(e.category||'')+'</td><td class="r">'+_money(e.amount)+'</td><td>'+_esc(e.note||'')+'</td></tr>').join('');
-  const expTot=(S.otherExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
+  const expRows=yrOther(finYear()).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(e=>'<tr><td>'+_esc(e.date||'')+'</td><td>'+_esc(e.category||'')+'</td><td class="r">'+_money(e.amount)+'</td><td>'+_esc(e.note||'')+'</td></tr>').join('');
+  const expTot=yrOther(finYear()).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
   _printHTML('Best Solution — Season Report',
-    '<h1>Best Solution — 2026 Season Report</h1><div class="muted">Generated '+_stamp()+' · Dot Dynasty LLC</div>'+
+    '<h1>Best Solution — '+finYear()+' Season Report</h1><div class="muted">Generated '+_stamp()+' · Dot Dynasty LLC</div>'+
     '<h2>Season Totals</h2><table><tr><th>Gross</th><th>COGS</th><th>Expenses</th><th>Net Profit</th><th>Tax Reserve</th><th>Units Sold</th></tr><tr class="tot"><td class="r">'+_money(y.gross)+'</td><td class="r">'+_money(y.cogs)+'</td><td class="r">'+_money(y.expenses)+'</td><td class="r">'+_money(y.profit)+'</td><td class="r">'+_money(y.taxRes)+'</td><td class="r">'+fmtN(y.totalUnits)+'</td></tr></table>'+
     '<h2>All Shows</h2><table><tr><th>Show</th><th>Status</th><th>Dates</th><th>Potential</th><th>Collected</th><th>COGS</th><th>Expenses</th><th>Profit</th></tr>'+showRowsAll+'</table>'+
     (repRows?'<h2>Rep Pay</h2><table><tr><th>Rep</th><th>Earned</th><th>Paid</th><th>Owed</th></tr>'+repRows+'</table>':'')+
@@ -10995,7 +11011,9 @@ function backupLocal(){
   try{
     const cur=localStorage.getItem('dd_bs_v7');if(!cur)return;
     localStorage.setItem('dd_bs_backup_'+Date.now(),cur);
-    const keys=Object.keys(localStorage).filter(k=>k.indexOf('dd_bs_backup_')===0).sort();
+    // v96: keep the newest 3 plain copies by time; tagged safety copies (dd_bs_backup_<tag>_<ts>) are not
+    // pruned here (a text sort put them after the plain ones and deleted the copy just made)
+    const keys=Object.keys(localStorage).filter(k=>/^dd_bs_backup_\d+$/.test(k)).sort((a,b)=>parseInt(a.slice(13))-parseInt(b.slice(13)));
     while(keys.length>3)localStorage.removeItem(keys.shift());
   }catch(e){console.warn('backupLocal',e);}
 }
@@ -11956,12 +11974,22 @@ function bxSummary(st,meta,diag,snap){
   line('');
   rule(); line('MONEY  (computed from '+meta.exportSource+')'); rule();
   let booth=0,paid=0,gross=0,cogs=0,exp=0,profit=0,miles=0,repPay=0,taxRes=0,irs=0;
-  shows.forEach(sh=>{ booth+=bxNum(sh.boothCost); paid+=V.boothPaid(sh); miles+=V.irsMiles(sh); irs+=V.irsMiles(sh)*V.irsRate(sh);
-    const x=V.calcShow(sh); gross+=x.gross; cogs+=x.cogs; exp+=x.expenses; profit+=x.profit;
-    repPay+=x.repPay; taxRes+=x.taxRes; });
+  // v96: the same rules as Home and the P&L. Only worked shows (finished or running) earn and spend;
+  // money already paid on a missed or passed show is gone and counts; business purchases and online sales count.
+  const _today=_todayKey(), _worked=sh=>sh&&(sh.status==='completed'||sh.status==='active');
+  shows.forEach(sh=>{ booth+=bxNum(sh.boothCost); paid+=V.boothPaid(sh);
+    if(_worked(sh)){ miles+=V.irsMiles(sh); irs+=V.irsMiles(sh)*V.irsRate(sh);
+      const x=V.calcShow(sh); gross+=x.gross; cogs+=x.cogs; exp+=x.expenses; profit+=x.profit; repPay+=x.repPay; }
+    else if(sh&&(sh.passed||sh.status==='passed'||(/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate||'')&&sh.startDate<_today))){
+      const u=V.boothPaid(sh)+(sh.showExpenses||[]).reduce((t,e)=>t+bxNum(e&&e.amount),0)+bxNum(sh.lodging); exp+=u; profit-=u; } });
+  const _oth=(st.otherExpenses||[]).reduce((t,e)=>t+bxNum(e&&e.amount),0); exp+=_oth; profit-=_oth;
+  ((st.settings||{}).onlineSales||[]).forEach(x=>{ const amt=bxNum(x&&x.amount), post=bxNum(x&&x.postage), c=((x&&x.items)||[]).reduce((t,i)=>t+(parseInt(i.qty)||0)*V.cost(i.sku),0);
+    gross+=amt; cogs+=c; exp+=post; profit+=amt-c-post; });
+  taxRes=Math.max(0,profit)*V.setting('tax',0.28);
   line('  Booth committed        '+M(booth));
   line('  Booth paid             '+M(paid));
   line('  Booth still owed       '+M(Math.max(0,booth-paid)));
+  line('  (all years; worked shows, business purchases and online sales, like the P&L)');
   line('  Gross collected        '+M(gross));
   line('  COGS                   '+M(cogs));
   line('  All expenses           '+M(exp));
