@@ -1,6 +1,6 @@
-// v94: Small Sets (1 x 2oz + 1 x C5-S + organza 5x7 + microfiber cloth + pouch + mini
+// v95: Small Sets (1 x 2oz + 1 x C5-S + organza 5x7 + microfiber cloth + pouch + mini
 // screwdriver set) are their own product, built from garage stock. SYNTHETIC FIXTURES ONLY.
-//   node tests/small-sets-v94.test.js
+//   node tests/small-sets-v95.test.js
 'use strict';
 const {boot,reporter}=require('./harness.js');
 const R=reporter(); const chk=R.check;
@@ -23,13 +23,13 @@ R.section('2. One-time update on an older copy');
 { const {ctx}=world(), S=ctx.S;
   S.cogsHistory.forEach(e=>delete e.costs.set); delete S.prices.set; delete S.inventory.set;
   S.supplies=[{id:'sup_microfiber',name:'Microfiber Cloths',qty:40,low:4,unit:'ea',cost:0.12}];
-  delete S._applied.small_set_v94; ctx.applyOneTimeUpdates(S);
+  delete S._applied.small_set_v95; ctx.applyOneTimeUpdates(S);
   chk('2a. each cost period gets its own 2oz + C5-S',S.cogsHistory.map(e=>e.costs.set),[5.25,4.80]);
   chk('2b. schedule valid',ctx.cogsValidate(ctx.cogsSchedule(S)).valid,true);
   chk('2c. price $20, garage 0',[S.prices.set,S.inventory.set],[20,0]);
   chk('2d. add-ons and organza sizes on Supplies',S.supplies.map(s=>s.id),['sup_microfiber','sup_organza_5x7','sup_mf_pouch','sup_screwdriver','sup_organza_6x9','sup_organza_8x12']);
   chk('2e. an existing cloth keeps its count and cost',[S.supplies[0].qty,S.supplies[0].cost],[40,0.12]);
-  const n=S.supplies.length; S.prices.set=25; delete S._applied.small_set_v94; ctx.applyOneTimeUpdates(S);
+  const n=S.supplies.length; S.prices.set=25; delete S._applied.small_set_v95; ctx.applyOneTimeUpdates(S);
   chk('2f. running again changes nothing',[S.supplies.length,S.prices.set],[n,25]); }
 
 R.section('3. Build and break apart');
@@ -54,9 +54,9 @@ R.section('3. Build and break apart');
 R.section('4. Money');
 { const {ctx,els}=world(), S=ctx.S;
   chk('4a. COGS of 3 sets sold Oct 25',r2(ctx.calcCOGSOn({set:3},'2026-10-25',null,S)),14.40);
-  chk('4b. all-in cost of one set',r2(ctx.smallSetBottleCost()+ctx.smallSetAddonCost()),6.26);
+  chk('4b. all-in cost of one set',r2(ctx.smallSetBottleCost()+ctx.smallSetAddonCost()),5.83);
   ctx.openBuildSets(); const h=ctx.document.getElementById('mb').innerHTML;
-  chk('4c. card shows all-in and the three prices',['$6.26','$13.74','$18.74','$23.74'].every(x=>h.includes(x)),true);
+  chk('4c. card shows all-in and the three prices',['$5.83','$14.17','$19.17','$24.17'].every(x=>h.includes(x)),true);
   const sh={days:[{morningCount:{set:10,'2oz':4},eveningCount:{set:7,'2oz':0}}]};
   chk('4d. a set sold gets one bag',ctx.showBagCount(sh),5); }
 
