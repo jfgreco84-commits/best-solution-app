@@ -32,9 +32,9 @@ R.section('2. Only a rep on the crew, but you are charged as working it');
 { const h=world(),{ctx}=h; const sh=h.show({id:'b',extra:{repIds:['rep_isaiah']},day:{morningCount:cnt({c5s:50}),eveningCount:cnt({c5s:40}),payments:pmt({cash:100})}});
   chk('2a. flagged',h.codes('b').includes('repOnlyUnset'),true);
   const lunch=ctx.calcShow(sh).lunch, gas=ctx.calcShow(sh).gasAuto;
-  ctx.confirm=()=>false; ctx.auditSetCrew('b',false);  // not there, rep covered gas
-  chk('2b. rep-only: your lunch and gas come off',[lunch>0,gas>0,ctx.calcShow(sh).lunch,ctx.calcShow(sh).gasAuto],[true,true,0,0]);
-  chk('2c. snapshot engine agrees',[ctx.bxView(ctx.S).calcShow(sh).lunch,ctx.bxView(ctx.S).calcShow(sh).gasAuto],[0,0]);
+  ctx.confirm=()=>false; ctx.auditSetCrew('b',false);  // not there; v93: Froggy pays the gas at every show, no question asked
+  chk('2b. rep-only: your lunch comes off, the gas you paid stays',[lunch>0,gas>0,ctx.calcShow(sh).lunch,ctx.calcShow(sh).gasAuto],[true,true,0,gas]);
+  chk('2c. snapshot engine agrees',[ctx.bxView(ctx.S).calcShow(sh).lunch,ctx.bxView(ctx.S).calcShow(sh).gasAuto],[0,gas]);
   chk('2d. flag gone',h.codes('b').includes('repOnlyUnset'),false); }
 { const h=world(),{ctx}=h; const sh=h.show({id:'c',extra:{repIds:['rep_isaiah']},day:{morningCount:cnt({c5s:50}),eveningCount:cnt({c5s:40}),payments:pmt({cash:100})}});
   ctx.confirm=()=>true; ctx.auditSetCrew('c',false);

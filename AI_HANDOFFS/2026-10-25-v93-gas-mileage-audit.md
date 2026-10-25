@@ -48,6 +48,13 @@ prices)**. Setup's IRS field now means "2027 on" (set to 76¢ until the IRS post
 marked rep-only counted the rep's drive as his mileage. Now 0, unless Edit Show's new "Miles YOU drove your
 truck" box says he drove stock out (`sh.ownerMiles`). Gas he paid the rep still counts as a cost.
 
+**5b. Froggy pays the gas at every show, rep-run or not (Froggy, Oct 25).** Marking a show rep-only no longer
+asks "did you pay the gas"; `repGasPaid` is always true. The v93 update flips every `repGasPaid:false` on the
+board to true and names it in the log, so those shows now carry their gas cost. For taxes, gas paid for a
+rep's own car is deducted dollar for dollar (`showOwnGas` leaves it out, so `taxProfit` keeps it as a cost);
+only miles on Froggy's own truck get the IRS rate. If a rep drives the Ram, those miles go in Edit Show's
+"Miles on YOUR truck" box and get the rate.
+
 **6. Tax view** (`calcYTD().taxProfit`, `showOwnGas`). The standard mileage rate replaces the gas for his
 own truck on Schedule C; it does not stack. The Mileage screen and Accountant Package now show: mileage
 deduction, his truck's gas inside expenses, and profit for the tax return = app profit + own-truck gas −
@@ -128,7 +135,9 @@ Gaps filled by interpolation: Jul 15-26 and Aug 2-9 in WI, Oct 4 in WI. Exact pu
 - **Did TJ and Anthony each drive Merrillan ↔ Warrens every day, or ride with you?** Carpooling the local
   legs takes 210 mi off a car.
 - **The 10 shows from v83 that list one rep and not you but are not marked Rep-only.** Each still counts
-  your miles. Mark them in the Audit screen.
+  your miles and lunch. Mark them in the Audit screen (gas stays, you paid it).
+- **Rep gas is estimated from Waterford at the Ram's 17 mpg.** A rep starting from Cudahy in a 25 mpg car
+  burns less. If you pay them a set amount or have the receipt, put it in Actual Gas $.
 - **Tolls.** Rosemont, Carol Stream and North Aurora trips run on the Illinois Tollway. Tolls are deductible
   on top of the mileage rate; log them under Parking / Tolls on the day.
 - **Lunch.** $20 a day on local one-day shows is your own meal, not deductible. Meals count (50%) only on

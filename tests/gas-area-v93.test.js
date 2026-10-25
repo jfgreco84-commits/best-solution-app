@@ -52,12 +52,16 @@ R.section('3. Rep-only shows are not your miles');
   const sh=mk({repOnlyShow:true,miles:40});
   chk('3a. the rep drove: 0 IRS miles',ctx.showIrsMiles(sh),0);
   chk('3b. gas you paid them still counts',r2(ctx.showGas(sh))>0,true);
-  sh.ownerMiles=48; chk('3c. miles you drove yourself for it count',[ctx.showIrsMiles(sh),r2(ctx.showIrsDeduct(sh))],[48,r2(48*0.76)]); }
+  sh.ownerMiles=48; chk('3c. miles you drove yourself for it count',[ctx.showIrsMiles(sh),r2(ctx.showIrsDeduct(sh))],[48,r2(48*0.76)]);
+  const c=mk({status:'completed',miles:40}); d.shows.push(c); ctx.auditSetCrew(c.id,false);
+  chk('3d. marking a show rep-only keeps the gas: you pay it at every show',[c.repOnlyShow,c.repGasPaid,r2(ctx.calcShow(c).gasAuto)>0],[true,true,true]);
+  chk('3e. that gas is deducted as gas, not replaced by mileage',[r2(ctx.showOwnGas(c)),ctx.showIrsMiles(c)],[0,0]); }
 
 R.section('4. The v93 update on an old board');
 { const d=oldBoard();
   const own=d.shows.find(s=>/st\.? martin/i.test(s.name)); own.gasPrice=3.99;
   const hand=d.shows.find(s=>/sheboygan/i.test(s.name)); hand.gasOverride=150;
+  const rep=d.shows.find(s=>/fair to remember, fall/i.test(s.name)); rep.repOnlyShow=true; rep.repGasPaid=false;
   const r=ctx.gasAuditV93(d);
   chk('4a. ran',r.done,true);
   chk('4b. settings: 17 mpg, WI $4.52, IL $4.82, 76c for 2027 on',[d.settings.mpg,d.settings.gasPrice,d.settings.gasPriceIL,d.settings.irsRate],[17,4.52,4.82,0.76]);
@@ -67,6 +71,7 @@ R.section('4. The v93 update on an old board');
   chk('4e. gas you entered by hand stays',hand.gasOverride,150);
   chk('4f. upcoming shows wait for their own week',d.shows.filter(s=>!s.passed&&String(s.startDate)>'2026-10-25').every(s=>s.gasPrice==null),true);
   chk('4g. the change is on the show history',rf.invLog.some(x=>/v93/.test(x.type)),true);
+  chk('4g2. a rep show marked "rep covered gas" now carries the gas you paid',[rep.repGasPaid,ctx.calcShow(rep).gasAuto>0],[true,true]);
   const keep=JSON.stringify(d.shows); d._applied['gas_area_v93']=true; ctx.applyOneTimeUpdates(d);
   chk('4h. a second load changes nothing',JSON.stringify(d.shows),keep);
   const e=blank(); Object.keys(ctx.MRG_SEED_RECORDS).forEach(k=>e._applied[k]=true); ctx.applyOneTimeUpdates(e);

@@ -3655,15 +3655,14 @@ function openAuditModal(){
     <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${(x.fixes||[]).map(f=>`<button class="btn btn-xs btn-gold" onclick="${f.js}">${_esc(f.label)}</button>`).join('')}${x.showId?`<button class="btn btn-xs btn-ghost" onclick="mClose();auditGo('${x.showId}',${x.di==null?0:x.di})">Open it ›</button>`:''}<button class="btn btn-xs btn-ghost" onclick="auditHide('${_esc(auditHideKey(x))}')">Hide this</button></div></div>`).join('');
   const log=(auditState().log||[]).slice(-8).reverse().map(e=>`<div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--border)">${_esc((e.ts||'').slice(0,16).replace('T',' '))} · ${_esc(e.msg||'')}</div>`).join('');
   mOpen(`<div class="mh"><div class="mt">🛡️ Audit: stock + money</div><button class="mx" onclick="mClose()">×</button></div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Runs every time anything is saved. <b>Stock:</b> every table, booth and truck adds up and every day that opened got counted. <b>Money:</b> every day that sold has its money in, every show charges your lunch and gas only if you were there, and every rep was paid what was entered. Tap a gold button to fix it on the spot</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Runs every time anything is saved. <b>Stock:</b> every table, booth and truck adds up and every day that opened got counted. <b>Money:</b> every day that sold has its money in, every show charges your lunch only if you were there (gas counts on every show, you pay it), and every rep was paid what was entered. Tap a gold button to fix it on the spot</div>
   ${rows||'<div class="wb green" style="font-size:13px">✅ All clear. Garage, shows, booths and truck all add up.</div>'}
   ${log?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:12px 0 4px">What the audit did on its own</div>${log}`:''}`);
 }
 function auditSetCrew(shId,wasThere){
   const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const own=(S.reps||[]).find(r=>r.isSelf);
   if(wasThere){ sh.repIds=sh.repIds||[]; if(own&&sh.repIds.indexOf(own.id)<0)sh.repIds.unshift(own.id); sh.repOnlyShow=false; }
-  else { sh.repOnlyShow=true; const g=showGas(sh);
-    sh.repGasPaid=(typeof confirm!=='function')?true:confirm('Did you pay the gas for this show ('+fmt(g)+' estimated)?\n\nOK = yes, keep the gas cost\nCancel = no, the rep covered it'); }
+  else { sh.repOnlyShow=true; sh.repGasPaid=true; } // v93: Froggy pays the gas at every show, rep-run or not
   invLogPush(sh,{ts:new Date().toISOString(),type:'crew',changes:[wasThere?'owner was there':('rep-only: owner not there'+(sh.repGasPaid===false?', rep covered gas':''))],by:'owner'});
   saveS(); toast(wasThere?'👑 You are on the crew':'✅ Marked rep-only'); openAuditModal();
 }
@@ -4884,7 +4883,7 @@ function secMileage(C){
       line('One-way distance',`${fmtN(sh.miles||0)} mi`),
       line('Round trips',`${trips}${tripsSet?'':' <i>(1 per show day)</i>'}`),
       route?line('Miles driven',`${fmtN(mi)} mi <i>(real route)</i>`):line('Miles driven',`${fmtN(sh.miles||0)} × 2 × ${trips} = ${fmtN(mi)} mi`),
-      sh.repOnlyShow?line('IRS deduction',`rep-only show, the rep drove: ${fmtN(irsMi)} mi in your truck × ${rt(rate)} = <b class="mi-g">${fmt(irsMi*rate)}</b>`)
+      sh.repOnlyShow?line('Deduction',`rep drove their own car: the gas you paid them (${fmt(gas)}) is deducted as gas${irsMi>0?`, plus ${fmtN(irsMi)} mi on your truck × ${rt(rate)} = <b class="mi-g">${fmt(irsMi*rate)}</b>`:''}`)
         :line('IRS deduction',`${fmtN(mi)} mi × ${rt(rate)} = <b class="mi-g">${fmt(mi*rate)}</b>`),
       manualGas?line('Gas','<b>'+fmt(gas)+'</b> <i>(entered)</i>')
         :line('Gas (est.)',`${fmtN(mi)} mi ÷ ${showMpg(sh)} mpg × $${showGasPrice(sh).toFixed(2)} = <b>${fmt(gas)}</b>`),
@@ -4905,7 +4904,7 @@ function secMileage(C){
       <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">IRS 2026: 72.5¢/mi Jan-Jun, 76¢/mi from Jul 1 · ${S.settings.mpg} mpg · gas now WI $${(parseFloat(S.settings.gasPrice)||0).toFixed(2)} / IL $${(parseFloat(S.settings.gasPriceIL)||parseFloat(S.settings.gasPrice)||0).toFixed(2)} (each finished show keeps its own week's price)</div>
       <div style="margin-top:8px;font-size:11px;color:var(--muted);text-align:center">Your miles: ${fmtN(C.ytd.miles)} in your truck${C.ytd.allMiles-C.ytd.miles>0.5?` · ${fmtN(C.ytd.allMiles-C.ytd.miles)} driven by reps on rep-only shows (not your deduction)`:''}</div>
       <div style="margin-top:8px;padding:8px;border:1px solid var(--goldbd);border-radius:8px;font-size:11px;line-height:1.5">
-        <b>Taxes:</b> take the IRS mileage OR your truck's gas, never both. Mileage wins: ${fmt(C.mileDeduct)} vs ${fmt(C.ytd.ownGas||0)} of gas in your truck.
+        <b>Taxes:</b> for your own truck take the IRS mileage OR its gas, never both. Mileage wins: ${fmt(C.mileDeduct)} vs ${fmt(C.ytd.ownGas||0)} of gas in your truck. Gas you paid for reps' cars is deducted on its own, dollar for dollar.
         Profit for the tax return ≈ <b>${fmt(C.ytd.taxProfit||0)}</b> (app profit ${fmt(C.ytd.profit||0)} + your truck's gas − mileage). Parking and tolls still count on top.</div>
       <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-gold btn-sm" style="flex:1" onclick="tripModal()">➕ Log a business trip</button><button class="btn btn-ghost btn-sm" style="flex:1" onclick="exportMileageLog()">📄 IRS mileage log</button></div>
       ${tripListHTML()}
@@ -5879,8 +5878,8 @@ function showEditCosts(id){
   <div id="ec_travel_preview" style="font-size:12px;color:var(--gold);margin:-2px 0 10px;font-weight:700"></div>
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
   ${gasMarketPrice(sh)!=null?`<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">⛽ Regular in this show's area that week: <b>$${gasMarketPrice(sh).toFixed(2)}</b>${(sh.gasPrice!=null&&sh.gasPrice!==''&&Math.abs(parseFloat(sh.gasPrice)-gasMarketPrice(sh))>0.005)?` · <a href="#" onclick="$$('ec_gasprice').value='${gasMarketPrice(sh).toFixed(2)}';ecUpdateTravelPreview();return false">use it</a>`:''}</div>`:''}
-  ${sh.repOnlyShow?`<div class="fg"><label class="fl">🚚 Miles YOU drove your truck for this rep-only show (stock drop-off / pickup)</label><input class="fi" type="number" id="ec_ownmiles" step="1" min="0" value="${(sh.ownerMiles!=null&&sh.ownerMiles!=='')?sh.ownerMiles:''}" placeholder="0 (the rep drove)"></div>
-  <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Only miles in your own vehicle count for your IRS mileage. Gas you paid a rep is still a cost.</div>`:''}
+  ${sh.repOnlyShow?`<div class="fg"><label class="fl">🚚 Miles on YOUR truck for this rep-only show (the rep took your Ram, or you dropped off / picked up stock)</label><input class="fi" type="number" id="ec_ownmiles" step="1" min="0" value="${(sh.ownerMiles!=null&&sh.ownerMiles!=='')?sh.ownerMiles:''}" placeholder="0 (the rep drove their own car)"></div>
+  <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Only miles on your own vehicle get the IRS mileage rate. The gas you paid for the rep's car is still deducted, dollar for dollar.</div>`:''}
   <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
   ${showGasLogged(sh)>0?`<div style="font-size:11px;color:var(--gold);margin:-6px 0 12px">⛽ This show has ${fmt(showGasLogged(sh))} of gas receipts logged from before; those receipts are its gas.</div>`:''}
   <div class="fg"><label class="fl">🧻 Paper towel rolls used (actual)</label><input class="fi" type="number" id="ec_paper" step="1" min="0" value="${(sh.paperRolls!=null&&sh.paperRolls!=='')?sh.paperRolls:''}" placeholder="est. ${paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh)} (${paperRollsPerPersonDay()} per person per day)"></div>
@@ -7302,6 +7301,7 @@ function gasAuditV93(d){
     shows.forEach(sh=>{ if(!sh||isPassed(sh))return;
       const w=was[sh.id]||{gas:r2(showGas(sh)),irs:r2(showMiles(sh)*0.70)}, gas0=w.gas, irs0=w.irs, ch=[];
       if(sh.mpg!=null&&sh.mpg!==''&&Math.abs(parseFloat(sh.mpg)-17.5)<0.005){ sh.mpg=RAM_MPG; ch.push('17.5 → 17 mpg'); }
+      if(sh.repOnlyShow&&sh.repGasPaid===false){ sh.repGasPaid=true; ch.push('you paid the rep\'s gas (you pay gas at every show)'); }
       const started=String(sh.startDate||'')<=today, mkt=gasMarketPrice(sh);
       if(/cranberry/i.test(sh.name||'')&&String(sh.startDate||'').startsWith('2026-09-25')){ v93Cranberry(sh,ch); }
       else if(v93IsAutoGas(sh)){
