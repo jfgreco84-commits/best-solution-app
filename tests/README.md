@@ -34,6 +34,7 @@ node tests/paid-ahead-v82.test.js
 node tests/supplies-once-v83.test.js
 node tests/auditor-v84.test.js
 node tests/bulletproof-v85.test.js
+node tests/full-audit-v96.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 
