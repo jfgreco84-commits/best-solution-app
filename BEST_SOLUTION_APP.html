@@ -546,7 +546,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v91';
+const APP_VERSION='v92';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -7839,8 +7839,11 @@ function payHowText(sh,di,id){
   return Math.round(repCommRate(id)*100)+'% of '+fmt(pp.base)+(r.how&&/split/.test(r.how)?' (their share)':''); }
 function repPayIsManual(sh,id){ return !!(sh&&sh.repPayManual&&sh.repPayManual[id]); }
 // Who worked a show with no booths: its reps, plus the owner unless it is a rep-only show.
+// v92: pay already on the show does not put someone on the crew. It used to, so a rep taken
+// off the crew kept their auto pay (and kept splitting the 35%) forever. Sales still count.
 function tableCrew(sh){ const own=(S.reps||[]).find(r=>r.isSelf), ownId=own&&own.id;
-  const ids=[...new Set([...(sh.repIds||[]),...showRepIds(sh)])].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf; });
+  const sold=[]; (sh.days||[]).forEach(d=>{ (d.repSales||[]).forEach(rs=>{ if(rs&&rs.repId)sold.push(rs.repId); }); sold.push(...drawerSellers(d)); });
+  const ids=[...new Set([...(sh.repIds||[]),...sold])].filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf; });
   if(ownId&&(!sh.repOnlyShow||(sh.repIds||[]).indexOf(ownId)>=0))ids.unshift(ownId); return ids; }
 function commissionDay(sh,di){
   const d=(sh.days||[])[di]; if(!d)return null;
@@ -8442,12 +8445,14 @@ function rDay(sh,di){
       // Per-rep sales tracking is GONE — the day's money is one total (Money column above).
       // The only per-person thing on a day is DAY PAY: the flat $ each rep gets for working it.
       const payReps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active&&(!sh.payFromCommission||repDayPay(d,r.id)>0));
+      // v92: anyone with pay on this day is listed, so the rows always add up to the total
+      Object.keys(d.repPay||{}).forEach(id=>{ if(repDayPay(d,id)>0&&!payReps.some(r=>r.id===id))payReps.push((S.reps||[]).find(r=>r.id===id)||{id,name:sellerName(id)}); });
       if(!payReps.length)return'';
       const dayPayT=calcDayPay(d);
       const repRows=payReps.map(rep=>{
         const rp=repDayPay(d,rep.id);
         return`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:6px">
-          <div><div style="font-weight:800;font-size:13px">${rep.name}</div>${payRulesOn(sh)?`<div style="font-size:10px;color:var(--muted)">${_esc(payHowText(sh,di,rep.id))}</div>`:''}</div>
+          <div><div style="font-weight:800;font-size:13px">${rep.name}</div>${(sh.repIds||[]).indexOf(rep.id)<0||rep.active===false?`<div style="font-size:10px;color:var(--red)">not on the crew, still paid this day. Edit Day Pay or Change crew</div>`:payRulesOn(sh)?`<div style="font-size:10px;color:var(--muted)">${_esc(payHowText(sh,di,rep.id))}</div>`:''}</div>
           <div style="font-size:13px;font-weight:900;color:${rp>0?'var(--red)':'var(--muted)'}">${rp>0?fmt(rp):'not paid yet'}</div>
         </div>`;
       }).join('');
@@ -9991,9 +9996,12 @@ function repPayMarkManual(sh,id){ if(!payRulesOn(sh))return;
 // ---- DAY PAY ENTRY ----
 // Two ways in, same data (day.repPay): per DAY for everyone (openDayPay, the daily workflow),
 // or per REP across all the show's days (openRepDayPay, from the show's rep list).
+// v92: the crew, plus anyone off the crew who still has pay on this day (so it can be cleared)
+function dayPayIds(sh,d){ const ids=(sh.repIds||[]).filter(id=>{ const r=(S.reps||[]).find(x=>x.id===id); return r&&!r.isSelf&&r.active; });
+  Object.keys((d&&d.repPay)||{}).forEach(id=>{ if(repDayPay(d,id)>0&&ids.indexOf(id)<0)ids.push(id); }); return ids; }
 function openDayPay(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; if(sh.payFromCommission){toast('💵 Pay on this show is the commission. See Teams → Payout Sheet.');return;}
-  const reps=(sh.repIds||[]).map(id=>(S.reps||[]).find(r=>r.id===id)).filter(r=>r&&!r.isSelf&&r.active);
+  const reps=dayPayIds(sh,d).map(id=>(S.reps||[]).find(r=>r.id===id)||{id,name:sellerName(id)});
   if(!reps.length){toast('Assign reps to this show first');return;}
   mOpen(`<div class="mh"><div class="mt">💵 Day Pay — ${d.date||'Day '+(di+1)}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${sh.name} — enter the flat $ each rep gets for THIS day. No percentages. Blank = not paid this day.</div>
@@ -10003,7 +10011,7 @@ function openDayPay(shId,di){
 function saveDayPay(shId,di){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return;
   if(!d.repPay)d.repPay={};
-  (sh.repIds||[]).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(), was=d.repPay[rid];
+  dayPayIds(sh,d).forEach(rid=>{ const el=$$('dp_'+rid); if(!el)return; const v=(el.value||'').trim(), was=d.repPay[rid];
     if(v==='')delete d.repPay[rid]; else d.repPay[rid]=Math.max(0,parseFloat(v)||0);
     if(Math.abs((parseFloat(was)||0)-(parseFloat(d.repPay[rid])||0))>0.004)repPayMarkManual(sh,rid); });
   mClose();saveS();toast('✅ Day pay saved · '+fmt(calcDayPay(d))+' this day');renderCur();
