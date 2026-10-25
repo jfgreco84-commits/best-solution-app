@@ -1,8 +1,12 @@
 # LATEST
 
-**NEWEST: [v89 Garage History, hide audit items, Oct 22 count back, Oct 23 2026](2026-10-23-v89-garage-history.md)** (every garage change logged with why; Hide this on audit items; Fox & Found + Andre hidden; garage set to the Oct 22 hard count)
+**NEWEST: [v93 gas by area and week, 17 mpg, IRS 72.5¢/76¢ by date, Oct 25 2026](2026-10-25-v93-gas-mileage-audit.md)** (every show re-priced at the real regular price where he drove that week; Cranberry 3 vehicles leg by leg; rep-only miles out of the deduction; tax view; IRS mileage log; log a business trip)
 
-**Previous: [Sync: show moved to Missed no longer blocks syncing, Oct 23 2026](2026-10-23-sync-missed-show.md)** (finished-shows guard only for copies that do not descend from the cloud row; reason shown on Setup; PR #88 "behind" prompt removed)
+**Previous: [v92 rep off the crew kept getting paid, Oct 25 2026](2026-10-25-v92-off-crew-pay.md)**
+
+**Before that: [v89 Garage History, hide audit items, Oct 22 count back, Oct 23 2026](2026-10-23-v89-garage-history.md)** (every garage change logged with why; Hide this on audit items; Fox & Found + Andre hidden; garage set to the Oct 22 hard count)
+
+**Before that: [Sync: show moved to Missed no longer blocks syncing, Oct 23 2026](2026-10-23-sync-missed-show.md)** (finished-shows guard only for copies that do not descend from the cloud row; reason shown on Setup; PR #88 "behind" prompt removed)
 
 **Before that: [v88 Batman debt put back to after the Oct 19 return, Oct 22 2026](2026-10-22-v88-batman-oct19-fix.md)** (cloud copy predated the return; owed set to 2oz 96, C5-S 274, rest 0 = 370; garage not changed)
 

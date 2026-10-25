@@ -24,6 +24,7 @@ node tests/garage-history-v89.test.js
 node tests/fox-found-oct-pack.test.js
 node tests/womens-expo.test.js
 node tests/expense-audit.test.js
+node tests/gas-area-v93.test.js
 node tests/simplify-v79.test.js
 node tests/pay-rules-v80.test.js
 node tests/off-crew-pay-v92.test.js

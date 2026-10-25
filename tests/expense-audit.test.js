@@ -67,7 +67,7 @@ R.section('5. Gas');
   chk('5b. break-even: fuel receipt is the gas, estimate not added on top',[be.parts.gas,be.parts.showExp],[0,75]);
   const be2=ctx.calcBreakEven(mk({miles:35,gasPrice:4,mpg:17.5,numDays:1}));
   chk('5c. no receipt: estimate used',r2(be2.parts.gas),16);
-  chk('5d. default gas moved off $3.50',d.settings.gasPrice,4.2); }
+  chk('5d. default gas moved off $3.50 (v93: AAA WI Oct 24)',d.settings.gasPrice,4.52); }
 
 R.section('6. One-time fill on a full board');
 { const d=full();
@@ -83,8 +83,8 @@ R.section('6. One-time fill on a full board');
   chk('6c4. every Sip & Sleigh / Kris Kringle placeholder passed',d.shows.filter(s=>/sip & sleigh|kris kringle/i.test(s.name)).every(s=>s.passed),true);
   chk('6d. blank miles filled',['Polish Fest','Waukesha County Fair','McHenry County Fair','Burgoo','Baraboo'].map(n=>d.shows.find(s=>s.name.indexOf(n)>=0).miles),[32,22,45,150,110]);
   chk('6e. Maxwell Street 14 mi',d.shows.filter(s=>/maxwell/i.test(s.name)).every(s=>s.miles===14),true);
-  chk('6f. finished show frozen at its month gas price',f(/rustic fox/i,'2026-08-02').gasPrice,4.05);
-  chk('6g. upcoming show keeps the default',d.shows.find(s=>/women.?s expo/i.test(s.name)).gasPrice==null,true);
+  chk('6f. finished show frozen at its week\'s area gas price (v93)',f(/rustic fox/i,'2026-08-02').gasPrice,ctx.gasMarketPrice(f(/rustic fox/i,'2026-08-02')));
+  chk('6g. upcoming show keeps the default',d.shows.filter(s=>!s.passed&&String(s.startDate)>ctx._todayKey()).every(s=>s.gasPrice==null),true);
   ctx.applyOneTimeUpdates(d); // other seeds finish on the second load
   const keep=JSON.stringify(d.shows);
   delete d._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d);
@@ -98,7 +98,7 @@ R.section('7. Never overwrites what is there');
   delete d2._applied['expense_audit_v77']; ctx.applyOneTimeUpdates(d2);
   chk('7a. booth, miles, gas price kept',[own.boothCost,own.boothPayments.length,own.miles,own.gasPrice],[75,0,88,3.99]);
   const d3=blank(); d3.settings.gasPrice=4; ctx.applyOneTimeUpdates(d3);
-  chk('7b. his old $4.00 default moves to the Oct 2026 price (he asked for gas to be updated)',d3.settings.gasPrice,4.2);
+  chk('7b. his old $4.00 default moves to the current price (he asked for gas to be updated)',d3.settings.gasPrice,4.52);
   const d4=blank(); d4.shows=[]; d4._applied={}; Object.keys(ctx.MRG_SEED_RECORDS).forEach(k=>d4._applied[k]=true);
   ctx.applyOneTimeUpdates(d4);
   chk('7c. no shows yet: waits',!!d4._applied['expense_audit_v77'],false); }
@@ -163,7 +163,7 @@ R.section('11. Review fixes (Oct 18)');
   chk('11b. the old placeholder still is',!!d2.shows.find(s=>s.name==='Kris Kringle — Carol Stream').passed,true);
   const d3=blank(); d3.settings.gasPrice=4; const old=ctx.buildPlannedShow({name:'Old Show',location:'Racine, WI',startDate:'2025-12-06',numDays:1,miles:40}); old.status='completed'; d3.shows.push(old);
   ctx.applyOneTimeUpdates(d3);
-  chk('11c. a finished show with no month reading keeps the old $4.00, not the new default',[old.gasPrice,d3.settings.gasPrice],[4,4.2]);
+  chk('11c. a finished show with no month reading keeps the old $4.00, not the new default',[old.gasPrice,d3.settings.gasPrice],[4,4.52]);
   const z=ctx.buildPlannedShow({name:'Racine Holiday Pop-up',location:'Racine, WI',startDate:'2026-11-30',numDays:1}); z.miles=0;
   const d4=full(); d4.shows.push(z); ctx.applyOneTimeUpdates(d4); ctx.applyOneTimeUpdates(d4);
   chk('11d. a 0 he typed is not refilled on every load',z.miles,0);
