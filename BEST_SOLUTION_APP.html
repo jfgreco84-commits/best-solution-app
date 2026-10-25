@@ -537,7 +537,7 @@ const SKUS=[
   {key:'2oz', name:'2oz Best Solution', short:'2oz', emoji:'🧴',cost:2.25,defP:8.00},
   {key:'c5s', name:'C5 Small (2oz)',    short:'C5-S',emoji:'✨',cost:3.00,defP:10.00},
   {key:'c5l', name:'C5 Large (8oz)',    short:'C5-L',emoji:'✨',cost:6.00,defP:20.00},
-  // v93: Small Set = 1 x 2oz + 1 x C5-S, built from garage stock (buildSmallSets) and
+  // v94: Small Set = 1 x 2oz + 1 x C5-S, built from garage stock (buildSmallSets) and
   // counted as its own column. Its cost is the two bottles; the add-ons are below.
   {key:'set', name:'Small Set (2oz + C5-S)',short:'SET',emoji:'🎁',cost:5.25,defP:20.00}
 ];
@@ -549,7 +549,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v93';
+const APP_VERSION='v94';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2930,12 +2930,12 @@ function applyOneTimeUpdates(d){
     catch(e){ console.error('ftr_fall_pack_v91',e); }
   }
 
-  // v93 (Froggy, Oct 25): Small Sets are their own product. The cost schedule,
+  // v94 (Froggy, Oct 25): Small Sets are their own product. The cost schedule,
   // prices and garage get a SET entry (cost = that period's 2oz + C5-S), and the
   // set add-ons become tracked supplies. Nothing already there is overwritten.
-  if(!d._applied['small_set_v93']){
-    try{ smallSetSeedV93(d); d._applied['small_set_v93']=true; }
-    catch(e){ console.error('small_set_v93',e); }
+  if(!d._applied['small_set_v94']){
+    try{ smallSetSeedV94(d); d._applied['small_set_v94']=true; }
+    catch(e){ console.error('small_set_v94',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -5387,7 +5387,7 @@ function showRestock(){
   <button class="btn btn-gold btn-full" onclick="applyRestock()">Add to Inventory</button>`);
 }
 function applyRestock(){if(_sameTap('rst|'+_skuVals('rst_')))return;let n=0;SKUS.forEach(s=>{const v=parseInt($$('rst_'+s.key).value)||0;if(v>0){S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' units added!');}
-// ---- v93 Small Sets: 1 x 2oz + 1 x C5-S + 5x7 purple organza + microfiber cloth + pouch + mini screwdriver set ----
+// ---- v94 Small Sets: 1 x 2oz + 1 x C5-S + 5x7 purple organza + microfiber cloth + pouch + mini screwdriver set ----
 // The bottles move from the garage into SET when sets are built. The add-ons are bought and logged as
 // Business Purchases, so they are NOT in COGS (v83: counted once). Their per-set cost is shown for pricing.
 // Pack prices are the Amazon orders, Oct 2026. Edit costs on the Supplies page.
@@ -5402,7 +5402,7 @@ const ORGANZA_OTHER=[
   {id:'sup_organza_6x9',  name:'Organza Bag 6x9 (8oz + C5-L)',        cost:0.199, unit:'ea', low:25},
   {id:'sup_organza_8x12', name:'Organza Bag 8x12 (16oz/32oz + C5-L)', cost:0.199, unit:'ea', low:25}
 ];
-function smallSetSeedV93(d){
+function smallSetSeedV94(d){
   (d.cogsHistory||[]).forEach(e=>{ if(e&&e.costs&&(e.costs.set==null||e.costs.set==='')){
     const a=parseFloat(e.costs['2oz']), b=parseFloat(e.costs.c5s);
     e.costs.set=(isFinite(a)&&isFinite(b))?Math.round((a+b)*100)/100:5.25; } });

@@ -1,6 +1,6 @@
-// v93: Small Sets (1 x 2oz + 1 x C5-S + organza 5x7 + microfiber cloth + pouch + mini
+// v94: Small Sets (1 x 2oz + 1 x C5-S + organza 5x7 + microfiber cloth + pouch + mini
 // screwdriver set) are their own product, built from garage stock. SYNTHETIC FIXTURES ONLY.
-//   node tests/small-sets-v93.test.js
+//   node tests/small-sets-v94.test.js
 'use strict';
 const {boot,reporter}=require('./harness.js');
 const R=reporter(); const chk=R.check;
@@ -23,13 +23,13 @@ R.section('2. One-time update on an older copy');
 { const {ctx}=world(), S=ctx.S;
   S.cogsHistory.forEach(e=>delete e.costs.set); delete S.prices.set; delete S.inventory.set;
   S.supplies=[{id:'sup_microfiber',name:'Microfiber Cloths',qty:40,low:4,unit:'ea',cost:0.12}];
-  delete S._applied.small_set_v93; ctx.applyOneTimeUpdates(S);
+  delete S._applied.small_set_v94; ctx.applyOneTimeUpdates(S);
   chk('2a. each cost period gets its own 2oz + C5-S',S.cogsHistory.map(e=>e.costs.set),[5.25,4.80]);
   chk('2b. schedule valid',ctx.cogsValidate(ctx.cogsSchedule(S)).valid,true);
   chk('2c. price $20, garage 0',[S.prices.set,S.inventory.set],[20,0]);
   chk('2d. add-ons and organza sizes on Supplies',S.supplies.map(s=>s.id),['sup_microfiber','sup_organza_5x7','sup_mf_pouch','sup_screwdriver','sup_organza_6x9','sup_organza_8x12']);
   chk('2e. an existing cloth keeps its count and cost',[S.supplies[0].qty,S.supplies[0].cost],[40,0.12]);
-  const n=S.supplies.length; S.prices.set=25; delete S._applied.small_set_v93; ctx.applyOneTimeUpdates(S);
+  const n=S.supplies.length; S.prices.set=25; delete S._applied.small_set_v94; ctx.applyOneTimeUpdates(S);
   chk('2f. running again changes nothing',[S.supplies.length,S.prices.set],[n,25]); }
 
 R.section('3. Build and break apart');

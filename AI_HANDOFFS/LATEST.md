@@ -1,6 +1,6 @@
 # LATEST
 
-**NEWEST: [v93 Small Sets, Oct 25 2026](2026-10-25-v93-small-sets.md)** (travel sets renamed Small Sets and made their own SET column, $20 default, $4.80 bottle COGS, $6.26 all in; 🎁 Build Small Sets on the Stock page; set add-ons and organza sizes on Supplies)
+**NEWEST: [v94 Small Sets, Oct 25 2026](2026-10-25-v94-small-sets.md)** (travel sets renamed Small Sets and made their own SET column, $20 default, $4.80 bottle COGS, $6.26 all in; 🎁 Build Small Sets on the Stock page; set add-ons and organza sizes on Supplies)
 
 **Before that: [v89 Garage History, hide audit items, Oct 22 count back, Oct 23 2026](2026-10-23-v89-garage-history.md)** (every garage change logged with why; Hide this on audit items; Fox & Found + Andre hidden; garage set to the Oct 22 hard count)
 
