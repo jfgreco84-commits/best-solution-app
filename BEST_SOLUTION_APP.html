@@ -9231,7 +9231,7 @@ function updSplitPmt(){
   const e=$$('pmtTot'); if(e)e.textContent=fmt(g); mmDiffUpd(g);
 }
 function mmRender(){
-  const st=mmState();
+  const st=mmState(), _cf=_closeFlow;
   const sh=S.shows.find(x=>x.id===st.shId); if(!sh)return;
   const d=sh.days[st.di]; if(!d)return;
   const boothId=st.boothId;
@@ -9272,6 +9272,8 @@ function mmRender(){
   </div>
   ${exp>0?`<div id="mmDiff" data-exp="${exp}" style="text-align:center;font-size:12px;font-weight:800;margin:-4px 0 10px">${mmDiffText(grand,exp)}</div>`:''}
   <button class="btn btn-gold btn-full" onclick="saveMoney()">Save Money Count</button>`);
+  // v96: splitting by person or adding a person redraws this screen; a close-out walk-through on it carries on
+  if(_cf&&_cf.step==='money'&&_cf.shId===st.shId&&_cf.di===st.di&&(_cf.boothId||null)===(st.boothId||null)){ _closeFlow=_cf; _cfBanner(2); }
 }
 // Callable two ways: bare, from the modal, or with an explicit target. When a
 // target is named and it is not the one the modal is holding, the money is

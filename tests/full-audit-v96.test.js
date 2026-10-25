@@ -84,6 +84,55 @@ R.section('5. Money');
 R.section('6. Sync');
 { const h=world(),{ctx}=h;
   chk('6a. protocol 3, so an app without the SET size refuses this copy',ctx.SYNC_PROTOCOL,3);
-  chk('6b. a second push while one is waiting joins it',ctx.cloudPush()===ctx.cloudPush(),true); }
+  chk('6b. a second push while one is waiting joins it',ctx.cloudPush()===ctx.cloudPush(),true);
+  ctx._syncState='error'; ctx._lastSyncAt=Date.now()-3*3600e3; ctx.syncTxtRender();
+  chk('6c. the header says it in words',ctx.document.getElementById('syncTxt').innerHTML,'Not synced<br>last 3h ago'); }
+
+R.section('7. Close out: count, then money, then what it adds up to');
+{ const h=world(),{ctx}=h; const mb=()=>ctx.document.getElementById('mb').innerHTML;
+  const sh=h.newShow('Flow',dayKey(0)); h.pack(sh,{c5s:40});
+  ctx.startCloseFlow(sh.id,0);
+  chk('7a. opens the night count',[/Evening Count/.test(mb()),ctx._closeFlow&&ctx._closeFlow.step],[true,'count']);
+  h.count(sh,0,'evening',{c5s:30});
+  chk('7b. a saved count goes straight to the money',[/Money Count/.test(mb()),ctx._closeFlow&&ctx._closeFlow.step],[true,'money']);
+  h.val('pm_cash',100); ctx.window.__lastSave=0; ctx.saveMoney(sh.id,0); // Save on the money screen the walk-through opened
+  chk('7c. the money shows what it adds up to',[/closed out/.test(mb()),/10 units/.test(mb()),ctx._closeFlow],[true,true,null]);
+  chk('7d. saved through the normal saves',[sh.days[0].eveningCount.c5s,ctx.calcPmt(sh.days[0].payments)],[30,100]); }
+{ const h=world(),{ctx}=h; const mb=()=>ctx.document.getElementById('mb').innerHTML;
+  const sh=h.newShow('Walk Away',dayKey(0)); h.pack(sh,{c5s:40});
+  ctx.startCloseFlow(sh.id,0); ctx.openDiscountModal(sh.id);
+  chk('7e. opening another screen ends the walk-through',ctx._closeFlow,null);
+  h.count(sh,0,'evening',{c5s:30});
+  chk('7f. a normal count later does not jump to money',/Money Count/.test(mb()),false); }
+{ const h=world(),{ctx}=h;
+  const sh=h.newShow('Split',dayKey(0)); h.pack(sh,{c5s:40});
+  ctx.startCloseFlow(sh.id,0); h.count(sh,0,'evening',{c5s:30}); ctx.mmToggle();
+  chk('7i. splitting the money by person keeps the walk-through',ctx._closeFlow&&ctx._closeFlow.step,'money'); }
+{ const h=world(),{ctx}=h;
+  const sh=h.newShow('Typo',dayKey(0)); h.pack(sh,{c5s:40});
+  ctx.startCloseFlow(sh.id,0); h.count(sh,0,'evening',{c5s:400});
+  chk('7g. a count that looks like a typo stops it',ctx._closeFlow,null); }
+{ const h=world(),{ctx}=h; const sh=h.newShow('Not Open',dayKey(0));
+  ctx.startCloseFlow(sh.id,0);
+  chk('7h. nothing to close before the morning count',ctx._closeFlow,null); }
+
+R.section('8. Counting screens');
+{ const h=world(),{ctx}=h; const html=require('fs').readFileSync(require('./harness.js').APP,'utf8');
+  chk('8a. count boxes open the number pad',/id="c_\$\{s\.key\}" value="\$\{def\[s\.key\]\|\|0\}"/.test(html)&&/type="number" inputmode="numeric" id="c_\$\{s\.key\}"/.test(html),true);
+  chk('8b. Batman Set Exact keeps the minus key',/type="number" id="bms_\$\{s\.key\}"/.test(html),true);
+  chk('8c. ±10 under each name',(ctx.q10(d=>`cA('c_x',${d})`).match(/cA\('c_x',(-10|10)\)/g)||[]).length,2);
+  const sh=h.newShow('Pk','2026-11-07'); ctx.showPackModal(sh.id); h.val('pk_c5s',5); ctx.pkA('c5s',10); ctx.pkA('c5s',1000);
+  chk('8d. +10 on Pack never goes past the garage',h.els['pk_c5s'].value,100); }
+
+R.section('9. Garage count stamp');
+{ const h=world(),{ctx}=h; const S=ctx.S; S.settings.garageLog=[
+    {ts:'2026-10-23T18:00:00.000Z',why:"your Oct 22 7:39 PM hard count put back (v89)",changes:{c5s:1}},
+    {ts:'2026-10-24T18:00:00.000Z',why:'Pack for Show',changes:{c5s:-40}},
+    {ts:'2026-10-24T19:00:00.000Z',why:'Built 4 Small Sets',changes:{set:4}}];
+  const g=ctx.garageStamp();
+  chk('9a. the count date is the count, not when it was logged',new Date(g.at).toLocaleDateString('en-US',{month:'short',day:'numeric'}),'Oct 22');
+  chk('9b. changes since are counted',g.since,2);
+  ctx.document.getElementById('sa_c5s').value='50'; ctx.applySetAll();
+  chk('9c. Set All is a new count',ctx.garageStamp().since,0); }
 
 R.done();
