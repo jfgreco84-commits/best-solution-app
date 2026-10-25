@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v93 + v94 gas by area and week, who drove what, 17 mpg, IRS 72.5¢/76¢ by date, Oct 25 2026](2026-10-25-v93-gas-mileage-audit.md)** (every show re-priced at the real regular price where he drove that week; Cranberry 3 vehicles leg by leg; rep-only miles out of the deduction; tax view; IRS mileage log; log a business trip; v94: per-show drivers and vehicles, Ram miles get the IRS rate whoever drove)
+**NEWEST: [v95 Small Sets, Oct 25 2026](2026-10-25-v95-small-sets.md)** (travel sets renamed Small Sets and made their own SET column, $20 default, $4.80 bottle COGS, $5.83 all in; 🎁 Build Small Sets on the Stock page; set add-ons and organza sizes on Supplies)
+
+**Before that: [v93 + v94 gas by area and week, who drove what, 17 mpg, IRS 72.5¢/76¢ by date, Oct 25 2026](2026-10-25-v93-gas-mileage-audit.md)** (every show re-priced at the real regular price where he drove that week; Cranberry 3 vehicles leg by leg; rep-only miles out of the deduction; tax view; IRS mileage log; log a business trip; v94: per-show drivers and vehicles, Ram miles get the IRS rate whoever drove)
 
 **Previous: [v92 rep off the crew kept getting paid, Oct 25 2026](2026-10-25-v92-off-crew-pay.md)**
 
