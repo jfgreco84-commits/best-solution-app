@@ -22,8 +22,11 @@
     #hdr{background:var(--card);border-bottom:2px solid var(--gold);padding:0 16px;display:flex;align-items:center;justify-content:space-between;position:fixed;top:0;left:0;right:0;z-index:100;height:52px}
     .hdr-brand{display:flex;align-items:center;gap:8px}
     .hdr-logo{font-size:22px}
-    .hdr-name{font-size:16px;font-weight:900;color:var(--gold);letter-spacing:0.3px}
-    .hdr-sub{font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-top:-1px}
+    .hdr-name{font-size:16px;font-weight:900;color:var(--gold);letter-spacing:0.3px;white-space:nowrap}
+    .hdr-sub{font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-top:-1px;white-space:nowrap}
+    #syncTxt{font-size:10px;font-weight:700;line-height:1.15;text-align:right;cursor:pointer;white-space:nowrap}
+    @media (max-width:350px){#syncTxt{display:none}}
+    #hdrR .btn{white-space:nowrap}
 
     /* BOTTOM NAV */
     #nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:100;height:58px}
@@ -131,8 +134,9 @@
     .cr-n{font-size:14px;font-weight:700}
     .cr-s{font-size:11px;color:var(--muted);margin-top:1px}
     .cr-c{display:flex;align-items:center;gap:7px}
-    .crb{width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:300}
+    .crb{width:44px;height:44px;border-radius:8px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:300}
     .crb:active{background:var(--gold);color:#000;border-color:var(--gold)}
+    .crq{display:flex;gap:6px;margin-top:5px}.crq button{min-width:44px;height:30px;padding:0 8px;border-radius:7px;border:1px solid var(--border);background:var(--card2);color:var(--muted);font-size:12px;font-weight:800;cursor:pointer}
     .cri{width:62px;text-align:center;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 4px;color:var(--text);font-size:18px;font-weight:900;outline:none}
     .cri:focus{border-color:var(--gold)}
 
@@ -491,7 +495,7 @@
     <span class="hdr-logo">⚡</span>
     <div><div class="hdr-name">Best Solution</div><div class="hdr-sub">Dot Dynasty LLC</div></div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px"><span id="syncDot" onclick="go('settings')" title="Cloud sync — tap for details" style="width:10px;height:10px;border-radius:50%;background:#666;display:inline-block;cursor:pointer;flex-shrink:0"></span><span id="auditBadge" onclick="openAuditModal()" title="Inventory audit" style="font-size:12px;font-weight:900;cursor:pointer;flex-shrink:0">🛡️</span><div id="hdrR"></div></div>
+  <div style="display:flex;align-items:center;gap:10px"><span id="syncTxt" onclick="go('settings')"></span><span id="syncDot" onclick="go('settings')" title="Cloud sync — tap for details" style="width:10px;height:10px;border-radius:50%;background:#666;display:inline-block;cursor:pointer;flex-shrink:0"></span><span id="auditBadge" onclick="openAuditModal()" title="Inventory audit" style="font-size:12px;font-weight:900;cursor:pointer;flex-shrink:0">🛡️</span><div id="hdrR"></div></div>
 </div>
 <div id="auditBar" style="display:none;position:fixed;top:52px;left:0;right:0;z-index:99"></div>
 
@@ -3013,6 +3017,17 @@ function garageCheck(why){
   L.push(e); if(L.length>300)L.splice(0,L.length-300);
   store(); _garageWhy=''; return e;
 }
+// v96: when the garage was last counted by hand, and how many changes since, so you know
+// whether you are looking at a real count or a running total
+function garageStamp(st){ st=st||S; const L=((st.settings||{}).garageLog||[]); let at=String((st.settings||{}).garageCountedAt||'');
+  let shown=at, logAt=at;
+  L.forEach(e=>{ if(e&&/set all counts|hard count/i.test(e.why||'')&&String(e.ts||'')>logAt){ logAt=String(e.ts); shown=logAt;
+    // "your Oct 22 7:39 PM hard count put back": the count itself was earlier than the entry
+    const m=/(\b[A-Z][a-z]{2} \d{1,2}) (\d{1,2}:\d{2} [AP]M) hard count/.exec(e.why||''); if(m){ const d=new Date(m[1]+' '+String(e.ts).slice(0,4)+' '+m[2]); if(!isNaN(d))shown=d.toISOString(); } } });
+  return {at:shown, since:logAt?L.filter(e=>e&&String(e.ts||'')>logAt).length:L.length}; }
+function garageStampHTML(){ const g=garageStamp();
+  const when=g.at?new Date(g.at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+  return `<div class="card" style="margin-bottom:10px;padding:10px 14px;font-size:12px;cursor:pointer" onclick="showSetAllInv()">🧮 ${g.at?`<strong>Counted ${_esc(when)}</strong> · ${g.since?g.since+' change'+(g.since>1?'s':'')+' since (see Garage History)':'nothing changed since'}`:'<strong>No full count on record.</strong> Count the shelf, then tap here to Set All Counts.'}</div>`; }
 function garageHistoryHTML(){
   const L=((S.settings||{}).garageLog||[]).slice(-25).reverse(); if(!L.length)return '';
   return `<div class="card" style="margin-bottom:12px">
@@ -3753,8 +3768,8 @@ function openTruckCount(shId,di){
   const d=sh.days[di], prev=(d.truckCount&&d.truckCount.counts)||null;
   mOpen(`<div class="mh"><div class="mt">🚚 Count the Truck</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${_esc(sh.name)} · ${_esc(d.date||('Day '+(di+1)))}. Count ONLY what is in the truck. Booth tables are counted on their own cards.</div>
-  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">App expects: ${r.truck[s.key]}</div></div>
-  <div class="cr-c"><button class="crb" onclick="cA('tk_${s.key}',-1)">−</button><input class="cri" type="number" id="tk_${s.key}" value="${prev?(prev[s.key]||0):Math.max(0,r.truck[s.key])}" min="0"><button class="crb" onclick="cA('tk_${s.key}',1)">+</button></div></div>`).join('')}
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">App expects: ${r.truck[s.key]}</div>${q10(d=>`cA('tk_${s.key}',${d})`)}</div>
+  <div class="cr-c"><button class="crb" onclick="cA('tk_${s.key}',-1)">−</button><input class="cri" type="number" inputmode="numeric" id="tk_${s.key}" value="${prev?(prev[s.key]||0):Math.max(0,r.truck[s.key])}" min="0"><button class="crb" onclick="cA('tk_${s.key}',1)">+</button></div></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveTruckCountUI('${shId}',${di})">Save Truck Count</button>`);
 }
 function saveTruckCountUI(shId,di){
@@ -5383,6 +5398,7 @@ function rStock(){
           return `<div style="font-size:12px;margin-top:6px"><span style="color:var(--gold);font-weight:800">🚚 Truck</span> <span style="color:var(--muted)">${tk}</span></div><div style="font-size:12px;margin-top:2px"><span style="color:#7EB8F7;font-weight:800">🎪 Booths</span> <span style="color:var(--muted)">${bt}</span></div>`;})():''}
       </div>`;}).join('');
   })():''}
+  ${view==='garage'?garageStampHTML():''}
   ${SKUS.map(s=>{
     const g=garage[s.key]||0, sw=shows[s.key]||0;
     const q=inv[s.key]||0;const val=q*getCost(s.key);const margin=Math.round(((getP(s.key)-getCost(s.key))/getP(s.key))*100);const low=(view==='garage'&&q<5);
@@ -5395,7 +5411,7 @@ function rStock(){
           ${view==='all'?`<div style="font-size:11px;color:var(--blue);margin-top:2px">🏠 ${g} garage + 🎪 ${sw} at shows</div>`:''}
           ${view==='garage'?`<div style="margin-top:10px;display:flex;align-items:center;gap:8px">
             <button class="crb" onclick="adjInv('${s.key}',-1)">−</button>
-            <input class="cri" type="number" value="${q}" min="0" onchange="setInv('${s.key}',this.value)" onfocus="this.select()">
+            <input class="cri" type="number" inputmode="numeric" value="${q}" min="0" onchange="setInv('${s.key}',this.value)" onfocus="this.select()">
             <button class="crb" onclick="adjInv('${s.key}',1)">+</button>
           </div>`:''}
         </div>
@@ -5419,7 +5435,7 @@ function setInv(k,v){_garageWhy='typed on the Stock page';S.inventory[k]=Math.ma
 function showRestock(){
   mOpen(`<div class="mh"><div class="mt">+ Restock Inventory</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter units to ADD to current inventory.</div>
-  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (now: ${S.inventory[s.key]||0})</label><input class="fi" type="number" id="rst_${s.key}" placeholder="0" min="0"></div>`).join('')}
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (now: ${S.inventory[s.key]||0})</label><input class="fi" type="number" inputmode="numeric" id="rst_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applyRestock()">Add to Inventory</button>`);
 }
 function applyRestock(){if(_sameTap('rst|'+_skuVals('rst_')))return;let n=0;SKUS.forEach(s=>{const v=parseInt($$('rst_'+s.key).value)||0;if(v>0){S.inventory[s.key]=(S.inventory[s.key]||0)+v;n+=v;}});mClose();saveS();toast('+'+n+' units added!');}
@@ -5485,7 +5501,7 @@ function openBuildSets(){
     ${mg(20)}${mg(25)}${mg(30)}
     <div style="font-size:10px;color:var(--muted);margin-top:4px">Add-ons are logged as Business Purchases, so the P&amp;L counts them once there, not per set.</div>
   </div>
-  <div class="fg"><label class="fl">How many sets</label><input class="fi" type="number" id="bss_n" min="1" placeholder="e.g. 24"></div>
+  <div class="fg"><label class="fl">How many sets</label><input class="fi" type="number" inputmode="numeric" id="bss_n" min="1" placeholder="e.g. 24"></div>
   <div style="display:flex;gap:8px"><button class="btn btn-gold" style="flex:1" onclick="applyBuildSets(1)">🎁 Build</button><button class="btn btn-ghost" style="flex:1" onclick="applyBuildSets(-1)">↩️ Break apart</button></div>`);
 }
 function applyBuildSets(sign){
@@ -5497,17 +5513,17 @@ function applyBuildSets(sign){
 function showSetAllInv(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Counts</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT count you have right now.</div>
-  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name}</label><input class="fi" type="number" id="sa_${s.key}" value="${S.inventory[s.key]||0}" min="0"></div>`).join('')}
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name}</label><input class="fi" type="number" inputmode="numeric" id="sa_${s.key}" value="${S.inventory[s.key]||0}" min="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" onclick="applySetAll()">Save All Counts</button>`);
 }
-function applySetAll(){_garageWhy='Set All Counts at Once';SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);if(!isNaN(v))S.inventory[s.key]=Math.max(0,v);});mClose();saveS();toast('Inventory updated!');}
+function applySetAll(){_garageWhy='Set All Counts at Once';S.settings=S.settings||{};S.settings.garageCountedAt=new Date().toISOString();SKUS.forEach(s=>{const v=parseInt($$('sa_'+s.key).value);if(!isNaN(v))S.inventory[s.key]=Math.max(0,v);});mClose();saveS();toast('Inventory updated!');}
 
 // ---- Borrowed-from-Batman editors (Borrowed / Returned move the garage too; Set Exact is debt only) ----
 function showAddBatman(){
   mOpen(`<div class="mh"><div class="mt">🦇 Borrowed More from Batman</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you just borrow? This ADDS to what you owe him AND puts them in the garage.</div>
   <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="bma_date" value="${_todayKey()}"></div>
-  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bma_${s.key}" placeholder="0" min="0"></div>`).join('')}
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" inputmode="numeric" id="bma_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="bma_note" placeholder="e.g. for Burgoo"></div>
   <button class="btn btn-gold btn-full" onclick="applyAddBatman()">Add to What I Owe</button>`);
 }
@@ -5517,7 +5533,7 @@ function showReturnBatman(){
   mOpen(`<div class="mh"><div class="mt">− Returned to Batman</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many bottles did you give back? This LOWERS what you owe, bottle for bottle, and takes them out of the garage.</div>
   <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="bmr_date" value="${_todayKey()}"></div>
-  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" id="bmr_${s.key}" placeholder="0" min="0"></div>`).join('')}
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (owe now: ${bmInv()[s.key]||0})</label><input class="fi" type="number" inputmode="numeric" id="bmr_${s.key}" placeholder="0" min="0"></div>`).join('')}
   <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="bmr_note" placeholder="e.g. pallet came in"></div>
   <button class="btn btn-gold btn-full" onclick="applyReturnBatman()">Subtract Returned</button>`);
 }
@@ -5976,26 +5992,26 @@ function showEditCosts(id){
   <div class="fg"><label class="fl">Show Name</label><input class="fi" type="text" id="ec_name" value="${esc(sh.name)}" placeholder="Show name"></div>
   <div class="fg"><label class="fl">Location</label><input class="fi" type="text" id="ec_loc" value="${esc(sh.location)}" placeholder="City, ST"></div>
   <div class="fg"><label class="fl">Start Date (rain date or rescheduled? change it here)</label><input class="fi" type="date" id="ec_start" value="${esc(sh.startDate)}"></div>
-  <div class="fg"><label class="fl">Number of Days</label><input class="fi" type="number" id="ec_days" step="1" min="1" value="${sh.numDays||1}" placeholder="1"></div>
+  <div class="fg"><label class="fl">Number of Days</label><input class="fi" type="number" inputmode="numeric" id="ec_days" step="1" min="1" value="${sh.numDays||1}" placeholder="1"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Changing days adds/removes day tabs. Days that already have counts entered are never deleted.</div>
-  <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" inputmode="decimal" id="ec_booth" step="0.01" min="0" value="${sh.boothCost||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">🏬 Booths at this show</label>
     <button type="button" class="btn btn-ghost btn-sm btn-full" onclick="openBoothsModal('${id}')">${hasBooths(sh)?(showBooths(sh).length+' booths — '+showBooths(sh).map(b=>b.name).join(', ')):'Single booth — tap to split into 2, 3 or 4'}</button>
     <div style="font-size:11px;color:var(--muted);margin-top:5px">Still one show, one booth fee, one pull from master stock. Splitting only means each booth gets counted and cashed out on its own, and every booth adds into the grand total.</div>
   </div>
   <div class="fg"><label class="fl">Booth Deposit Due By (optional)</label><input class="fi" type="date" id="ec_due" value="${sh.depositDue||''}"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Set this and the app warns you on Home starting 7 days out until the booth is paid.</div>
-  <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
+  <div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" inputmode="decimal" id="ec_miles" step="1" min="0" value="${sh.miles||''}" placeholder="0"></div>
   <div class="fg"><label class="fl">Travel Type — tap one</label>
     <div style="display:flex;gap:8px">
       <button type="button" id="ec_tt_daily" class="btn ${(sh.roundTrips===1&&(sh.numDays||1)>1)?'btn-ghost':'btn-gold'} btn-sm" style="flex:1" onclick="ecSetTravel('daily')">🚗 Round-trip daily</button>
       <button type="button" id="ec_tt_hotel" class="btn ${(sh.roundTrips===1&&(sh.numDays||1)>1)?'btn-gold':'btn-ghost'} btn-sm" style="flex:1" onclick="ecSetTravel('hotel')">🏨 Hotel stay</button>
     </div>
   </div>
-  <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)" oninput="ecUpdateTravelPreview()"></div>
+  <div class="fg"><label class="fl">Round Trips</label><input class="fi" type="number" inputmode="decimal" id="ec_trips" step="1" min="0" value="${(sh.roundTrips!=null&&sh.roundTrips!=='')?sh.roundTrips:''}" placeholder="${sh.numDays||1} (1 per day)" oninput="ecUpdateTravelPreview()"></div>
   <div class="g2" style="gap:8px">
-    <div class="fg"><label class="fl">Gas $/gallon (this show)</label><input class="fi" type="number" id="ec_gasprice" step="0.01" min="0" value="${(sh.gasPrice!=null&&sh.gasPrice!=='')?sh.gasPrice:''}" placeholder="${gasDefaultPrice(sh).toFixed(2)}" oninput="ecUpdateTravelPreview()"></div>
-    <div class="fg"><label class="fl">MPG (this vehicle)</label><input class="fi" type="number" id="ec_mpg" step="0.1" min="0" value="${(sh.mpg!=null&&sh.mpg!=='')?sh.mpg:''}" placeholder="${S.settings.mpg||RAM_MPG}" oninput="ecUpdateTravelPreview()"></div>
+    <div class="fg"><label class="fl">Gas $/gallon (this show)</label><input class="fi" type="number" inputmode="decimal" id="ec_gasprice" step="0.01" min="0" value="${(sh.gasPrice!=null&&sh.gasPrice!=='')?sh.gasPrice:''}" placeholder="${gasDefaultPrice(sh).toFixed(2)}" oninput="ecUpdateTravelPreview()"></div>
+    <div class="fg"><label class="fl">MPG (this vehicle)</label><input class="fi" type="number" inputmode="decimal" id="ec_mpg" step="0.1" min="0" value="${(sh.mpg!=null&&sh.mpg!=='')?sh.mpg:''}" placeholder="${S.settings.mpg||RAM_MPG}" oninput="ecUpdateTravelPreview()"></div>
   </div>
   <div class="fg"><label class="fl">🚗 Who drove what</label>
     <div id="ec_veh"></div>
@@ -6005,12 +6021,12 @@ function showEditCosts(id){
   <div id="ec_travel_preview" style="font-size:12px;color:var(--gold);margin:-2px 0 10px;font-weight:700"></div>
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">🚗 Round-trip daily = drive home each night (trips = # days). 🏨 Hotel = there once & back once (1 trip). Leave gas $/gal & MPG blank to use Settings.</div>
   ${gasMarketPrice(sh)!=null?`<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">⛽ Regular in this show's area that week: <b>$${gasMarketPrice(sh).toFixed(2)}</b>${(sh.gasPrice!=null&&sh.gasPrice!==''&&Math.abs(parseFloat(sh.gasPrice)-gasMarketPrice(sh))>0.005)?` · <a href="#" onclick="$$('ec_gasprice').value='${gasMarketPrice(sh).toFixed(2)}';ecUpdateTravelPreview();return false">use it</a>`:''}</div>`:''}
-  ${sh.repOnlyShow&&!(Array.isArray(sh.vehicles)&&sh.vehicles.length)?`<div class="fg"><label class="fl">🚚 Miles on YOUR truck for this rep-only show (the rep took your Ram, or you dropped off / picked up stock)</label><input class="fi" type="number" id="ec_ownmiles" step="1" min="0" value="${(sh.ownerMiles!=null&&sh.ownerMiles!=='')?sh.ownerMiles:''}" placeholder="0 (the rep drove their own car)"></div>
+  ${sh.repOnlyShow&&!(Array.isArray(sh.vehicles)&&sh.vehicles.length)?`<div class="fg"><label class="fl">🚚 Miles on YOUR truck for this rep-only show (the rep took your Ram, or you dropped off / picked up stock)</label><input class="fi" type="number" inputmode="decimal" id="ec_ownmiles" step="1" min="0" value="${(sh.ownerMiles!=null&&sh.ownerMiles!=='')?sh.ownerMiles:''}" placeholder="0 (the rep drove their own car)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Only miles on your own vehicle get the IRS mileage rate. The gas you paid for the rep's car is still deducted, dollar for dollar.</div>`:''}
-  <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
+  <div class="fg"><label class="fl">Actual Gas $ — optional, overrides the estimate</label><input class="fi" type="number" inputmode="decimal" id="ec_gas" step="0.01" min="0" value="${(sh.gasOverride!=null&&sh.gasOverride!=='')?sh.gasOverride:''}" placeholder="auto: ${fmt(autoGas)}"></div>
   ${showGasLogged(sh)>0?`<div style="font-size:11px;color:var(--gold);margin:-6px 0 12px">⛽ This show has ${fmt(showGasLogged(sh))} of gas receipts logged from before; those receipts are its gas.</div>`:''}
-  <div class="fg"><label class="fl">🧻 Paper towel rolls used (actual)</label><input class="fi" type="number" id="ec_paper" step="1" min="0" value="${(sh.paperRolls!=null&&sh.paperRolls!=='')?sh.paperRolls:''}" placeholder="est. ${paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh)} (${paperRollsPerPersonDay()} per person per day)"></div>
-  <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">🧻 Paper towel rolls used (actual)</label><input class="fi" type="number" inputmode="numeric" id="ec_paper" step="1" min="0" value="${(sh.paperRolls!=null&&sh.paperRolls!=='')?sh.paperRolls:''}" placeholder="est. ${paperRollsPerPersonDay()*showPaperCrew(sh)*showOverheadDays(sh)} (${paperRollsPerPersonDay()} per person per day)"></div>
+  <div class="fg"><label class="fl">Lodging / Hotel ($)</label><input class="fi" type="number" inputmode="decimal" id="ec_lodging" step="0.01" min="0" value="${sh.lodging||''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Hours — set each day's open &amp; close</label>
     ${Array.from({length:sh.numDays||1},(_,i)=>{
       const d=(sh.days||[])[i]||{}; const dl=(sh.dates&&sh.dates[i])?sh.dates[i]:('Day '+(i+1));
@@ -6019,9 +6035,9 @@ function showEditCosts(id){
     }).join('')}
   </div>
   <div style="font-size:11px;color:var(--muted);margin:-2px 0 12px">Call time = 1 hour before open. Different each day is fine (e.g. Fri 4–8, Sat 10–4, Sun 10–3).</div>
-  <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
+  <div class="fg"><label class="fl">Tax % for this show</label><input class="fi" type="number" inputmode="decimal" id="ec_tax" step="0.1" min="0" max="100" value="${(sh.taxRate!=null&&sh.taxRate!=='')?(sh.taxRate*100):''}" placeholder="${gpct} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Leave tax blank to use the global ${gpct}%. Set 0 for a tax-free show/state.</div>
-  <div class="fg"><label class="fl">Sales Tax % on CARD sales at THIS venue</label><input class="fi" type="number" id="ec_ctax" step="0.1" min="0" max="15" value="${(sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?(sh.cardTaxRate*100):''}" placeholder="${(((S.settings.cardTax||0))*100).toFixed(1)} (global default)"></div>
+  <div class="fg"><label class="fl">Sales Tax % on CARD sales at THIS venue</label><input class="fi" type="number" inputmode="decimal" id="ec_ctax" step="0.1" min="0" max="15" value="${(sh.cardTaxRate!=null&&sh.cardTaxRate!=='')?(sh.cardTaxRate*100):''}" placeholder="${(((S.settings.cardTax||0))*100).toFixed(1)} (global default)"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 14px">Rates differ by county/state: West Bend 5.5, Waukesha Cty 5.0, Milwaukee city 7.9, Franklin 5.9. Leave blank for the global rate.</div>
   <div class="fg"><label class="fl">👥 Crew — hours worked (pay is entered per day)</label>
     ${(()=>{
@@ -6033,7 +6049,7 @@ function showEditCosts(id){
         const hrs=(sh.repHours&&sh.repHours[rid]!=null)?sh.repHours[rid]:(r.isSelf&&sh.myHours!=null?sh.myHours:'');
         const pay=repShowPay(sh,rid);
         return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="min-width:74px;font-size:12px;font-weight:700">${r.name}${r.isSelf?' 👑':''}</div>
-          <input class="fi" type="number" step="0.5" min="0" id="ec_hrs_${rid}" value="${hrs}" placeholder="hrs" style="flex:1">
+          <input class="fi" type="number" inputmode="decimal" step="0.5" min="0" id="ec_hrs_${rid}" value="${hrs}" placeholder="hrs" style="flex:1">
           ${r.isSelf?'<div style="flex:1;font-size:11px;color:var(--muted);text-align:center">earns profit</div>':`<div style="flex:1;font-size:11px;color:var(--muted);text-align:center">pay: ${fmt(pay)}</div>`}</div>`;
       }).join('');
     })()}
@@ -6063,9 +6079,9 @@ function ecVehRender(){ const el=$$('ec_veh'); if(!el)return; const vs=window.__
         <button type="button" class="btn btn-sm ${own?'btn-gold':'btn-ghost'}" style="flex:1" onclick="ecVehSet(${i},'car','own')">🚙 Their own car</button></div>
       ${own?`<input class="fi" type="text" style="margin-bottom:6px" placeholder="What car (e.g. GMC Terrain)" value="${_esc(v.carName||'')}" oninput="ecVehSet(${i},'carName',this.value,1)">`:''}
       <div style="display:flex;gap:6px">
-        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">MPG</div><input class="fi" type="number" step="0.1" min="0" value="${v.mpg!=null&&v.mpg!==''?v.mpg:''}" placeholder="${own?'needed':(S.settings.mpg||RAM_MPG)}" oninput="ecVehSet(${i},'mpg',this.value,1)"></div>
-        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">Miles one way</div><input class="fi" type="number" step="1" min="0" value="${v.miles!=null&&v.miles!==''?v.miles:''}" placeholder="${oneDef}" oninput="ecVehSet(${i},'miles',this.value,1)"></div>
-        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">Round trips</div><input class="fi" type="number" step="1" min="0" value="${v.trips!=null&&v.trips!==''?v.trips:''}" placeholder="${tripsDef}" oninput="ecVehSet(${i},'trips',this.value,1)"></div></div>
+        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">MPG</div><input class="fi" type="number" inputmode="decimal" step="0.1" min="0" value="${v.mpg!=null&&v.mpg!==''?v.mpg:''}" placeholder="${own?'needed':(S.settings.mpg||RAM_MPG)}" oninput="ecVehSet(${i},'mpg',this.value,1)"></div>
+        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">Miles one way</div><input class="fi" type="number" inputmode="decimal" step="1" min="0" value="${v.miles!=null&&v.miles!==''?v.miles:''}" placeholder="${oneDef}" oninput="ecVehSet(${i},'miles',this.value,1)"></div>
+        <div style="flex:1"><div style="font-size:10px;color:var(--muted)">Round trips</div><input class="fi" type="number" inputmode="decimal" step="1" min="0" value="${v.trips!=null&&v.trips!==''?v.trips:''}" placeholder="${tripsDef}" oninput="ecVehSet(${i},'trips',this.value,1)"></div></div>
       ${own&&!(parseFloat(v.mpg)>0)?'<div style="font-size:11px;color:var(--red,#f66);margin-top:4px">Enter their MPG. Until then it is figured at the Ram\'s.</div>':''}
     </div>`; }).join('');
   ecUpdateTravelPreview(); }
@@ -6278,7 +6294,7 @@ function showLodgingModal(id){
   mOpen(`<div class="mh"><div class="mt">🏨 Lodging Expenses</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="padding:8px 0 14px;font-size:13px;color:var(--muted)">${sh.name}</div>
   ${sh.lodgingNote?`<div class="wb gold" style="margin-bottom:12px">📍 ${sh.lodgingNote}</div>`:''}
-  <div class="fg"><label class="fl">Total Lodging Cost ($)</label><input class="fi" type="number" id="lod_amt" placeholder="0.00" step="0.01" min="0" value="${sh.lodging||''}"></div>
+  <div class="fg"><label class="fl">Total Lodging Cost ($)</label><input class="fi" type="number" inputmode="decimal" id="lod_amt" placeholder="0.00" step="0.01" min="0" value="${sh.lodging||''}"></div>
   <div class="fg"><label class="fl">Lodging Notes</label><input class="fi" type="text" id="lod_note" placeholder="e.g. Airbnb in Merrillan WI — 34 min drive" value="${sh.lodgingNote||''}"></div>
   <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:12px">Lodging is added to your Break Even calculation automatically.</div>
   <button class="btn btn-gold btn-full" onclick="saveLodging('${id}')">Save Lodging</button>`);
@@ -6579,8 +6595,8 @@ function showNewShowModal(){
   mOpen(`<div class="mh"><div class="mt">🎪 New Show</div><button class="mx" onclick="mClose()">×</button></div>
   <div class="fg"><label class="fl">Show Name *</label><input class="fi" id="ns_n" placeholder="e.g. Cranberry Fest 2026"></div>
   <div class="fg"><label class="fl">Location / Venue</label><input class="fi" id="ns_l" placeholder="e.g. Warrens, WI"></div>
-  <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Start Date</label><input class="fi" type="date" id="ns_d" value="${today}"></div><div class="fg"><label class="fl"># of Days</label><input class="fi" type="number" id="ns_dy" value="1" min="1" max="10"></div></div>
-  <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" id="ns_b" placeholder="0.00" step="0.01" min="0"></div><div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" id="ns_m" placeholder="0" min="0"></div></div>
+  <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Start Date</label><input class="fi" type="date" id="ns_d" value="${today}"></div><div class="fg"><label class="fl"># of Days</label><input class="fi" type="number" inputmode="numeric" id="ns_dy" value="1" min="1" max="10"></div></div>
+  <div class="g2" style="gap:10px"><div class="fg"><label class="fl">Booth Cost ($)</label><input class="fi" type="number" inputmode="decimal" id="ns_b" placeholder="0.00" step="0.01" min="0"></div><div class="fg"><label class="fl">One-Way Miles</label><input class="fi" type="number" inputmode="decimal" id="ns_m" placeholder="0" min="0"></div></div>
   <button class="btn btn-gold btn-full" onclick="createShow()">Create Show</button>`);
 }
 function createShow(){ if(_sameTap('ns|'+(($$('ns_n')||{}).value||'')+'|'+(($$('ns_d')||{}).value||'')))return;
@@ -6844,7 +6860,7 @@ function trRender(){
     ${booths.length?`<div class="fg"><label class="fl">Which booth gets it</label><select class="fi" id="tr_booth" onchange="trRefresh('booth')"><option value="${TRUCK_ID}"${st.booth===TRUCK_ID?' selected':''}>🚚 Truck (booths pull from it)</option>${booths.map(b=>`<option value="${b.id}"${b.id===st.booth?' selected':''}>${_esc(b.name)}</option>`).join('')}</select></div>`:''}
     ${(booths.length&&st.booth===TRUCK_ID)?`<div class="wb gold" style="font-size:11px;margin-bottom:12px">These units go into the <strong>🚚 truck</strong>. The garage goes down, the truck goes up, and no booth count changes until a booth pulls them.</div>`:`<div class="wb gold" style="font-size:11px;margin-bottom:12px">These units are added to that day's <strong>opening count</strong>${booths.length?' at that booth':''} — last night's ending + what you brought = what is on the table. The garage goes down by the same amount, and the show's "brought from garage" total goes up.</div>`}`;
   }
-  const rows=SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">${isGarage?'Garage':'Packed'}: ${parseInt(src[s.key])||0}</div></div>
+  const rows=SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">${isGarage?'Garage':'Packed'}: ${parseInt(src[s.key])||0}</div>${q10(d=>`trA('${s.key}',${d})`)}</div>
     <div class="cr-c"><button class="crb" onclick="trA('${s.key}',-1)">−</button><input class="cri" type="number" id="tr_q_${s.key}" value="${parseInt(st.qtys[s.key])||0}" min="0" step="1" inputmode="numeric" oninput="trReadState()"><button class="crb" onclick="trA('${s.key}',1)">+</button></div></div>`).join('');
   mOpen(`<div class="mh"><div class="mt">🔄 Transfer Stock</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${isGarage?'Bring more product from home to a show that is already running. Fill in every size you are bringing, then tap once.':'Move packed units from one show to another (e.g. one booth ran out).'} This is NOT a sale — revenue, units sold, and rep totals are untouched.</div>
@@ -7066,8 +7082,8 @@ function tripModal(){ mOpen(`<div class="mh"><div class="mt">🚚 Log a business
   <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="tr_date" value="${_todayKey()}"></div>
   <div class="fg"><label class="fl">Where to</label><input class="fi" type="text" id="tr_to" placeholder="Post office, Burlington"></div>
   <div class="fg"><label class="fl">Why (business purpose)</label><input class="fi" type="text" id="tr_why" placeholder="Mailed online order / bought supplies / picked up product"></div>
-  <div class="fg"><label class="fl">Round-trip miles</label><input class="fi" type="number" id="tr_mi" step="0.1" min="0" placeholder="0"></div>
-  <div class="fg"><label class="fl">Parking / tolls ($, optional)</label><input class="fi" type="number" id="tr_pk" step="0.01" min="0" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Round-trip miles</label><input class="fi" type="number" inputmode="decimal" id="tr_mi" step="0.1" min="0" placeholder="0"></div>
+  <div class="fg"><label class="fl">Parking / tolls ($, optional)</label><input class="fi" type="number" inputmode="decimal" id="tr_pk" step="0.01" min="0" placeholder="0.00"></div>
   <button class="btn btn-gold btn-full" onclick="tripSave()">Save trip</button>`); }
 function tripSave(){ const v=k=>(($$(k)||{}).value||'').trim(); const mi=parseFloat(v('tr_mi'))||0; if(!(mi>0)){ toast('Enter the miles'); return; } if(_sameTap('trip'+v('tr_date')+mi))return;
   _trips().push({id:'trip_'+Date.now(),date:/^\d{4}-\d{2}-\d{2}$/.test(v('tr_date'))?v('tr_date'):_todayKey(),to:v('tr_to'),why:v('tr_why')||'Business errand',miles:mi,park:parseFloat(v('tr_pk'))||0});
@@ -8076,6 +8092,7 @@ function boothDayCardHTML(sh,di,b){
       ${col('🌙 Evening',{fg:'#B98AE6',bd:haE?'var(--border)':(haM?'var(--gold)':'var(--border)')},skuRows(en.eveningCount||{},haE),eBtn)}
       ${col('💰 Money',{fg:'#00D26A',bd:haP?'var(--border)':(haE?'var(--gold)':'var(--border)')},pmtRows,pBtn)}
     </div>`;
+  if(!locked&&sh.status==='active'&&haM&&!(haE&&haP))h+=`<button class="btn btn-sm btn-gold btn-full" style="margin-top:8px" onclick="startCloseFlow('${sh.id}',${di},${bArg})">🌙 Close out ${_esc(b.name)}: count, then money</button>`;
   if(restockT||lostT)h+=`<div style="font-size:10px;color:var(--muted);margin-top:6px">${restockT?'+ Restock '+restockT+' ':''}${lostT?'· Lost/Damaged '+lostT+' (still costs COGS)':''}</div>`;
   if(carry.length)h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ Opening ≠ this booth's ending last night: ${carry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>`;
   if(pulled.length)h+=`<div style="margin-top:6px;font-size:11px;color:#7EB8F7">🚚 ${pulled.map(m=>m.short+' '+(m.diff>0?'+'+m.diff+' off the truck':(-m.diff)+' back to the truck')).join(' · ')}</div>`;
@@ -8686,7 +8703,7 @@ function openBoothTransfer(shId,di,fromId){
   ${SKUS.map(s=>`<div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:6px;align-items:center;margin-top:6px">
     <div style="font-size:12px">${s.short}</div>
     <div style="font-size:12px;font-weight:800;color:${(have[s.key]||0)>0?'var(--gold)':'var(--muted)'}">${have[s.key]||0}</div>
-    <input class="fi" type="number" min="0" step="1" id="bt_${s.key}" value="" placeholder="0" oninput="btCheck()"></div>`).join('')}
+    <input class="fi" type="number" inputmode="numeric" min="0" step="1" id="bt_${s.key}" value="" placeholder="0" oninput="btCheck()"></div>`).join('')}
   <div id="bt_warn" style="margin-top:10px"></div>
   <div class="fg" style="margin-top:10px"><label class="fl">Note (optional)</label><input class="fi" type="text" id="bt_note" placeholder="e.g. Booth 2 ran out of C5 Small"></div>
   <div class="wb" style="font-size:11px;background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7">This moves product between your own booths. The show's stock, sales, COGS and profit do not change by a single unit — only which booth gets the credit for selling it.</div>
@@ -8817,6 +8834,7 @@ function rDay(sh,di){
         ${hasBooths(sh)?`<div style="text-align:center;font-size:10px;color:var(--muted);margin-top:6px;padding:4px 0">= sum of booths</div>`:`<button class="btn btn-xs ${haP?'btn-ghost':(haE?'btn-gold':'btn-outline')} btn-full" style="margin-top:6px" onclick="showMoneyModal('${sh.id}',${di})" ${!haE?'disabled':''}>${haP?'Edit':'Count'}</button>`}
       </div>
     </div>
+    ${(!hasBooths(sh)&&!d.locked&&sh.status==='active'&&d.morningCount&&!(d.eveningCount&&haP))?`<button class="btn btn-gold btn-full" style="margin:8px 0 2px" onclick="startCloseFlow('${sh.id}',${di})">🌙 Close out today: count, then money</button>`:''}
     ${dayGarageCardHTML(sh,di)}
     ${moneyCheck}
     ${(haP&&!(haM&&haE))?`<div class="wb red" style="margin-top:6px">⚠️ Money logged but counts missing — this day's profit ignores product cost until you count.</div>`:''}
@@ -8933,8 +8951,8 @@ function showPackModal(shId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   mOpen(`<div class="mh"><div class="mt">🎒 Pack for ${sh.name}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">How many are you bringing? Can't exceed master inventory.</div>
-  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">In stock: ${S.inventory[s.key]||0}</div></div>
-  <div class="cr-c"><button class="crb" onclick="pkA('${s.key}',-1)">−</button><input class="cri" type="number" id="pk_${s.key}" value="0" min="0" max="${S.inventory[s.key]||0}" oninput="updPackLeft()"><button class="crb" onclick="pkA('${s.key}',1)">+</button></div></div>`).join('')}
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div><div class="cr-s">In stock: ${S.inventory[s.key]||0}</div>${q10(d=>`pkA('${s.key}',${d})`)}</div>
+  <div class="cr-c"><button class="crb" onclick="pkA('${s.key}',-1)">−</button><input class="cri" type="number" inputmode="numeric" id="pk_${s.key}" value="0" min="0" max="${S.inventory[s.key]||0}" oninput="updPackLeft()"><button class="crb" onclick="pkA('${s.key}',1)">+</button></div></div>`).join('')}
   <div id="pkLeft" style="font-size:11px;color:var(--muted);margin-top:10px;text-align:center"></div>
   <div style="display:flex;gap:10px;margin-top:12px">
     <button class="btn btn-ghost" style="flex:0 0 auto" onclick="pkAll('${shId}');updPackLeft()">Take All</button>
@@ -9004,10 +9022,12 @@ function showCntModal(shId,di,type,boothId){
       const mine=skuZero(); if(cur.restock)SKUS.forEach(s=>mine[s.key]=parseInt(cur.restock[s.key])||0);
       return `<div class="wb gold" style="margin-bottom:12px;font-size:12px">🚚 Count what is on <strong>this booth's table</strong>. Anything above ${prevEve?'last night':'zero'} comes off the truck. Available for this booth: ${SKUS.map(s=>s.short+' '+Math.max(0,r.start[s.key]-other[s.key]-mine[s.key])).join(' · ')}</div>`; })()
     :(prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night${gInT?' + what you brought from the garage':''}</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:'')}
-  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}${(gIn[s.key]||0)?' + 🏠 '+gIn[s.key]+' brought = '+((parseInt(prevEve[s.key])||0)+gIn[s.key]):''}</div>`:'')}</div>
-  <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
+  ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}${(gIn[s.key]||0)?' + 🏠 '+gIn[s.key]+' brought = '+((parseInt(prevEve[s.key])||0)+gIn[s.key]):''}</div>`:'')}${q10(d=>`cA('c_${s.key}',${d})`)}</div>
+  <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" inputmode="numeric" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}',${bArg})">Save ${type==='morning'?'Morning':'Evening'} Count${who}</button>`);
 }
+// v96: quick −10 / +10 under the product name on count, pack, truck and transfer screens
+function q10(f){ return `<div class="crq"><button type="button" onclick="${f(-10)}">−10</button><button type="button" onclick="${f(10)}">+10</button></div>`; }
 function cA(id,d){const e=$$(id);e.value=Math.max(0,parseInt(e.value||0)+d);}
 function saveCount(shId,di,type,boothId){
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
@@ -9044,6 +9064,55 @@ function saveCount(shId,di,type,boothId){
   if(type==='evening'&&tgt.morningCount){ const hi=SKUS.filter(s=>(c[s.key]||0)>(parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0));
     if(hi.length)warn=' 🛑 Typo? '+hi.map(s=>s.short+' '+c[s.key]+' tonight, only '+((parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0))+' this morning').join(', ')+'. Tap Evening Count to fix.'; }
   mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn,warn?7000:2200);
+  if(type==='evening')closeFlowStep('count',shId,di,boothId,warn);
+}
+// v96 CLOSE OUT: one button per booth (or per day on a show with no booths) walks the night:
+// 1) evening count, 2) money count, 3) what sold vs what is in the drawer, and what is left to do.
+// It only opens the same screens in order; every save, check and typo warning is the normal one.
+// Any other screen opened along the way ends the walk-through; nothing is saved by the flow itself.
+let _closeFlow=null, _cfOpening=false;
+function _cfOpen(fn){ _cfOpening=true; try{ fn(); }finally{ _cfOpening=false; } }
+function _cfBanner(n){ try{ const mb=$$('mb'), mh=mb&&mb.querySelector&&mb.querySelector('.mh'); if(mh&&mh.insertAdjacentHTML)mh.insertAdjacentHTML('afterend',`<div class="wb gold" style="margin-bottom:10px;font-size:12px"><strong>🌙 Close out, step ${n} of 2:</strong> ${n===1?'count what is left on the table.':'count the money in the drawer.'}</div>`); }catch(e){} }
+function startCloseFlow(shId,di,boothId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const d=(sh.days||[])[di]; if(!d)return;
+  boothId=boothId||null;
+  if(d.locked){ toast('🔒 Day is locked. Unlock it to edit.'); return; }
+  if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — close out each booth.'); return; }
+  const src=boothId?(dayBoothRead(d,boothId)||{}):d;
+  if(!src.morningCount){ toast('Count this morning first.'); return; }
+  _closeFlow={shId,di,boothId,step:'count'};
+  _cfOpen(()=>showCntModal(shId,di,'evening',boothId||undefined)); _cfBanner(1);
+}
+function closeFlowStep(kind,shId,di,boothId,warn){
+  const f=_closeFlow; if(!f||f.shId!==shId||f.di!==(parseInt(di)||0)||(f.boothId||null)!==(boothId||null))return;
+  if(kind==='count'){
+    if(f.step!=='count')return;
+    if(/🛑/.test(warn||'')){ _closeFlow=null; return; } // a count that looks wrong stops here: the toast says what to fix
+    f.step='money'; _cfOpen(()=>showMoneyModal(shId,f.di,boothId||undefined)); _cfBanner(2); return;
+  }
+  if(kind==='money'&&f.step==='money'){ _closeFlow=null; _cfOpen(()=>closeFlowSummary(shId,f.di,boothId)); }
+}
+function closeFlowSummary(shId,di,boothId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return; const d=sh.days[di]; if(!d)return;
+  const src=boothId?(dayBoothRead(d,boothId)||{}):d;
+  const sold=boothId?(boothSold(d,boothId)||{}):daySold(src), units=SKUS.reduce((t,s)=>t+(sold[s.key]||0),0);
+  const rev=calcRev(sold,sh.prices||null), money=boothId?boothMoney(src):calcPmt(src.payments||{});
+  const cc=boothId?boothCashCheck(sh,di,boothId):dayCashCheck(sh,di);
+  const check=cc.state==='ok'?`<div class="wb green" style="font-size:12px">✅ The money matches what sold.</div>`
+    :cc.state==='short'?`<div class="wb gold" style="font-size:12px">⚠️ ${fmt(cc.amt)} short of full price. Fine if you gave discounts; if not, recount the table and the drawer.</div>`
+    :cc.state==='over'?`<div class="wb red" style="font-size:12px">🛑 ${fmt(cc.amt)} more money than the product that left. Recheck the night count.</div>`:'';
+  const left=hasBooths(sh)?showBooths(sh).filter(b=>{ if(b.id===boothId)return false; const en=dayBoothRead(d,b.id)||{}; return en.morningCount&&!(en.eveningCount&&boothMoney(en)>0); }):[];
+  const who=boothId?_esc(boothName(sh,boothId)):_esc(d.date||('Day '+(di+1)));
+  mOpen(`<div class="mh"><div class="mt">🌙 ${who} closed out</div><button class="mx" onclick="mClose()">×</button></div>
+  <div class="card" style="margin-bottom:10px">
+    <div class="sr"><span class="srl">Sold</span><span class="srv b">${units} units</span></div>
+    <div class="sr"><span class="srl">Worth at full price</span><span class="srv gold">${fmt(rev)}</span></div>
+    <div class="sr" style="border-bottom:none"><span class="srl">Money counted</span><span class="srv green b">${fmt(money)}</span></div>
+  </div>
+  ${check}
+  ${left.length?`<div style="font-size:12px;color:var(--muted);margin:12px 0 6px">Still open tonight:</div>${left.map(b=>`<button class="btn btn-gold btn-full" style="margin-bottom:6px" onclick="startCloseFlow('${sh.id}',${di},'${b.id}')">🌙 Close out ${_esc(b.name)}</button>`).join('')}`
+    :`<button class="btn btn-gold btn-full" style="margin-top:12px" onclick="openCloseout('${sh.id}',${di})">🏁 Day Closeout</button>`}
+  <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="mClose()">Done</button>`);
 }
 function lockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; d.locked=true; d.lockTs=new Date().toISOString(); invLogPush(sh,{ts:d.lockTs,di,date:d.date,type:'lock',changes:['day finalized/locked'],by:'owner'}); saveS();toast('🔒 Day finalized'); }
 function unlockDay(shId,di){ const sh=S.shows.find(s=>s.id===shId);if(!sh)return; const d=sh.days[di];if(!d)return; const reason=(typeof prompt==='function')?prompt('Reason for unlocking this finalized day?'):'unlocked'; if(reason===null)return; d.locked=false; invLogPush(sh,{ts:new Date().toISOString(),di,date:d.date,type:'unlock',changes:['unlocked: '+(reason||'(no reason)')],by:'owner'}); saveS();toast('🔓 Day unlocked'); }
@@ -9062,7 +9131,7 @@ function openAdjustModal(shId,di,boothId){
   <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${sh.name} · ${d.date||('Day '+(di+1))}${boothId?' · <strong style="color:var(--gold)">'+_esc(boothName(sh,boothId))+'</strong>':''}</div>
   <div class="wb gold" style="font-size:11px;margin-bottom:12px">Restock = extra units you brought to the booth that day${boothId&&truckMode(sh)?' <strong>from the truck</strong>':''}. Damaged / Lost / Given = units that left but earned no money. Both keep your sold count and COGS honest — lost/given units still count as COGS.</div>
   <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700"><div>Product</div><div>Restock +</div><div>Lost/Dmg −</div></div>
-  ${SKUS.map(s=>`<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;margin-top:6px"><div style="font-size:12px">${s.short}</div><input class="fi" type="number" min="0" step="1" id="adj_r_${s.key}" value="${rk[s.key]||''}" placeholder="0"><input class="fi" type="number" min="0" step="1" id="adj_l_${s.key}" value="${ls[s.key]||''}" placeholder="0"></div>`).join('')}
+  ${SKUS.map(s=>`<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;align-items:center;margin-top:6px"><div style="font-size:12px">${s.short}</div><input class="fi" type="number" inputmode="numeric" min="0" step="1" id="adj_r_${s.key}" value="${rk[s.key]||''}" placeholder="0"><input class="fi" type="number" inputmode="numeric" min="0" step="1" id="adj_l_${s.key}" value="${ls[s.key]||''}" placeholder="0"></div>`).join('')}
   <button class="btn btn-gold btn-full" style="margin-top:14px" onclick="saveAdjust('${shId}',${di},${bArg})">Save Adjustments</button>`);
 }
 function saveAdjust(shId,di,boothId){
@@ -9182,13 +9251,13 @@ function mmRender(){
               ${st.ids.length>1?`<span style="cursor:pointer;color:var(--muted);font-weight:900" title="Remove" onclick="mmDropSeller('${id}')">×</span>`:''}
             </div>
           </div>
-          ${mmMethods(st,id).map(p=>`<div class="mr"><span style="font-size:16px;width:24px">${p.icon}</span><span style="width:64px;font-size:12px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="sp_${id}_${p.key}" value="${e[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updSplitPmt()"></div>`).join('')}
+          ${mmMethods(st,id).map(p=>`<div class="mr"><span style="font-size:16px;width:24px">${p.icon}</span><span style="width:64px;font-size:12px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" inputmode="decimal" id="sp_${id}_${p.key}" value="${e[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updSplitPmt()"></div>`).join('')}
         </div>`; }).join('')
       +(spare.length?`<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
           <select class="fi" id="mm_add" style="flex:1">${spare.map(r=>`<option value="${r.id}">${_esc(r.name)}</option>`).join('')}</select>
           <button class="btn btn-sm btn-ghost" onclick="mmAddSeller()">+ Add person</button>
         </div>`:'')
-    : PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" id="pm_${p.key}" value="${st.flat[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('');
+    : PMTS.map(p=>`<div class="mr"><span style="font-size:18px;width:26px">${p.icon}</span><span style="width:70px;font-size:13px;font-weight:700;color:var(--muted)">${p.label}</span><input class="mi" type="number" inputmode="decimal" id="pm_${p.key}" value="${st.flat[p.key]||0}" placeholder="0.00" step="0.01" min="0" oninput="updPmt()"></div>`).join('');
   mOpen(`<div class="mh"><div class="mt">💰 Money Count</div><button class="mx" onclick="mClose()">×</button></div>
   ${boothId?`<div style="font-size:13px;font-weight:900;color:var(--gold);margin-bottom:6px">🏬 ${_esc(boothName(sh,boothId))} — this booth's drawer only</div>`:''}
   ${hasRepSales?`<div class="wb" style="margin-bottom:12px;background:rgba(79,195,247,0.1);border:1px solid rgba(79,195,247,0.3);color:#7EB8F7;font-size:12px">This day has old per-rep sales data totaling <strong>${fmt(repTot)}</strong> (from before per-rep tracking was removed). Saving a count here overrides it.</div>`:''}
@@ -9250,6 +9319,7 @@ function saveMoney(shId,di,boothId){
     type:(tgtBooth?boothName(sh,tgtBooth)+' — ':'')+'money count'+(st.on?' (by person)':''),changes:[label],by:'owner'});
   mClose();saveS();
   toast((tgtBooth?boothName(sh,tgtBooth)+': ':'')+'Money count saved!'+(added.length?' '+added.join(', ')+' added to the crew.':''));
+  closeFlowStep('money',st.shId,st.di,tgtBooth);
 }
 // Who rang it up — per day and whole show (v57). Cash/card split tucked below.
 function showSellerByDay(sh){
@@ -9288,10 +9358,10 @@ function showExpModal(shId,di){
   const e=sh.days[di].expenses||{};
   mOpen(`<div class="mh"><div class="mt">💸 Day Expenses</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">⛽ Gas is set once for the whole show in ✏️ Edit Show (miles, or Actual Gas $).${(parseFloat(e.gas)||0)>0?' This day has '+fmt(parseFloat(e.gas))+' of gas logged before; it still counts.':''}</div>
-  <div class="fg"><label class="fl">Food / Drinks</label><input class="fi" type="number" id="ex_f" value="${e.food||0}" step="0.01" placeholder="0.00"></div>
-  <div class="fg"><label class="fl">Parking / Tolls</label><input class="fi" type="number" id="ex_p" value="${e.parking||0}" step="0.01" placeholder="0.00"></div>
-  <div class="fg"><label class="fl">Hotel</label><input class="fi" type="number" id="ex_h" value="${e.hotel||0}" step="0.01" placeholder="0.00"></div>
-  <div class="fg"><label class="fl">Other</label><input class="fi" type="number" id="ex_o" value="${e.other||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Food / Drinks</label><input class="fi" type="number" inputmode="decimal" id="ex_f" value="${e.food||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Parking / Tolls</label><input class="fi" type="number" inputmode="decimal" id="ex_p" value="${e.parking||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Hotel</label><input class="fi" type="number" inputmode="decimal" id="ex_h" value="${e.hotel||0}" step="0.01" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Other</label><input class="fi" type="number" inputmode="decimal" id="ex_o" value="${e.other||0}" step="0.01" placeholder="0.00"></div>
   <button class="btn btn-gold btn-full" onclick="saveExp('${shId}',${di})">Save Expenses</button>`);
 }
 function saveExp(shId,di){
@@ -9676,7 +9746,7 @@ function openDebtPmt(invId){
   var opts=PD_METHODS.map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
   mOpen('<div class="mh"><div class="mt">💳 Payment — Invoice '+inv.number+'</div><button class="mx" onclick="mClose()">×</button></div>'+
   '<div class="wb red" style="margin-bottom:12px">Invoice '+inv.number+' balance: <strong>'+fmt(bal)+'</strong> of '+fmt(pdNum(inv.total))+'</div>'+
-  '<div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" id="dpt_amt" placeholder="'+bal.toFixed(2)+'" step="0.01" min="0.01"></div>'+
+  '<div class="fg"><label class="fl">PAYMENT AMOUNT ($)</label><input class="fi" type="number" inputmode="decimal" id="dpt_amt" placeholder="'+bal.toFixed(2)+'" step="0.01" min="0.01"></div>'+
   '<div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="dpt_date" value="'+today+'"></div>'+
   '<div class="fg"><label class="fl">METHOD</label><select class="fi" id="dpt_method">'+opts+'</select></div>'+
   '<div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="dpt_note" placeholder="e.g. check #1234"></div>'+
@@ -9729,13 +9799,13 @@ function openNewInvoice(){
   for(var i=0;i<PD_ITEM_ROWS;i++){
     rows+='<div style="display:flex;gap:6px;margin-bottom:6px">'+
       '<input class="fi" id="ni_lbl'+i+'" style="flex:2" placeholder="'+(i===0?'32 oz':'product')+'">'+
-      '<input class="fi" id="ni_qty'+i+'" style="flex:1" type="number" min="0" step="1" placeholder="cases">'+
+      '<input class="fi" id="ni_qty'+i+'" style="flex:1" type="number" inputmode="numeric" min="0" step="1" placeholder="cases">'+
     '</div>';
   }
   mOpen('<div class="mh"><div class="mt">🧾 New Invoice — Invoice '+n+'</div><button class="mx" onclick="mClose()">×</button></div>'+
   (open?'<div class="wb red" style="margin-bottom:12px">Invoice '+open.number+' is still open with '+fmt(pdBalance(open))+
         ' owed. Normally you settle it before the next order is entered.</div>':'')+
-  '<div class="fg"><label class="fl">INVOICE TOTAL ($)</label><input class="fi" type="number" id="ni_total" step="0.01" min="0.01" placeholder="0.00"></div>'+
+  '<div class="fg"><label class="fl">INVOICE TOTAL ($)</label><input class="fi" type="number" inputmode="decimal" id="ni_total" step="0.01" min="0.01" placeholder="0.00"></div>'+
   '<div class="fg"><label class="fl">INVOICE DATE (optional)</label><input class="fi" type="date" id="ni_date" value="'+today+'"></div>'+
   '<div class="fg"><label class="fl">SHIPPING (optional)</label><input class="fi" id="ni_ship" placeholder="e.g. Free"></div>'+
   '<div class="fg"><label class="fl">ORDER — PRODUCT / CASES</label>'+rows+'</div>'+
@@ -9913,7 +9983,7 @@ function openBoothPmt(shId){
   const today=_todayKey();
   mOpen(`<div class="mh"><div class="mt">💳 Pay Booth Fee — ${sh.name}</div><button class="mx" onclick="mClose()">×</button></div>
   <div class="wb red" style="margin-bottom:12px">Remaining balance: <strong>${fmt(bal)}</strong> of ${fmt(sh.boothCost||0)} total</div>
-  <div class="fg"><label class="fl">AMOUNT PAID ($)</label><input class="fi" type="number" id="bpt_amt" placeholder="${bal.toFixed(2)}" step="0.01" min="0.01" max="${bal.toFixed(2)}"></div>
+  <div class="fg"><label class="fl">AMOUNT PAID ($)</label><input class="fi" type="number" inputmode="decimal" id="bpt_amt" placeholder="${bal.toFixed(2)}" step="0.01" min="0.01" max="${bal.toFixed(2)}"></div>
   <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="bpt_date" value="${today}"></div>
   <div class="fg"><label class="fl">NOTE (optional)</label><input class="fi" id="bpt_note" placeholder="e.g. check, Venmo, cash"></div>
   <button class="btn btn-green btn-full" onclick="saveBoothPmt('${shId}')">✅ Save Payment</button>
@@ -9942,7 +10012,7 @@ function openOtherExpense(presetCategory,editId){
   const noteVal=String(ex&&ex.note!=null?ex.note:'').replace(/"/g,'&quot;');
   mOpen(`<div class="mh"><div class="mt">${ex?'✏️ Edit Expense':'💸 Log Expense'}</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Bags, paper towels, equipment, canopy, table — anything you spent money on.</div>
-  <div class="fg"><label class="fl">AMOUNT ($)</label><input class="fi" type="number" id="oe_amt" placeholder="0.00" step="0.01" min="0.01" value="${ex?ex.amount:''}"></div>
+  <div class="fg"><label class="fl">AMOUNT ($)</label><input class="fi" type="number" inputmode="decimal" id="oe_amt" placeholder="0.00" step="0.01" min="0.01" value="${ex?ex.amount:''}"></div>
   <div class="fg"><label class="fl">WHAT WAS IT? (description)</label><input class="fi" id="oe_note" placeholder="e.g. Paper bags x2 packs, Costco run" value="${noteVal}"></div>
   <div class="fg"><label class="fl">CATEGORY</label><select class="fi" id="oe_cat">${categories.map(c=>`<option value="${c}"${c===cat?' selected':''}>${c}</option>`).join('')}</select></div>
   <div class="fg"><label class="fl">DATE</label><input class="fi" type="date" id="oe_date" value="${ex?ex.date:today}"></div>
@@ -10180,7 +10250,7 @@ function rSupplies(){
         </div>
         <div class="cr-c">
           <button class="crb" onclick="adjSup(${i},-1)">−</button>
-          <input class="cri" type="number" min="0" value="${s.qty}" style="${isLow?'border-color:var(--red);color:var(--red)':''}" onchange="setSup(${i},this.value)">
+          <input class="cri" type="number" inputmode="numeric" min="0" value="${s.qty}" style="${isLow?'border-color:var(--red);color:var(--red)':''}" onchange="setSup(${i},this.value)">
           <button class="crb" onclick="adjSup(${i},1)">+</button>
           <button onclick="openSupEdit(${i})" style="background:none;border:none;color:var(--muted);font-size:15px;cursor:pointer;padding:4px;margin-left:2px" title="Cost & give-away settings">⚙️</button>
           <button onclick="delSup(${i})" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px" title="Delete">🗑</button>
@@ -10193,12 +10263,12 @@ function rSupplies(){
   <div class="card">
     <div class="fg"><label class="fl">ITEM NAME</label><input class="fi" id="sup-new-name" placeholder="e.g. Small lacy bag"></div>
     <div class="g2" style="gap:8px;margin-bottom:11px">
-      <div><label class="fl">QUANTITY</label><input class="fi" id="sup-new-qty" type="number" min="0" placeholder="0" style="font-size:16px"></div>
-      <div><label class="fl">LOW ALERT AT</label><input class="fi" id="sup-new-low" type="number" min="0" placeholder="2" style="font-size:16px"></div>
+      <div><label class="fl">QUANTITY</label><input class="fi" id="sup-new-qty" type="number" inputmode="numeric" min="0" placeholder="0" style="font-size:16px"></div>
+      <div><label class="fl">LOW ALERT AT</label><input class="fi" id="sup-new-low" type="number" inputmode="numeric" min="0" placeholder="2" style="font-size:16px"></div>
     </div>
     <div class="g2" style="gap:8px;margin-bottom:11px">
       <div><label class="fl">UNIT (optional)</label><input class="fi" id="sup-new-unit" placeholder="ea, roll, bag…"></div>
-      <div><label class="fl">COST $/UNIT</label><input class="fi" id="sup-new-cost" type="number" min="0" step="0.001" placeholder="0.00" style="font-size:16px"></div>
+      <div><label class="fl">COST $/UNIT</label><input class="fi" id="sup-new-cost" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00" style="font-size:16px"></div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">After adding, tap ⚙️ to set which bottle sizes give it away (auto-counts per show).</div>
     <button class="btn btn-gold btn-full" onclick="addSupItem()">+ ADD ITEM</button>
@@ -10211,10 +10281,10 @@ function openSupEdit(i){
   mOpen(`<div class="mh"><div class="mt">⚙️ ${s.name}</div><button class="mx" onclick="mClose()">×</button></div>
   <div class="fg"><label class="fl">Name</label><input class="fi" id="se_name" value="${(s.name||'').replace(/"/g,'&quot;')}"></div>
   <div class="g2" style="gap:8px">
-    <div class="fg"><label class="fl">Cost $/unit</label><input class="fi" id="se_cost" type="number" min="0" step="0.001" value="${(s.cost!=null&&s.cost!=='')?s.cost:''}" placeholder="0.00"></div>
+    <div class="fg"><label class="fl">Cost $/unit</label><input class="fi" id="se_cost" type="number" inputmode="decimal" min="0" step="0.001" value="${(s.cost!=null&&s.cost!=='')?s.cost:''}" placeholder="0.00"></div>
     <div class="fg"><label class="fl">Unit</label><input class="fi" id="se_unit" value="${s.unit||''}" placeholder="ea"></div>
   </div>
-  <div class="fg"><label class="fl">Low alert at</label><input class="fi" id="se_low" type="number" min="0" value="${s.low!=null?s.low:''}" placeholder="2"></div>
+  <div class="fg"><label class="fl">Low alert at</label><input class="fi" id="se_low" type="number" inputmode="numeric" min="0" value="${s.low!=null?s.low:''}" placeholder="2"></div>
   <div class="fg"><label class="fl">🎁 Given away automatically with (1 per unit sold)</label>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
       ${SKUS.map(sk=>`<label style="display:flex;align-items:center;gap:5px;font-size:12px;background:var(--card2);padding:6px 9px;border-radius:8px;cursor:pointer"><input type="checkbox" class="se_sz" value="${sk.key}" ${sizes.includes(sk.key)?'checked':''}> ${sk.short}</label>`).join('')}
@@ -10239,7 +10309,7 @@ function openSupplyUse(shId){
   const useMap={}; (sh.supplyUse||[]).forEach(u=>useMap[u.name]=u.qty);
   mOpen(`<div class="mh"><div class="mt">🧴 Supplies Used</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sh.name} — how many of each you used (paper towels, liners, skirts, tables…). Lacy bags auto-count from sales.</div>
-  ${sups.length?sups.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:13px"><div style="font-weight:700">${s.name}</div><div style="font-size:11px;color:var(--muted)">${(parseFloat(s.cost)||0)?fmt(parseFloat(s.cost))+'/'+(s.unit||'ea'):'no cost set'}</div></div><input class="fi su_use" data-name="${(s.name||'').replace(/"/g,'&quot;')}" type="number" min="0" step="1" value="${useMap[s.name]!=null?useMap[s.name]:''}" placeholder="0" style="max-width:90px"></div>`).join(''):'<div style="font-size:12px;color:var(--muted)">No manual supplies yet. Add items on the Supplies page (leave their give-away sizes unchecked) and set a cost.</div>'}
+  ${sups.length?sups.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:13px"><div style="font-weight:700">${s.name}</div><div style="font-size:11px;color:var(--muted)">${(parseFloat(s.cost)||0)?fmt(parseFloat(s.cost))+'/'+(s.unit||'ea'):'no cost set'}</div></div><input class="fi su_use" data-name="${(s.name||'').replace(/"/g,'&quot;')}" type="number" inputmode="numeric" min="0" step="1" value="${useMap[s.name]!=null?useMap[s.name]:''}" placeholder="0" style="max-width:90px"></div>`).join(''):'<div style="font-size:12px;color:var(--muted)">No manual supplies yet. Add items on the Supplies page (leave their give-away sizes unchecked) and set a cost.</div>'}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveSupplyUse('${shId}')">Save</button>`);
 }
 function saveSupplyUse(shId){
@@ -10451,7 +10521,7 @@ function openRepDayPay(shId,repId){
   ${(sh.days||[]).map((d,i)=>`<div class="fg"><label class="fl">${d.date||('Day '+(i+1))} ($)</label><input class="fi" type="number" id="rdp_${i}" step="0.01" min="0" value="${(d.repPay&&d.repPay[repId]!=null&&d.repPay[repId]!=='')?d.repPay[repId]:''}" placeholder="0.00" inputmode="decimal"></div>`).join('')}
   <div class="fg"><label class="fl">Payment method used to pay the rep</label><select class="fi" id="ep_method">${methodOpts}</select></div>
   <div class="fg"><label class="fl">Pay note (optional)</label><input class="fi" id="ep_note" value="${(meta.note||'').replace(/"/g,'&quot;')}" placeholder="e.g. paid cash same night, included $20 gas"></div>
-  <div class="fg"><label class="fl">Log a payment now (optional) — $ actually handed over</label><input class="fi" type="number" id="ep_paid" step="0.01" min="0" placeholder="0.00"></div>
+  <div class="fg"><label class="fl">Log a payment now (optional) — $ actually handed over</label><input class="fi" type="number" inputmode="decimal" id="ep_paid" step="0.01" min="0" placeholder="0.00"></div>
   <div style="font-size:11px;color:var(--muted);margin:-4px 0 12px">Already logged paid for this show: <strong>${fmt(paidThis)}</strong></div>
   <button class="btn btn-gold btn-full" onclick="saveRepDayPay('${shId}','${repId}')">✅ Save Day Pay</button>`);
 }
@@ -10493,11 +10563,11 @@ function _openWorkerModal(shId,wid){
   <div class="fg"><label class="fl">Role (optional)</label><input class="fi" id="wk_role" value="${(w.role||'').replace(/"/g,'&quot;')}" placeholder="e.g. helper, setup"></div>
   <div class="fg"><label class="fl">Payout type</label><select class="fi" id="wk_type" onchange="_wkToggle()">${typeOpts}</select></div>
   <div id="wk_hourly" style="display:${type==='hourly'?'block':'none'}">
-    <div class="g2" style="gap:8px"><div class="fg"><label class="fl">Hours</label><input class="fi" type="number" id="wk_hours" step="0.5" min="0" value="${(w.hours!=null&&w.hours!=='')?w.hours:''}"></div>
-    <div class="fg"><label class="fl">$/hour</label><input class="fi" type="number" id="wk_rate" step="0.01" min="0" value="${(w.rate!=null&&w.rate!=='')?w.rate:''}"></div></div>
+    <div class="g2" style="gap:8px"><div class="fg"><label class="fl">Hours</label><input class="fi" type="number" inputmode="decimal" id="wk_hours" step="0.5" min="0" value="${(w.hours!=null&&w.hours!=='')?w.hours:''}"></div>
+    <div class="fg"><label class="fl">$/hour</label><input class="fi" type="number" inputmode="decimal" id="wk_rate" step="0.01" min="0" value="${(w.rate!=null&&w.rate!=='')?w.rate:''}"></div></div>
   </div>
-  <div id="wk_amtwrap" style="display:${type==='hourly'?'none':'block'}"><div class="fg"><label class="fl">Payout amount ($)</label><input class="fi" type="number" id="wk_amount" step="0.01" min="0" value="${(w.amount!=null&&w.amount!=='')?w.amount:''}" placeholder="0.00"></div></div>
-  <div class="fg"><label class="fl">Amount paid so far ($)</label><input class="fi" type="number" id="wk_paid" step="0.01" min="0" value="${(w.paid!=null&&w.paid!=='')?w.paid:''}" placeholder="0.00"></div>
+  <div id="wk_amtwrap" style="display:${type==='hourly'?'none':'block'}"><div class="fg"><label class="fl">Payout amount ($)</label><input class="fi" type="number" inputmode="decimal" id="wk_amount" step="0.01" min="0" value="${(w.amount!=null&&w.amount!=='')?w.amount:''}" placeholder="0.00"></div></div>
+  <div class="fg"><label class="fl">Amount paid so far ($)</label><input class="fi" type="number" inputmode="decimal" id="wk_paid" step="0.01" min="0" value="${(w.paid!=null&&w.paid!=='')?w.paid:''}" placeholder="0.00"></div>
   <div class="fg"><label class="fl">Payment method</label><select class="fi" id="wk_method">${methodOpts}</select></div>
   <div class="fg"><label class="fl">Notes</label><input class="fi" id="wk_note" value="${(w.payNote||'').replace(/"/g,'&quot;')}" placeholder="e.g. paid straight cash at end of day"></div>
   <button class="btn btn-gold btn-full" style="margin-bottom:8px" onclick="saveWorker('${shId}','${wid||''}')">Save Worker</button>
@@ -10538,7 +10608,7 @@ function openLogRepPmt(repId){
     Earned: <strong style="color:var(--red)">${fmt(earned)}</strong> · Paid so far: <strong style="color:var(--green)">${fmt(paid)}</strong><br>
     <strong style="color:var(--gold);font-size:14px">Outstanding: ${fmt(owed)}</strong>
   </div>
-  <div class="fg"><label class="fl">Amount ($)</label><input class="fi" type="number" id="lp_amt" placeholder="${owed.toFixed(2)}" step="0.01" min="0" value="${owed>0?owed.toFixed(2):''}"></div>
+  <div class="fg"><label class="fl">Amount ($)</label><input class="fi" type="number" inputmode="decimal" id="lp_amt" placeholder="${owed.toFixed(2)}" step="0.01" min="0" value="${owed>0?owed.toFixed(2):''}"></div>
   <div class="fg"><label class="fl">Date</label><input class="fi" type="date" id="lp_date" value="${today}"></div>
   <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="lp_note" placeholder="e.g. Cash after Cranberry Fest"></div>
   <button class="btn btn-gold btn-full" onclick="saveRepPmt('${repId}')">✅ Log Payment</button>`);
@@ -10600,9 +10670,9 @@ function rSettings(){
     <button class="btn btn-ghost btn-full" onclick="restoreBackupFile()">📂 Restore</button>
   </div></div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TAX & FEES</div>
-  <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
-  <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
-  <div class="fg"><label class="fl">Sales Tax % on CARD sales (currently ${(((s.cardTax||0))*100).toFixed(1)}%)</label><input class="fi" type="number" id="st_ct" value="${(((s.cardTax||0))*100).toFixed(1)}" step="0.1" min="0" onchange="setSt('cardTax',this.value/100)"><div style="font-size:10px;color:var(--muted);margin-top:3px">Charged on Square/Debit only. Card totals you enter include this tax; the app sets the state's cut aside automatically.</div></div>
+  <div class="fg"><label class="fl">Tax Reserve % (currently ${Math.round(s.tax*100)}%)</label><input class="fi" type="number" inputmode="decimal" id="st_t" value="${Math.round(s.tax*100)}" min="0" max="50" onchange="setSt('tax',this.value/100)"></div>
+  <div class="fg"><label class="fl">Square Fee % (currently ${(s.sqFee*100).toFixed(1)}%)</label><input class="fi" type="number" inputmode="decimal" id="st_sq" value="${(s.sqFee*100).toFixed(1)}" step="0.1" onchange="setSt('sqFee',this.value/100)"></div>
+  <div class="fg"><label class="fl">Sales Tax % on CARD sales (currently ${(((s.cardTax||0))*100).toFixed(1)}%)</label><input class="fi" type="number" inputmode="decimal" id="st_ct" value="${(((s.cardTax||0))*100).toFixed(1)}" step="0.1" min="0" onchange="setSt('cardTax',this.value/100)"><div style="font-size:10px;color:var(--muted);margin-top:3px">Charged on Square/Debit only. Card totals you enter include this tax; the app sets the state's cut aside automatically.</div></div>
   </div>
   ${csHistoryCard()}
   <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">🏷️ PRODUCT UNIT COSTS (COGS)</div>${cogsIsValid(S)?'':`<button class="btn btn-xs btn-ghost" onclick="resetCosts()">Reset</button>`}</div>
@@ -10611,27 +10681,27 @@ function rSettings(){
        ${SKUS.map(k=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)"><span>${k.name}</span><strong>${fmt(getCost(k.key))}</strong></div>`).join('')}
        <div style="font-size:10px;color:var(--muted);margin-top:8px">Cost source: ${costSourceOn(SKUS[0].key,null,null,S)}</div>`
     : `<div style="font-size:12px;color:var(--red);margin-bottom:10px">No valid cost history, so this table is the fallback and IS being used for calculation.</div>
-       ${SKUS.map(k=>`<div class="fg"><label class="fl">${k.name} cost ($)</label><input class="fi" type="number" step="0.01" min="0" value="${getCost(k.key).toFixed(2)}" onchange="setCost('${k.key}',this.value)"></div>`).join('')}
+       ${SKUS.map(k=>`<div class="fg"><label class="fl">${k.name} cost ($)</label><input class="fi" type="number" inputmode="decimal" step="0.01" min="0" value="${getCost(k.key).toFixed(2)}" onchange="setCost('${k.key}',this.value)"></div>`).join('')}
        <div style="font-size:10px;color:var(--muted)">What each unit costs YOU. Drives COGS and profit everywhere.</div>`}
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">TRAVEL (2017 Ram 1500)</div>
-  <div class="fg"><label class="fl">Gas Price now, Wisconsin ($/gallon)</label><input class="fi" type="number" id="st_g" value="${s.gasPrice}" step="0.01" onchange="setSt('gasPrice',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">MPG (2017 Ram 1500: 17)</label><input class="fi" type="number" id="st_m" value="${s.mpg}" step="0.1" onchange="setSt('mpg',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Gas Price now, Illinois ($/gallon)</label><input class="fi" type="number" id="st_gil" value="${s.gasPriceIL!=null?s.gasPriceIL:s.gasPrice}" step="0.01" onchange="setSt('gasPriceIL',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Gas Price now, Wisconsin ($/gallon)</label><input class="fi" type="number" inputmode="decimal" id="st_g" value="${s.gasPrice}" step="0.01" onchange="setSt('gasPrice',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">MPG (2017 Ram 1500: 17)</label><input class="fi" type="number" inputmode="decimal" id="st_m" value="${s.mpg}" step="0.1" onchange="setSt('mpg',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Gas Price now, Illinois ($/gallon)</label><input class="fi" type="number" inputmode="decimal" id="st_gil" value="${s.gasPriceIL!=null?s.gasPriceIL:s.gasPrice}" step="0.01" onchange="setSt('gasPriceIL',parseFloat(this.value))"></div>
 <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Used for upcoming shows. A show freezes at its own week's area price once it is over.</div>
-<div class="fg"><label class="fl">IRS Mileage Rate for 2027 on ($/mile)</label><input class="fi" type="number" id="st_i" value="${s.irsRate}" step="0.005" onchange="setSt('irsRate',parseFloat(this.value))"></div>
+<div class="fg"><label class="fl">IRS Mileage Rate for 2027 on ($/mile)</label><input class="fi" type="number" inputmode="decimal" id="st_i" value="${s.irsRate}" step="0.005" onchange="setSt('irsRate',parseFloat(this.value))"></div>
 <div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">2026 is built in: 72.5¢ a mile Jan-Jun, 76¢ from Jul 1. Update this when the IRS posts the 2027 rate (late December).</div>
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">🧴 SHOW SUPPLY COSTS</div>
-  <div class="fg"><label class="fl">Lace bag cost ($ each)</label><input class="fi" type="number" id="st_bag" value="${bagUnitCost()}" step="0.01" min="0" onchange="setSt('bagCost',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Bounty paper towels, 6-roll pack ($)</label><input class="fi" type="number" id="st_paper" value="${paperPackPrice()}" step="0.01" min="0" onchange="setSt('paperPackPrice',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Paper towel estimate: rolls per person per show day</label><input class="fi" type="number" id="st_paperpp" value="${paperRollsPerPersonDay()}" step="0.25" min="0" onchange="setSt('paperRollsPerPersonDay',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Shelf liner, per roll ($)</label><input class="fi" type="number" id="st_liner" value="${linerRollCost()}" step="0.01" min="0" onchange="setSt('linerRollCost',parseFloat(this.value))"></div>
-  <div class="fg"><label class="fl">Lunch per show day ($)</label><input class="fi" type="number" id="st_lunch" value="${lunchPerDay()}" step="1" min="0" onchange="setSt('lunchPerDay',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Lace bag cost ($ each)</label><input class="fi" type="number" inputmode="decimal" id="st_bag" value="${bagUnitCost()}" step="0.01" min="0" onchange="setSt('bagCost',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Bounty paper towels, 6-roll pack ($)</label><input class="fi" type="number" inputmode="decimal" id="st_paper" value="${paperPackPrice()}" step="0.01" min="0" onchange="setSt('paperPackPrice',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Paper towel estimate: rolls per person per show day</label><input class="fi" type="number" inputmode="decimal" id="st_paperpp" value="${paperRollsPerPersonDay()}" step="0.25" min="0" onchange="setSt('paperRollsPerPersonDay',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Shelf liner, per roll ($)</label><input class="fi" type="number" inputmode="decimal" id="st_liner" value="${linerRollCost()}" step="0.01" min="0" onchange="setSt('linerRollCost',parseFloat(this.value))"></div>
+  <div class="fg"><label class="fl">Lunch per show day ($)</label><input class="fi" type="number" inputmode="decimal" id="st_lunch" value="${lunchPerDay()}" step="1" min="0" onchange="setSt('lunchPerDay',parseFloat(this.value))"></div>
   <div style="font-size:11px;color:var(--muted)"><b>Bags and shelf liner count when you buy them</b> (log the order in Business Purchases), not again per show. <b>Paper towels:</b> enter the real roll count on each show (✏️ Edit Show); until you do, the estimate above is used. <b>Lunch: every show day</b>, even food from home; food receipts logged on a show count toward it, never on top. No candy. All auto-added to each show's expenses &amp; break-even.</div>
   </div>
   <div class="card"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:10px">DEFAULT SELL PRICES</div>
-  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
+  ${SKUS.map(s=>`<div class="fg"><label class="fl">${s.name} (cost: ${fmt(s.cost)} · margin: ${Math.round(((getP(s.key)-s.cost)/getP(s.key))*100)}%)</label><input class="fi" type="number" inputmode="decimal" id="sp_${s.key}" value="${getP(s.key)}" step="0.50" onchange="setP('${s.key}',parseFloat(this.value))"></div>`).join('')}
   </div>
   <div class="card bb"><div style="font-size:10px;color:var(--blue);text-transform:uppercase;font-weight:700;margin-bottom:10px">📊 REPORTS & EXPORT</div>
   <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Download spreadsheets (CSV) or print a PDF for taxes & records.</div>
@@ -10816,7 +10886,7 @@ try{
   document.addEventListener('click',e=>{ const t=e.target; if(t&&t.__sel){ t.__sel=false; try{ t.select(); }catch(_){} } }); // select again after the tap, which moves the caret
   document.addEventListener('focusout',e=>{ const t=e.target; if(_num(t)&&t.dataset&&t.dataset.zero){ delete t.dataset.zero; if(t.value===''){ t.value='0'; try{ t.dispatchEvent(new Event('input',{bubbles:true})); }catch(_){} } } });
 }catch(e){}
-function mOpen(h){ try{ const m=/class="mt">([^<]*)/.exec(h); if(m)_lastModal={t:m[1].trim(),at:Date.now()}; }catch(e){} $$('mb').innerHTML=h;$$('mo').classList.add('on');document.body.style.overflow='hidden';}
+function mOpen(h){ if(!_cfOpening)_closeFlow=null; try{ const m=/class="mt">([^<]*)/.exec(h); if(m)_lastModal={t:m[1].trim(),at:Date.now()}; }catch(e){} $$('mb').innerHTML=h;$$('mo').classList.add('on');document.body.style.overflow='hidden';}
 function mClose(){$$('mo').classList.remove('on');document.body.style.overflow='';}
 function mMaybeClose(e){if(e.target===$$('mo'))mClose();}
 
@@ -10856,7 +10926,17 @@ function doneShows(st){ return ((st&&st.shows)||[]).filter(x=>x&&x.status==='com
 try{ if(window.supabase)sb=window.supabase.createClient(SB_URL,SB_KEY); }catch(e){console.warn('Supabase init failed',e);}
 
 function syncLabel(st){return {off:'Not signed in',syncing:'Syncing…',synced:'Synced ✓',error:'Sync error — working offline'}[st]||'';}
-function setSync(st){_syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st)+(st==='error'&&_cloudBlocked?' · '+_cloudBlocked:'');const d=$$('syncDot');if(d){d.style.background=st==='synced'?'#00D26A':st==='syncing'?'#FFD700':st==='error'?'#FF4D4D':'#666';d.title='Cloud sync: '+(syncLabel(st)||'not signed in')+' — tap for details';}}
+// v96: the header says in words when this device last matched the cloud
+let _lastSyncAt=(function(){ try{ return parseInt(localStorage.getItem('dd_bs_lastsync'),10)||0; }catch(e){ return 0; } })();
+function _agoTxt(t){ if(!t)return ''; const m=Math.floor((Date.now()-t)/60000); if(m<1)return 'just now'; if(m<60)return m+'m ago'; const h=Math.floor(m/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; }
+function syncTxtRender(){ const el=$$('syncTxt'); if(!el)return; const st=_syncState;
+  // two short lines so the header never squeezes the name on a small phone
+  const l1=st==='synced'?'Synced':st==='syncing'?'Saving…':st==='error'?'Not synced':'Not signed in';
+  const l2=(st==='synced'||st==='error')&&_lastSyncAt?(st==='error'?'last ':'')+_agoTxt(_lastSyncAt):'';
+  el.innerHTML=_esc(l1)+(l2?'<br>'+_esc(l2):''); el.style.color=st==='synced'?'var(--muted)':st==='error'?'#FF4D4D':st==='syncing'?'#FFD700':'var(--muted)'; }
+try{ setInterval(syncTxtRender,30000); setTimeout(syncTxtRender,0); }catch(e){}
+function setSync(st){ if(st==='synced'){ _lastSyncAt=Date.now(); try{ localStorage.setItem('dd_bs_lastsync',String(_lastSyncAt)); }catch(e){} } try{ setTimeout(syncTxtRender,0); }catch(e){}
+  _syncState=st;const el=$$('cl_status');if(el)el.textContent=syncLabel(st)+(st==='error'&&_cloudBlocked?' · '+_cloudBlocked:'');const d=$$('syncDot');if(d){d.style.background=st==='synced'?'#00D26A':st==='syncing'?'#FFD700':st==='error'?'#FF4D4D':'#666';d.title='Cloud sync: '+(syncLabel(st)||'not signed in')+' — tap for details';}}
 try{ if(typeof window.addEventListener==='function'){ window.addEventListener('offline',()=>setSync('error')); window.addEventListener('online',()=>{ if(_cloudUser){ if(_cloudVerified)cloudQueuePush(); else cloudHydrate(); } }); } }catch(e){}
 
 function syncBaseGet(){
@@ -12556,7 +12636,7 @@ function csOpen(){
   const rows=SKUS.map(sk=>{
     const now=cur&&cur.costs?bxNum(cur.costs[sk.key]):getCost(sk.key);
     return '<div class="fg"><label class="fl">'+sk.name+' &nbsp;<span style="color:var(--muted)">now '+fmt(now)+'</span></label>'+
-      '<input class="fi" type="number" step="0.01" min="0" id="cs_'+sk.key+'" value="'+now.toFixed(2)+'"></div>';
+      '<input class="fi" type="number" inputmode="decimal" step="0.01" min="0" id="cs_'+sk.key+'" value="'+now.toFixed(2)+'"></div>';
   }).join('');
   mOpen('<div class="mh"><div class="mt">💲 Change product costs</div><button class="mx" onclick="mClose()">&times;</button></div>'+
   (sv.valid?'':'<div class="card rb" style="margin-bottom:10px;padding:10px"><div style="font-size:11px;font-weight:900;color:var(--red)">SCHEDULE PROBLEM</div>'+
