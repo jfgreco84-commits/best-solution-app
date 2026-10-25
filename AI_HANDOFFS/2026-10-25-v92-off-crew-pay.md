@@ -10,3 +10,9 @@
 - Edit Day Pay lists those people too, so their pay can be cleared.
 
 Test: `node tests/off-crew-pay-v92.test.js`. Pre-existing date-based failures in passed-not-doing and product-debt-invoices are unrelated (fail on main too).
+
+## Follow-up: Alivia did not come Saturday, works Sunday
+
+- New per-day "Not here today" link next to each rep in Rep Pay Today (shows without booths). It sets `day.offCrew`. That rep stays on the show's crew, is left out of that day's split, and their auto pay for that day goes. "Was here" undoes it.
+- One-time `cwe_alivia_sat_off_v92`: Chicago Women's Expo (Oct 24): Alivia back on the crew, marked not here on day 1, her day 1 auto pay removed. Sunday she fills in normally.
+- Note: Michele's pay was typed by hand, so under the v80 rule she stays manual for the whole show. Her Sunday pay has to be typed too. Clearing every day of her pay sends her back to automatic.

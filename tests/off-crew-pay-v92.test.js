@@ -41,4 +41,25 @@ R.section('3. Sales still count');
   sh.days[0].sellerPayments={rep_alivia:{cash:300},rep_michele:{cash:1000}}; ctx.commissionSyncAll();
   chk('3a. a seller with money is still paid on her own sales',[pay(sh).rep_alivia,pay(sh).rep_michele],[105,350]); }
 
+R.section('4. Not here one day: off that day only');
+{ const h=world(),{ctx,sh}=h; sh.numDays=2; sh.dates=['2026-10-24','2026-10-25'];
+  sh.days.push(Object.assign(ctx._bsBlankDay(2,'Day 2'),{payments:{cash:900}})); ctx.commissionSyncAll();
+  ctx.dayOffToggle('x',0,'rep_alivia');
+  chk('4a. Saturday: Alivia off, Michele half of 35% of $1,300',[pay(sh).rep_alivia,pay(sh).rep_michele],[undefined,227.5]);
+  chk('4b. Sunday: all three split 35% of $900',[sh.days[1].repPay.rep_alivia,sh.days[1].repPay.rep_michele],[105,105]);
+  chk('4c. Alivia still on the crew',sh.repIds.indexOf('rep_alivia')>=0,true);
+  ctx.dayOffToggle('x',0,'rep_alivia');
+  chk('4d. Was here: Saturday back to 3 ways',[pay(sh).rep_alivia,sh.days[0].offCrew],[151.67,undefined]); }
+
+R.section('5. One-time: Women\'s Expo Saturday');
+{ const h=world(),{ctx,sh}=h; sh.numDays=2; sh.days.push(ctx._bsBlankDay(2,'Day 2')); ctx.commissionSyncAll();
+  sh.repIds=['rep_michele']; sh.repPayManual={rep_michele:true}; sh.days[0].repPay={rep_alivia:151.67,rep_michele:227};
+  const d=ctx.S; delete d._applied.cwe_alivia_sat_off_v92; ctx.applyOneTimeUpdates(d); ctx.commissionSyncAll();
+  chk('5a. Alivia back on the crew, off Saturday',[sh.repIds,sh.days[0].offCrew],[['rep_michele','rep_alivia'],['rep_alivia']]);
+  chk('5b. Saturday rep pay is Michele\'s $227 only',[pay(sh),ctx.calcDayPay(sh.days[0])],[{rep_michele:227},227]);
+  chk('5c. runs once',!!d._applied.cwe_alivia_sat_off_v92,true);
+  sh.days[1].payments={cash:900}; ctx.commissionSyncAll();
+  chk('5d. Sunday: Alivia fills in at 35% of $900 split 3 ways',sh.days[1].repPay.rep_alivia,105);
+  chk('5e. Sunday: Michele (typed Saturday) waits for you to type Sunday',sh.days[1].repPay.rep_michele,undefined); }
+
 R.done();
