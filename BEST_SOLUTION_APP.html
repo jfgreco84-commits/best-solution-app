@@ -25,7 +25,7 @@
     .hdr-name{font-size:16px;font-weight:900;color:var(--gold);letter-spacing:0.3px;white-space:nowrap}
     .hdr-sub{font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-top:-1px;white-space:nowrap}
     #syncTxt{font-size:10px;font-weight:700;line-height:1.15;text-align:right;cursor:pointer;white-space:nowrap}
-    @media (max-width:350px){#syncTxt{display:none}}
+    @media (max-width:374px){#syncTxt{display:none}}
     #hdrR .btn{white-space:nowrap}
 
     /* BOTTOM NAV */
@@ -434,7 +434,7 @@
     .div{height:1px;background:var(--border);margin:12px 0}
 
     /* TOAST */
-    #toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--gold);color:var(--text);padding:8px 18px;border-radius:9px;font-size:13px;font-weight:700;z-index:400;display:none;white-space:nowrap;box-shadow:0 4px 24px rgba(0,0,0,0.6)}
+    #toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--gold);color:var(--text);padding:8px 18px;border-radius:9px;font-size:13px;font-weight:700;z-index:400;display:none;white-space:normal;max-width:calc(100vw - 32px);width:max-content;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.6)}
 
     /* HORIZONTAL MINI BAR (payment split) */
     .hbar{height:10px;border-radius:5px;overflow:hidden;display:flex;margin-top:5px;gap:1px}
@@ -4167,7 +4167,11 @@ function finYear(){ return _finYear||_todayKey().slice(0,4); }
 function _inYear(date,Y){ const d=String(date||''); return (/^\d{4}-\d{2}-\d{2}/.test(d)?d.slice(0,4):_todayKey().slice(0,4))===String(Y||finYear()); }
 function yrShows(Y){ return (S.shows||[]).filter(sh=>sh&&_inYear(sh.startDate,Y)); }
 function yrOther(Y){ return (S.otherExpenses||[]).filter(e=>e&&_inYear(e.date,Y)); }
-function finYears(){ const y=new Set([_todayKey().slice(0,4)]); (S.shows||[]).forEach(sh=>{ if(sh&&(sh.status==='completed'||sh.status==='active')&&/^\d{4}/.test(sh.startDate||''))y.add(sh.startDate.slice(0,4)); }); return [...y].sort(); }
+// Money paid on a show that was missed or passed is lost in the year of the show, or this year
+// if the show was still to come (a deposit on a 2027 show passed in Oct 2026 is a 2026 loss).
+function _unworkedYear(sh){ const t=_todayKey().slice(0,4), y=/^\d{4}-\d{2}-\d{2}/.test(sh&&sh.startDate||'')?sh.startDate.slice(0,4):t; return y<t?y:t; }
+function yrUnworked(Y){ Y=String(Y||finYear()); return (S.shows||[]).filter(sh=>sh&&sh.status!=='completed'&&sh.status!=='active'&&!isPaidAhead(sh)&&_unworkedYear(sh)===Y); }
+function finYears(){ const y=new Set([_todayKey().slice(0,4)]); (S.shows||[]).forEach(sh=>{ if(sh&&(sh.status==='completed'||sh.status==='active')&&/^\d{4}/.test(sh.startDate||''))y.add(sh.startDate.slice(0,4)); else if(sh&&!isPaidAhead(sh)&&unworkedSpend(sh)>0)y.add(_unworkedYear(sh)); }); (S.otherExpenses||[]).forEach(e=>{ if(e&&/^\d{4}-/.test(e.date||''))y.add(e.date.slice(0,4)); }); return [...y].sort(); }
 function setFinYear(y){ _finYear=(y===_todayKey().slice(0,4))?null:String(y); renderCur(); }
 function calcYTD(Y){
   Y=String(Y||finYear());
@@ -4188,7 +4192,7 @@ function calcYTD(Y){
   });
   // Missed / passed shows: what was paid on them is gone, so it counts. Deposits on shows still
   // to come are paid ahead (v82) and count when the show is worked.
-  yrShows(Y).filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).forEach(sh=>{ expenses+=unworkedSpend(sh); });
+  yrUnworked(Y).forEach(sh=>{ expenses+=unworkedSpend(sh); });
   const paidAhead=paidAheadTotal();
   // Other expenses: supplies, equipment, misc — logged separately
   const otherSpend=yrOther(Y).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
@@ -4380,13 +4384,14 @@ function rHome(){
   const plannedCount=upcomingShows.length+activeShows.length;
   const nextUp=upcomingShows[0]||null;
   // Completed-show economics — averages + clean keep use COMPLETED shows ONLY (not yearly overhead)
-  const completedNet=done.reduce((t,sh)=>t+calcShow(sh).profit,0);
-  const completedTax=done.reduce((t,sh)=>t+calcShow(sh).taxRes,0); // completed-only tax (pairs with Completed Shows Net)
-  const avgShowProfit=done.length?completedNet/done.length:0;
-  const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
+  const doneY=done.filter(sh=>_inYear(sh.startDate,_todayKey().slice(0,4))); // v96: this year's finished shows
+  const completedNet=doneY.reduce((t,sh)=>t+calcShow(sh).profit,0);
+  const completedTax=doneY.reduce((t,sh)=>t+calcShow(sh).taxRes,0); // completed-only tax (pairs with Completed Shows Net)
+  const avgShowProfit=doneY.length?completedNet/doneY.length:0;
+  const sellShows=yrShows(_todayKey().slice(0,4)).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)); // v96: this year
   const avgShowGross=sellShows.length?(ytd.gross-((ytd.online&&ytd.online.amount)||0))/sellShows.length:0; // gross ÷ shows that actually had sales // v96: show gross only, online sales are not a show
   // Yearly overhead shown SEPARATELY (not mixed into show profit)
-  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).reduce((t,sh)=>t+boothPaid(sh),0); // v82: only money lost on missed/passed shows; paid-ahead deposits wait for their show
+  const upcomingDeposits=yrUnworked(_todayKey().slice(0,4)).reduce((t,sh)=>t+boothPaid(sh),0); // v96: lost this year // v82: only money lost on missed/passed shows; paid-ahead deposits wait for their show
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
   // v79: ONE profit number. Home, P&L tab and exports all use the year's figures (calcYTD), overhead included.
   const yearNet=ytd.profit, taxRes=ytd.taxRes, cleanKeep=ytd.keep;
@@ -4573,12 +4578,13 @@ function homeCtx(){
   const upcomingShows=[...S.shows].filter(s=>isUpcoming(s)&&s.status!=='active').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1);
   const missedShows=S.shows.filter(s=>isMissed(s));
   const plannedCount=upcomingShows.length+activeShows.length;
-  const completedNet=done.reduce((t,sh)=>t+calcShow(sh).profit,0);
-  const completedTax=done.reduce((t,sh)=>t+calcShow(sh).taxRes,0);
-  const avgShowProfit=done.length?completedNet/done.length:0;
-  const sellShows=(S.shows||[]).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0));
+  const doneY=done.filter(sh=>_inYear(sh.startDate,_todayKey().slice(0,4))); // v96: this year's finished shows
+  const completedNet=doneY.reduce((t,sh)=>t+calcShow(sh).profit,0);
+  const completedTax=doneY.reduce((t,sh)=>t+calcShow(sh).taxRes,0);
+  const avgShowProfit=doneY.length?completedNet/doneY.length:0;
+  const sellShows=yrShows(_todayKey().slice(0,4)).filter(s=>(s.status==='completed'||s.status==='active')&&((typeof showActualRev==='function'?showActualRev(s):0)>0)); // v96: this year
   const avgShowGross=sellShows.length?(ytd.gross-((ytd.online&&ytd.online.amount)||0))/sellShows.length:0; // v96: show gross only, online sales are not a show
-  const upcomingDeposits=[...S.shows].filter(s=>s.status!=='completed'&&s.status!=='active'&&!isPaidAhead(s)).reduce((t,sh)=>t+boothPaid(sh),0); // v82: only money lost on missed/passed shows; paid-ahead deposits wait for their show
+  const upcomingDeposits=yrUnworked(_todayKey().slice(0,4)).reduce((t,sh)=>t+boothPaid(sh),0); // v96: lost this year // v82: only money lost on missed/passed shows; paid-ahead deposits wait for their show
   const overhead=(ytd.otherSpend||0)+upcomingDeposits;
   // v79: ONE profit number. Home, P&L tab and exports all use the year's figures (calcYTD), overhead included.
   const yearNet=ytd.profit, taxRes=ytd.taxRes, cleanKeep=ytd.keep;
@@ -4945,7 +4951,7 @@ function secMileage(C){
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--green)">${fmt(C.mileDeduct)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">IRS Deduction</div></div>
         <div style="text-align:center"><div style="font-size:19px;font-weight:900;color:var(--text)">${fmt(gasTotal)}</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Gas Spent</div></div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">IRS 2026: 72.5¢/mi Jan-Jun, 76¢/mi from Jul 1 · ${S.settings.mpg} mpg · gas now WI $${(parseFloat(S.settings.gasPrice)||0).toFixed(2)} / IL $${(parseFloat(S.settings.gasPriceIL)||parseFloat(S.settings.gasPrice)||0).toFixed(2)} (each finished show keeps its own week's price)</div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center">${_todayKey().slice(0,4)==='2026'?'IRS 2026: 72.5¢/mi Jan-Jun, 76¢/mi from Jul 1':'IRS rate by trip date'} · ${S.settings.mpg} mpg · gas now WI $${(parseFloat(S.settings.gasPrice)||0).toFixed(2)} / IL $${(parseFloat(S.settings.gasPriceIL)||parseFloat(S.settings.gasPrice)||0).toFixed(2)} (each finished show keeps its own week's price)</div>
       <div style="margin-top:8px;font-size:11px;color:var(--muted);text-align:center">Your miles: ${fmtN(C.ytd.miles)} in your truck${C.ytd.allMiles-C.ytd.miles>0.5?` · ${fmtN(C.ytd.allMiles-C.ytd.miles)} driven by reps on rep-only shows (not your deduction)`:''}</div>
       <div style="margin-top:8px;padding:8px;border:1px solid var(--goldbd);border-radius:8px;font-size:11px;line-height:1.5">
         <b>Taxes:</b> for your own truck take the IRS mileage OR its gas, never both. Mileage wins: ${fmt(C.mileDeduct)} vs ${fmt(C.ytd.ownGas||0)} of gas in your truck. Gas you paid for reps' cars is deducted on its own, dollar for dollar.
@@ -5286,7 +5292,7 @@ function dashSectionGrid(){
     {k:'workload',icon:'⏱️',label:'Workload',sub:C.done.length+' done · '+C.plannedCount+' planned'},
     {k:'inventory',icon:'🗃️',label:'Master Inventory',sub:C.invUnits+' units · '+fmt(C.invRetail)},
     {k:'mileage',icon:'🚚',label:'Mileage &amp; Tax Deduction',sub:fmtN(C.ytd.miles)+' mi · '+fmt(C.mileDeduct)},
-    {k:'booth',icon:'🎪',label:'Booth Costs',sub:'2026 season'},
+    {k:'booth',icon:'🎪',label:'Booth Costs',sub:_todayKey().slice(0,4)+' season'},
     {k:'expenses',icon:'💸',label:'Other Expenses',sub:fmt(C.ytd.otherSpend)+' YTD'},
     {k:'debt',icon:'🧾',label:'Product Debt',sub:(function(){
       const o=pdOpenInvoice(S), T=pdSupplierTotals(S);
@@ -5479,7 +5485,7 @@ function buildSmallSets(n){
   const short=[];
   SMALL_SET_ADDONS.forEach(a=>{ const s=smallSetAddonSupply(a); if(!s)return; const have=parseInt(s.qty)||0, inSets=parseInt(s.inSets)||0;
     if(n>0){ const took=Math.min(have,n); if(have<n)short.push(a.name+' '+(n-have)); s.qty=have-took; s.inSets=inSets+took; }
-    else{ const back=Math.min(-n,inSets); s.qty=have+back; s.inSets=inSets-back; } }); // v96: break apart returns only what builds took
+    else{ const back=s.inSets==null?-n:Math.min(-n,inSets); s.qty=have+back; s.inSets=Math.max(0,inSets-back); } }); // sets built before v96: give back as before // v96: break apart returns only what builds took
   _garageWhy=n>0?('Built '+n+' Small Set'+(n>1?'s':'')):('Broke '+(-n)+' Small Set'+(n<-1?'s':'')+' back into 2oz + C5-S');
   return {ok:true,short};
 }
@@ -6438,14 +6444,14 @@ function rPnL(){
   // Expense breakdown, v48: built from calcShow's own parts (+ future-show
   // deposits + business purchases) so the lines add up to Total Expenses.
   let boothTotal=0,showExpTotal=0,dayExpTotal=0,lodgingTotal=0,gasTotal=0,supplyTotal=0,lunchTotal=0,repTotal=0,workerTotal=0,feeTotal=0;
-  yrShows(Y).forEach(sh=>{
-    if(sh.status==='completed'||sh.status==='active'){
+  (S.shows||[]).forEach(sh=>{
+    if(sh.status==='completed'||sh.status==='active'){ if(!_inYear(sh.startDate,Y))return;
       const t=calcShow(sh);
       boothTotal+=t.booth; gasTotal+=t.gasAuto; supplyTotal+=t.supplyCost; lunchTotal+=t.lunch||0; repTotal+=t.repPay; workerTotal+=t.workerPay; feeTotal+=t.cardFees;
       showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
       lodgingTotal+=sh.lodging||0;
       (sh.days||[]).forEach(d=>{if(d.expenses)Object.keys(d.expenses).forEach(k=>{ const v=parseFloat(d.expenses[k])||0; if(k==='gas')gasTotal+=v; else dayExpTotal+=v; });});
-    } else if(!isPaidAhead(sh)){
+    } else if(!isPaidAhead(sh)&&_unworkedYear(sh)===Y){
       boothTotal+=boothPaid(sh);
       showExpTotal+=(sh.showExpenses||[]).reduce((t,e)=>t+(parseFloat(e.amount)||0),0);
       lodgingTotal+=sh.lodging||0;
@@ -7101,7 +7107,7 @@ function exportMileageLog(){
   out.push(['Supply runs, post office trips for online orders and product pickups go in Mileage > Log a business trip so they land here too.']);
   dlFile('best-solution-mileage-log-'+_stamp()+'.csv',_csvRows(out),'text/csv');
 }
-function seasonFutureSpend(){ return yrShows(finYear()).filter(sh=>sh.status!=='completed'&&sh.status!=='active'&&!isPaidAhead(sh)).reduce((t,sh)=>t+unworkedSpend(sh),0); } // v82: missed/passed shows only
+function seasonFutureSpend(){ return yrUnworked(finYear()).reduce((t,sh)=>t+unworkedSpend(sh),0); } // v82: missed/passed shows only
 function exportSeasonCSV(){
   const rows=[['Show','Status','Dates','Location','Days','Potential Gross','Actual Collected','Discounts','COGS','Expenses','Rep Pay','Worker Payouts','Net Profit','Tax Reserve']];
   yrShows(finYear()).filter(sh=>sh.status==='active'||sh.status==='completed').sort((a,b)=>showSortKey(a)<showSortKey(b)?-1:1).forEach(sh=>{ const t=calcShow(sh);
@@ -8380,6 +8386,7 @@ function commissionSyncPay(sh){
   if(rules)(sh.days||[]).forEach((d,di)=>{ Object.keys(d.repPay||{}).forEach(id=>{ if(repPayIsManual(sh,id))wants[di][id]=d.repPay[id]; }); });
   // round up: on the last day with sales; round down: taken from the last day back
   if(lastDi>=0&&sh.payRound)Object.keys(sh.payRound).forEach(id=>{ let left=payRoundOf(sh,id);
+    if(rules&&repPayIsManual(sh,id))return; // v96: typed pay is final as typed; adding the rounding again grew it on every save
     if(left>0){ wants[lastDi][id]=r2((wants[lastDi][id]||0)+left); return; }
     for(let di=lastDi;di>=0&&left<-0.004;di--){ const have=wants[di][id]||0; if(!have)continue; const take=Math.min(have,-left);
       const v=r2(have-take); if(v>0)wants[di][id]=v; else delete wants[di][id]; left=r2(left+take); } });
@@ -8416,11 +8423,12 @@ function payoutSheetData(sh){
     r.crew.forEach(id=>{ if(id===ownId)return; const o=get(id); if(!o.booth[di])o.booth[di]=r.name; });
   }); });
   // v96: hand-typed pay wins here too, the same number the Reps tab and the P&L use
-  if(payRulesOn(sh))(sh.days||[]).forEach((d,di)=>Object.keys((d&&d.repPay)||{}).forEach(id=>{ if(id===ownId||!repPayIsManual(sh,id))return; const o=get(id); o.pay[di]=repDayPay(d,id); }));
+  const _man=id=>payRulesOn(sh)&&id!==ownId&&repPayIsManual(sh,id);
+  if(payRulesOn(sh))Object.keys(sh.repPayManual||{}).forEach(id=>{ if(!_man(id))return; const o=get(id); (sh.days||[]).forEach((d,di)=>{ o.pay[di]=repDayPay(d,id); }); }); // every day: typed, or 0
   Object.keys(extras).forEach(id=>{ const o=get(id); o.extra=extras[id].amt; o.extraPaid=extras[id].paid; o.notes=extras[id].notes; });
   const r2=n=>Math.round(n*100)/100;
   const people=Object.values(P).map(o=>{ o.comm=r2(o.pay.reduce((t,v)=>t+(v||0),0)); o.salesTot=r2(o.sales.reduce((t,v)=>t+(v||0),0));
-    o.round=payRoundOf(sh,o.id); o.total=r2(o.comm+o.extra+o.round); o.paid=r2(repPaid(o.id,sh.id)+o.extraPaid); o.owe=r2(Math.max(0,o.total-o.paid)); return o; })
+    o.round=_man(o.id)?0:payRoundOf(sh,o.id); o.total=r2(o.comm+o.extra+o.round); o.paid=r2(repPaid(o.id,sh.id)+o.extraPaid); o.owe=r2(Math.max(0,o.total-o.paid)); return o; })
     .filter(o=>o.total>0||o.paid>0||o.booth.some(Boolean)).sort((a,b)=>b.total-a.total);
   const dayInfo=days.map((x,di)=>({lbl:showDayLabel(sh,di),vol:x?x.vol:0,comm:r2(people.reduce((t,o)=>t+(o.pay[di]||0),0)),closed:!!(x&&x.vol>0)}));
   return {days:dayInfo,people,rate:showCommRate(sh),
@@ -8994,7 +9002,7 @@ function confirmPack(shId){
   // opening lands on today's day when the show starts late (rained out day 1), not always on day 1.
   const prev=sh.packedInventory||{}; SKUS.forEach(s=>pk[s.key]+=(parseInt(prev[s.key])||0));
   const _iso=getShowDates(sh), _t=_iso.indexOf(_todayKey()), _di=(_t>0&&_t<(sh.days||[]).length)?_t:0;
-  sh.status='active';sh.packedInventory={...pk};if(!truckMode(sh))sh.days[_di].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
+  sh.status='active';sh.packedInventory={...pk};if(!truckMode(sh)){ sh.days[_di].morningCount={...pk}; if(_di>0)sh.days[_di].morningSeeded=true; } // seeded: a back-filled night before it still carries forwardif(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
   mClose();saveS();toast('Show started! Inventory packed.');
 }
 // boothId is optional. Given one, the modal counts THAT booth and compares it
@@ -9042,7 +9050,7 @@ function saveCount(shId,di,type,boothId){
   const nextDay=sh.days[di+1]||null;
   if(type==='morning'){ tgt.morningCount=c; delete tgt.morningSeeded; }
   else{
-    tgt.eveningCount=c;
+    tgt.eveningCount=c; tgt.eveningAt=d.eveningAt=new Date().toISOString(); // v96: when tonight was counted (endShowReturns)
     // Tomorrow opens where tonight ended — per booth when the show has booths.
     if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount||ntgt.morningSeeded){ ntgt.morningSeeded=true; /* v48: an opening the app filled in follows last night's count until someone counts it */ const ng=boothId?boothGarageIn(nextDay,boothId):dayGarageIn(nextDay); ntgt.morningCount={}; SKUS.forEach(s=>ntgt.morningCount[s.key]=(parseInt(c[s.key])||0)+(ng[s.key]||0)); } }
   }
@@ -9088,7 +9096,7 @@ function closeFlowStep(kind,shId,di,boothId,warn){
   if(kind==='count'){
     if(f.step!=='count')return;
     if(/🛑/.test(warn||'')){ _closeFlow=null; return; } // a count that looks wrong stops here: the toast says what to fix
-    f.step='money'; _cfOpen(()=>showMoneyModal(shId,f.di,boothId||undefined)); _cfBanner(2); return;
+    f.step='money'; _cfOpen(()=>showMoneyModal(shId,f.di,boothId||undefined)); return; // mmRender adds the step 2 banner
   }
   if(kind==='money'&&f.step==='money'){ _closeFlow=null; _cfOpen(()=>closeFlowSummary(shId,f.di,boothId)); }
 }
@@ -9153,6 +9161,7 @@ function saveAdjust(shId,di,boothId){
 let _mm=null;
 function mmState(){ return _mm||(_mm={shId:'',di:0,boothId:null,on:false,ids:[],flat:{},split:{}}); }
 function showMoneyModal(shId,di,boothId){
+  if(!_cfOpening)_closeFlow=null; // v96: a money count opened by hand is never part of a close-out left open earlier
   const sh=S.shows.find(s=>s.id===shId);if(!sh)return;
   const d=sh.days[di]; boothId=boothId||null;
   if(hasBooths(sh)&&!boothId){ toast('This show has separate booths — count each drawer.'); return; }
@@ -9397,10 +9406,12 @@ function endShowReturns(sh){
   // What physically remains anywhere (booth + truck): packed − sold − lost, floored at the last booth count.
   let lE=null;for(let i=sh.days.length-1;i>=0;i--){if(sh.days[i].eveningCount){lE=sh.days[i].eveningCount;break;}}
   const pk=sh.packedInventory||null, sold=showUnitsSold(sh), ret={};
-  // v96: what left for another show on or after the last counted night is no longer on this table
+  // v96: what left for another show AFTER the last night count was saved is no longer on that table.
+  // Only by time: a move earlier the same day is already missing from the count. A count saved
+  // before v96 has no time, so nothing is taken off (shows closed before v96 never move).
   let lEi=-1; for(let i=sh.days.length-1;i>=0;i--){ if(sh.days[i].eveningCount){ lEi=i; break; } }
-  const lEdate=lEi>=0?(getShowDates(sh)[lEi]||''):'', outAfter={};
-  if(lEdate)(S.transfers||[]).forEach(t=>{ if(t&&t.fromShowId===sh.id&&t.toShowId!==GARAGE_ID&&(t.date||'')>=lEdate)outAfter[t.sku]=(outAfter[t.sku]||0)+(parseInt(t.qty)||0); });
+  const lEat=lEi>=0?String(sh.days[lEi].eveningAt||''):'', outAfter={};
+  if(lEat)(S.transfers||[]).forEach(t=>{ if(t&&t.fromShowId===sh.id&&t.toShowId!==GARAGE_ID&&String(t.ts||'')>lEat)outAfter[t.sku]=(outAfter[t.sku]||0)+(parseInt(t.qty)||0); });
   SKUS.forEach(s=>{
     let lost=0;(sh.days||[]).forEach(d=>{lost+=((d.lost&&d.lost[s.key])||0);});
     const fromPack=pk?Math.max(0,(pk[s.key]||0)-(sold[s.key]||0)-lost):0;
@@ -11025,6 +11036,9 @@ function cloudPush(){
   const p=_pushChain.then(()=>{ _pushQueued=null; return _cloudPushOnce(); });
   _pushQueued=p; _pushChain=p.catch(()=>{}); return p;
 }
+// v96: a write that never answers (show-site signal) gives up after 40s instead of holding every
+// later push behind it. If it landed after all, the next read sees this device's own write (pending).
+function _pushTimeout(q,ms){ return Promise.race([Promise.resolve(q),new Promise((_,rej)=>setTimeout(()=>rej(new Error('the cloud did not answer')),ms||40000))]); }
 async function _cloudPushOnce(){
   if(!sb||!_cloudUser)return {ok:false,reason:'not signed in'};
   if(syncQuarantine()){ cloudBlock('restored copy held on this device'); return {ok:false,reason:'quarantined'}; }
@@ -11053,14 +11067,14 @@ async function _cloudPushOnce(){
       if(row.rev!=null)patch.revision=row.rev+1;
       let q=sb.from('app_data').update(patch).eq('user_id',_cloudUser.id).eq('data_key','bs_state').eq('updated_at',row.token);
       if(row.rev!=null)q=q.eq('revision',row.rev);
-      res=await q.select('*');
+      res=await _pushTimeout(q.select('*'));
     } else {
       const ins={user_id:_cloudUser.id,data_key:'bs_state',data_value:doc,updated_at:now,revision:1};
-      res=await sb.from('app_data').insert(ins).select('*');
+      res=await _pushTimeout(sb.from('app_data').insert(ins).select('*'));
       // Before the server guard exists there is no revision column: retry the
       // same INSERT without it. Any other error stands.
       if(res&&res.error&&/revision/i.test(String(res.error.message||''))&&/column|schema/i.test(String(res.error.message||''))){
-        delete ins.revision; res=await sb.from('app_data').insert(ins).select('*');
+        delete ins.revision; res=await _pushTimeout(sb.from('app_data').insert(ins).select('*'));
       }
     }
     if(!res||res.error){
@@ -11095,8 +11109,11 @@ function backupLocal(){
     localStorage.setItem('dd_bs_backup_'+Date.now(),cur);
     // v96: keep the newest 3 plain copies by time; tagged safety copies (dd_bs_backup_<tag>_<ts>) are not
     // pruned here (a text sort put them after the plain ones and deleted the copy just made)
-    const keys=Object.keys(localStorage).filter(k=>/^dd_bs_backup_\d+$/.test(k)).sort((a,b)=>parseInt(a.slice(13))-parseInt(b.slice(13)));
+    const ts=k=>parseInt(k.slice(k.lastIndexOf('_')+1))||0, all=Object.keys(localStorage).filter(k=>k.indexOf('dd_bs_backup_')===0);
+    const keys=all.filter(k=>/^dd_bs_backup_\d+$/.test(k)).sort((a,b)=>ts(a)-ts(b));
     while(keys.length>3)localStorage.removeItem(keys.shift());
+    const tagged=all.filter(k=>!/^dd_bs_backup_\d+$/.test(k)).sort((a,b)=>ts(a)-ts(b)); // safety copies: the newest 5
+    while(tagged.length>5)localStorage.removeItem(tagged.shift());
   }catch(e){console.warn('backupLocal',e);}
 }
 function looksUsed(st){
@@ -12067,6 +12084,7 @@ function bxSummary(st,meta,diag,snap){
   const _oth=(st.otherExpenses||[]).reduce((t,e)=>t+bxNum(e&&e.amount),0); exp+=_oth; profit-=_oth;
   ((st.settings||{}).onlineSales||[]).forEach(x=>{ const amt=bxNum(x&&x.amount), post=bxNum(x&&x.postage), c=((x&&x.items)||[]).reduce((t,i)=>t+(parseInt(i.qty)||0)*V.cost(i.sku),0);
     gross+=amt; cogs+=c; exp+=post; profit+=amt-c-post; });
+  ((st.settings||{}).businessTrips||[]).forEach(t=>{ const m=bxNum(t&&t.miles); if(m>0){ miles+=m; irs+=m*irsRateOn(t.date); } }); // v96: supply runs and post office trips count too
   taxRes=Math.max(0,profit)*V.setting('tax',0.28);
   line('  Booth committed        '+M(booth));
   line('  Booth paid             '+M(paid));

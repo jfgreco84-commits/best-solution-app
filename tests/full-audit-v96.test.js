@@ -37,6 +37,14 @@ R.section('2. Close and transfers');
   ctx.S.transfers.push({id:'t1',batch:'t1',ts:new Date().toISOString(),date:dayKey(0),sku:'2oz',qty:30,fromShowId:A.id,toShowId:B.id});
   A.packedInventory['2oz']-=30; B.packedInventory['2oz']+=30;
   chk('2a. leftovers sent on after the night count are not returned too',ctx.endShowReturns(A)['2oz'],0); }
+{ const h=world(),{ctx}=h; const A=h.newShow('Midday',dayKey(0)), B=h.newShow('Other',dayKey(0));
+  h.pack(A,{'2oz':40}); h.pack(B,{}); h.money(A,0,80);
+  ctx.S.transfers.push({id:'t2',batch:'t2',ts:new Date(Date.now()-60000).toISOString(),date:dayKey(0),sku:'2oz',qty:10,fromShowId:A.id,toShowId:B.id});
+  A.packedInventory['2oz']-=10; B.packedInventory['2oz']+=10; h.count(A,0,'evening',{'2oz':20});
+  chk('2d. a move earlier the same day is already out of the count: nothing lost',ctx.endShowReturns(A)['2oz'],20); }
+{ const h=world(),{ctx}=h; const A=h.newShow('Old Close',dayKey(0)); h.pack(A,{'2oz':40}); A.days[0].eveningCount=cnt({'2oz':30});
+  ctx.S.transfers.push({id:'t3',batch:'t3',ts:new Date().toISOString(),date:dayKey(0),sku:'2oz',qty:30,fromShowId:A.id,toShowId:'x'});
+  chk('2e. a count saved before v96 (no time on it) works as before',ctx.endShowReturns(A)['2oz'],30); }
 { const h=world(),{ctx}=h; const sh=h.newShow('Short Garage',dayKey(0)); h.pack(sh,{c5s:10}); ctx.S.inventory.c5s=3;
   const r=ctx.garageToShow(sh,'c5s',5,0,null,'b1'); ctx.garageToShowUndo(r.rec);
   chk('2b. undoing a delivery the garage was short on gives back only what it lost',ctx.S.inventory.c5s,3); }
@@ -73,7 +81,9 @@ R.section('5. Money');
     days:[{date:'Oct 24',boothCounts:{b1:{payments:{cash:800}},b2:{payments:{cash:1000}}},boothCrew:{b1:[own,C],b2:[I]},payments:{}}]};
   S.shows.push(sh); ctx.saveS(); sh.days[0].repPay[I]=300; ctx.repPayMarkManual(sh,I); ctx.saveS();
   const xi=ctx.payoutSheetData(sh).people.find(p=>p.id===I);
-  chk('5a. Payout Sheet uses hand-typed pay',[xi.total,xi.owe],[300,300]); }
+  chk('5a. Payout Sheet uses hand-typed pay',[xi.total,xi.owe],[300,300]);
+  sh.payRound={}; sh.payRound[I]=0.5; ctx.saveS(); const e1=ctx.repEarned(I); ctx.saveS(); ctx.saveS();
+  chk('5e. hand-typed pay never grows on later saves',[e1,ctx.repEarned(I),ctx.payoutSheetData(sh).people.find(p=>p.id===I).total],[300,300,300]); }
 { const h=world(),{ctx}=h; const S=ctx.S;
   S.settings.onlineSales=[]; S.otherExpenses=[{id:'a',date:'2026-06-01',amount:100,category:'x'},{id:'b',date:'2027-02-01',amount:40,category:'x'}];
   chk('5b. a year only counts its own purchases',[ctx.calcYTD('2026').otherSpend,ctx.calcYTD('2027').otherSpend],[100,40]);
@@ -107,7 +117,9 @@ R.section('7. Close out: count, then money, then what it adds up to');
 { const h=world(),{ctx}=h;
   const sh=h.newShow('Split',dayKey(0)); h.pack(sh,{c5s:40});
   ctx.startCloseFlow(sh.id,0); h.count(sh,0,'evening',{c5s:30}); ctx.mmToggle();
-  chk('7i. splitting the money by person keeps the walk-through',ctx._closeFlow&&ctx._closeFlow.step,'money'); }
+  chk('7i. splitting the money by person keeps the walk-through',ctx._closeFlow&&ctx._closeFlow.step,'money');
+  ctx.mClose(); ctx.showMoneyModal(sh.id,0);
+  chk('7j. walked away with ×: a money count opened later is just a money count',ctx._closeFlow,null); }
 { const h=world(),{ctx}=h;
   const sh=h.newShow('Typo',dayKey(0)); h.pack(sh,{c5s:40});
   ctx.startCloseFlow(sh.id,0); h.count(sh,0,'evening',{c5s:400});
