@@ -6267,7 +6267,7 @@ function showLodgingModal(id){
 }
 function saveLodging(id){
   const sh=S.shows.find(s=>s.id===id);if(!sh)return;
-  sh.lodging=parseFloat($$('lod_amt').value)||0;
+  sh.lodging=Math.max(0,parseFloat($$('lod_amt').value)||0);
   const note=($$('lod_note').value||'').trim();
   if(note)sh.lodgingNote=note;
   saveS();mClose();toast('Lodging saved!');rShows();
@@ -8933,7 +8933,7 @@ function otherShowsNeedingStock(exceptId){
 function updPackLeft(){
   const el=$$('pkLeft'); if(!el)return;
   let taking=0; const left={};
-  SKUS.forEach(s=>{const v=parseInt(($$('pk_'+s.key)||{}).value)||0;taking+=v;left[s.key]=(S.inventory[s.key]||0)-v;});
+  SKUS.forEach(s=>{const v=Math.max(0,parseInt(($$('pk_'+s.key)||{}).value)||0);taking+=v;left[s.key]=(S.inventory[s.key]||0)-v;});
   const leftT=SKUS.reduce((t,s)=>t+Math.max(0,left[s.key]),0);
   el.innerHTML=taking>0?`Garage after this pack: <strong style="color:${leftT<20?'var(--red)':'var(--text)'}">${leftT} units</strong> (${SKUS.map(s=>s.short+' '+Math.max(0,left[s.key])).join(' · ')})`:'';
 }
@@ -8945,10 +8945,10 @@ function confirmPack(shId){
   (()=>{})();
   const others=otherShowsNeedingStock(shId);
   if(others.length){
-    let taking=0,leftT=0; SKUS.forEach(s=>{const v=Math.min(parseInt(($$('pk_'+s.key)||{}).value)||0,S.inventory[s.key]||0);taking+=v;leftT+=(S.inventory[s.key]||0)-v;});
+    let taking=0,leftT=0; SKUS.forEach(s=>{const v=Math.max(0,Math.min(parseInt(($$('pk_'+s.key)||{}).value)||0,S.inventory[s.key]||0));taking+=v;leftT+=(S.inventory[s.key]||0)-v;});
     if(taking>0&&typeof confirm==='function'&&!confirm('Heads up: '+others.map(o=>o.name).join(', ')+' also '+(others.length>1?'need':'needs')+' stock this week. After this pack the garage has '+leftT+' units left. Pack anyway?'))return;
   }
-  const pk={};SKUS.forEach(s=>pk[s.key]=Math.min(parseInt($$('pk_'+s.key).value)||0,S.inventory[s.key]||0));
+  const pk={};SKUS.forEach(s=>pk[s.key]=Math.max(0,Math.min(parseInt($$('pk_'+s.key).value)||0,S.inventory[s.key]||0))); // v96: a stray minus sign never adds stock to the garage
   SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)-pk[s.key]);
   sh.status='active';sh.packedInventory={...pk};if(!truckMode(sh))sh.days[0].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
   mClose();saveS();toast('Show started! Inventory packed.');
@@ -9286,6 +9286,7 @@ function showEndModal(shId){
     <div class="sr"><span class="srl">Gross Sales</span><span class="srv gold">${fmt(t.gross)}</span></div>
     <div class="sr"><span class="srl">COGS</span><span class="srv">-${fmt(t.cogs)}</span></div>
     <div class="sr"><span class="srl">All Expenses</span><span class="srv">-${fmt(t.expenses)}</span></div>
+    ${t.salesTax>0?`<div class="sr"><span class="srl">Sales tax (owed to state)</span><span class="srv">-${fmt(t.salesTax)}</span></div>`:''}
     <div class="sr"><span class="srl b">Net Profit</span><span class="srv lg ${t.profit>=0?'green':'red'}">${fmt(t.profit)}</span></div>
     <div class="sr"><span class="srl">Tax Reserve</span><span class="srv red">-${fmt(t.taxRes)}</span></div>
     <div class="sr"><span class="srl b">Keep</span><span class="srv lg green">${fmt(Math.max(0,t.profit-t.taxRes))}</span></div>
