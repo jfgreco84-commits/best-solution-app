@@ -3322,6 +3322,7 @@ function boothHasData(sh,boothId){
     if(e.morningCount||e.eveningCount)return true;
     if(e.payments&&calcPmt(e.payments)>0)return true;
     if(e.restock&&SKUS.some(s=>(e.restock[s.key]||0)>0))return true;
+    if(e.garageIn&&SKUS.some(s=>(e.garageIn[s.key]||0)>0))return true; // v96: a garage delivery is data
     if(e.lost&&SKUS.some(s=>(e.lost[s.key]||0)>0))return true;
     return false; });
 }
@@ -4037,7 +4038,7 @@ function showEndKey(sh){ // last day of the show as YYYY-MM-DD (start + numDays-
 function isPassed(sh){ return !!(sh&&sh.passed===true); }
 function passedReason(sh){ return (sh&&sh.passedReason)?String(sh.passedReason):''; }
 function passedRevisit(sh){ return (sh&&sh.passedRevisit)?String(sh.passedRevisit):''; }
-function isMissed(sh){ if(isPassed(sh))return false; return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
+function isMissed(sh){ if(isPassed(sh))return false; if(!sh||!/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate||''))return false; /* v96: a date-TBD show is never missed */ return sh.status!=='completed' && sh.status!=='active' && showEndKey(sh) < _todayKey(); }
 function isUpcoming(sh){ if(isPassed(sh))return false; return sh.status!=='completed' && !isMissed(sh); } // active + future planned; never a passed show
 function showUnitsSold(sh){ const u={}; SKUS.forEach(s=>u[s.key]=0); (sh.days||[]).forEach(d=>{ if(d.morningCount&&d.eveningCount){ const sold=daySold(d); SKUS.forEach(s=>u[s.key]+=(sold[s.key]||0)); } }); return u; }
 // ===== Inventory reconciliation / discrepancy trust system =====
@@ -5124,7 +5125,7 @@ function bmUndo(id){
   const b=bmInv();
   Object.keys(e.items||{}).forEach(k=>{const q=parseInt(e.items[k])||0; if(!q)return;
     if(e.type==='borrow'){ b[k]=(b[k]||0)-q; S.inventory[k]=Math.max(0,(parseInt(S.inventory[k])||0)-q); }
-    else if(e.type==='return'){ b[k]=(b[k]||0)+q; S.inventory[k]=(parseInt(S.inventory[k])||0)+q; }
+    else if(e.type==='return'){ b[k]=(b[k]||0)+q; const g=(e.took&&e.took[k]!=null)?(parseInt(e.took[k])||0):q; S.inventory[k]=(parseInt(S.inventory[k])||0)+g; }
     else if(e.type==='set'){ b[k]=(b[k]||0)-q; }
   });
   L.splice(i,1); saveS(); toast(T+' undone');
@@ -5444,8 +5445,9 @@ function buildSmallSets(n){
   if(n<0&&inv.set<-n)return {ok:false,reason:'Only '+inv.set+' Small Sets in the garage.'};
   inv['2oz']-=n; inv.c5s-=n; inv.set+=n;
   const short=[];
-  SMALL_SET_ADDONS.forEach(a=>{ const s=smallSetAddonSupply(a); if(!s)return; const q=(parseInt(s.qty)||0)-n;
-    if(q<0)short.push(a.name+' '+(-q)); s.qty=Math.max(0,q); });
+  SMALL_SET_ADDONS.forEach(a=>{ const s=smallSetAddonSupply(a); if(!s)return; const have=parseInt(s.qty)||0, inSets=parseInt(s.inSets)||0;
+    if(n>0){ const took=Math.min(have,n); if(have<n)short.push(a.name+' '+(n-have)); s.qty=have-took; s.inSets=inSets+took; }
+    else{ const back=Math.min(-n,inSets); s.qty=have+back; s.inSets=inSets-back; } }); // v96: break apart returns only what builds took
   _garageWhy=n>0?('Built '+n+' Small Set'+(n>1?'s':'')):('Broke '+(-n)+' Small Set'+(n<-1?'s':'')+' back into 2oz + C5-S');
   return {ok:true,short};
 }
@@ -5503,7 +5505,7 @@ function showReturnBatman(){
   <div class="fg"><label class="fl">Note (optional)</label><input class="fi" id="bmr_note" placeholder="e.g. pallet came in"></div>
   <button class="btn btn-gold btn-full" onclick="applyReturnBatman()">Subtract Returned</button>`);
 }
-function applyReturnBatman(){if(_sameTap('bmr|'+_skuVals('bmr_')))return;const b=bmInv();let n=0;const it={};SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){b[s.key]=(parseInt(b[s.key])||0)-v;S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-v);n+=v;it[s.key]=v;}});if(n)bmAddLog('return',it,bmField('bmr_date'),bmField('bmr_note'));mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
+function applyReturnBatman(){if(_sameTap('bmr|'+_skuVals('bmr_')))return;const b=bmInv();let n=0;const it={},tk={};SKUS.forEach(s=>{const v=parseInt($$('bmr_'+s.key).value)||0;if(v>0){b[s.key]=(parseInt(b[s.key])||0)-v;tk[s.key]=Math.min(v,Math.max(0,parseInt(S.inventory[s.key])||0));S.inventory[s.key]=Math.max(0,(S.inventory[s.key]||0)-v);n+=v;it[s.key]=v;}});if(n){const e=bmAddLog('return',it,bmField('bmr_date'),bmField('bmr_note'));e.took=tk;}mClose();saveS();toast('Returned '+n+' to Batman (taken out of the garage)');}
 function showSetBatman(){
   mOpen(`<div class="mh"><div class="mt">📋 Set Exact Bottles Owed</div><button class="mx" onclick="mClose()">×</button></div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter the EXACT number of each you currently owe Batman. If you gave him back extra, type it as a minus (e.g. -8).</div>
@@ -5941,7 +5943,7 @@ function _bsBlankDay(n,dateStr){ return {dayNum:n,date:dateStr||('Day '+n),morni
 function _bsDatesFor(startDate,n){ const out=[]; if(startDate){ const s=new Date(startDate+'T12:00:00'); for(let i=0;i<n;i++){ const d=new Date(s); d.setDate(d.getDate()+i); out.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'})); } } else { for(let i=0;i<n;i++) out.push('Day '+(i+1)); } return out; }
 function resizeShowDays(sh,newND){
   sh.days=sh.days||[]; newND=Math.max(1,Math.round(newND)||1);
-  if(newND<sh.days.length){ let lastData=0; sh.days.forEach((d,i)=>{ const hasData=d.morningCount||d.eveningCount||(d.payments&&Object.values(d.payments).some(v=>parseFloat(v)>0)); if(hasData)lastData=i+1; }); newND=Math.max(newND,lastData); }
+  if(newND<sh.days.length){ let lastData=0; sh.days.forEach((d,i)=>{ const _nz=o=>!!(o&&typeof o==='object'&&Object.values(o).some(v=>parseFloat(v)>0)); const hasData=d.morningCount||d.eveningCount||_nz(d.payments)||_nz(d.expenses)||_nz(d.repPay)||_nz(d.garageIn)||_nz(d.truckIn)||_nz(d.restock)||_nz(d.lost)||(d.notes&&String(d.notes).trim())||(d.boothCounts&&Object.keys(d.boothCounts).length); /* v96: expenses, pay, notes and deliveries count as data too */ if(hasData)lastData=i+1; }); newND=Math.max(newND,lastData); }
   const dates=_bsDatesFor(sh.startDate,newND);
   if(newND>sh.days.length){ for(let i=sh.days.length;i<newND;i++) sh.days.push(_bsBlankDay(i+1,dates[i])); }
   else if(newND<sh.days.length){ sh.days=sh.days.slice(0,newND); }
@@ -6671,6 +6673,7 @@ function garageToShow(sh,sku,qty,di,boothId,batch){
   else boothId=null;
   if(boothId===TRUCK_ID)return garageToTruck(sh,sku,qty,di,batch);
   S.inventory=S.inventory||{};
+  const took=Math.min(qty,Math.max(0,parseInt(S.inventory[sku])||0)); // v96: undo gives back only this
   S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)-qty);
   sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[sku]=(parseInt(sh.packedInventory[sku])||0)+qty;
   const tgt=boothId?dayBoothWrite(d,boothId):d;
@@ -6680,7 +6683,7 @@ function garageToShow(sh,sku,qty,di,boothId,batch){
   if(boothId)rollupDay(sh,di);
   const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
   const id='tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-  const rec={id,batch:batch||id,ts:new Date().toISOString(),date:_todayKey(),sku,qty,landed:'opening',
+  const rec={id,batch:batch||id,ts:new Date().toISOString(),date:_todayKey(),sku,qty,took,landed:'opening',
     fromShowId:GARAGE_ID,fromName:GARAGE_NAME,toShowId:sh.id,toName:sh.name,di,dayDate:d.date||'',boothId:boothId||null,boothName:boothId?boothName(sh,boothId):''};
   if(!Array.isArray(S.transfers))S.transfers=[];
   S.transfers.push(rec);
@@ -6693,6 +6696,7 @@ function garageToShow(sh,sku,qty,di,boothId,batch){
 const TRUCK_ID='truck';
 function garageToTruck(sh,sku,qty,di,batch){
   const d=sh.days[di];
+  const took=Math.min(qty,Math.max(0,parseInt(S.inventory[sku])||0));
   S.inventory[sku]=Math.max(0,(parseInt(S.inventory[sku])||0)-qty);
   sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[sku]=(parseInt(sh.packedInventory[sku])||0)+qty;
   if(!d.truckIn||typeof d.truckIn!=='object')d.truckIn={};
@@ -6700,7 +6704,7 @@ function garageToTruck(sh,sku,qty,di,batch){
   rollupDay(sh,di);
   const sName=(SKUS.find(s=>s.key===sku)||{}).short||sku;
   const id='tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-  const rec={id,batch:batch||id,ts:new Date().toISOString(),date:_todayKey(),sku,qty,landed:'truck',
+  const rec={id,batch:batch||id,ts:new Date().toISOString(),date:_todayKey(),sku,qty,took,landed:'truck',
     fromShowId:GARAGE_ID,fromName:GARAGE_NAME,toShowId:sh.id,toName:sh.name,di,dayDate:d.date||'',boothId:TRUCK_ID,boothName:'🚚 Truck'};
   if(!Array.isArray(S.transfers))S.transfers=[];
   S.transfers.push(rec);
@@ -6716,8 +6720,8 @@ function garageToShowUndo(tr){
   if(!sh)return {ok:false,reason:'Show not found'};
   const d=(sh.days||[])[tr.di];
   if(d&&d.locked)return {ok:false,reason:'That day is finalized. Unlock it first.'};
-  const qty=parseInt(tr.qty)||0;
-  S.inventory=S.inventory||{}; S.inventory[tr.sku]=(parseInt(S.inventory[tr.sku])||0)+qty;
+  const qty=parseInt(tr.qty)||0, back=(tr.took!=null&&isFinite(parseInt(tr.took)))?parseInt(tr.took):qty;
+  S.inventory=S.inventory||{}; S.inventory[tr.sku]=(parseInt(S.inventory[tr.sku])||0)+back;
   sh.packedInventory=sh.packedInventory||{}; sh.packedInventory[tr.sku]=Math.max(0,(parseInt(sh.packedInventory[tr.sku])||0)-qty);
   if(d&&tr.landed==='truck'){
     if(d.truckIn&&typeof d.truckIn==='object')d.truckIn[tr.sku]=Math.max(0,(parseInt(d.truckIn[tr.sku])||0)-qty);
@@ -8378,12 +8382,14 @@ function payoutSheetData(sh){
     r.people.forEach(p=>{ const o=get(p.id); o.pay[di]=(o.pay[di]||0)+p.amt; o.sales[di]=(o.sales[di]||0)+p.base; o.booth[di]=r.name; });
     r.crew.forEach(id=>{ if(id===ownId)return; const o=get(id); if(!o.booth[di])o.booth[di]=r.name; });
   }); });
+  // v96: hand-typed pay wins here too, the same number the Reps tab and the P&L use
+  if(payRulesOn(sh))(sh.days||[]).forEach((d,di)=>Object.keys((d&&d.repPay)||{}).forEach(id=>{ if(id===ownId||!repPayIsManual(sh,id))return; const o=get(id); o.pay[di]=repDayPay(d,id); }));
   Object.keys(extras).forEach(id=>{ const o=get(id); o.extra=extras[id].amt; o.extraPaid=extras[id].paid; o.notes=extras[id].notes; });
   const r2=n=>Math.round(n*100)/100;
   const people=Object.values(P).map(o=>{ o.comm=r2(o.pay.reduce((t,v)=>t+(v||0),0)); o.salesTot=r2(o.sales.reduce((t,v)=>t+(v||0),0));
     o.round=payRoundOf(sh,o.id); o.total=r2(o.comm+o.extra+o.round); o.paid=r2(repPaid(o.id,sh.id)+o.extraPaid); o.owe=r2(Math.max(0,o.total-o.paid)); return o; })
     .filter(o=>o.total>0||o.paid>0||o.booth.some(Boolean)).sort((a,b)=>b.total-a.total);
-  const dayInfo=days.map((x,di)=>({lbl:showDayLabel(sh,di),vol:x?x.vol:0,comm:x?x.out:0,closed:!!(x&&x.vol>0)}));
+  const dayInfo=days.map((x,di)=>({lbl:showDayLabel(sh,di),vol:x?x.vol:0,comm:r2(people.reduce((t,o)=>t+(o.pay[di]||0),0)),closed:!!(x&&x.vol>0)}));
   return {days:dayInfo,people,rate:showCommRate(sh),
     vol:r2(dayInfo.reduce((t,d)=>t+d.vol,0)),comm:r2(people.reduce((t,o)=>t+o.comm,0)),extra:r2(people.reduce((t,o)=>t+o.extra,0)),
     total:r2(people.reduce((t,o)=>t+o.total,0)),paid:r2(people.reduce((t,o)=>t+o.paid,0)),owe:r2(people.reduce((t,o)=>t+o.owe,0))};
@@ -8950,7 +8956,11 @@ function confirmPack(shId){
   }
   const pk={};SKUS.forEach(s=>pk[s.key]=Math.max(0,Math.min(parseInt($$('pk_'+s.key).value)||0,S.inventory[s.key]||0))); // v96: a stray minus sign never adds stock to the garage
   SKUS.forEach(s=>S.inventory[s.key]=(S.inventory[s.key]||0)-pk[s.key]);
-  sh.status='active';sh.packedInventory={...pk};if(!truckMode(sh))sh.days[0].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
+  // v96: stock moved in from another show before the start stays packed (it was overwritten), and the
+  // opening lands on today's day when the show starts late (rained out day 1), not always on day 1.
+  const prev=sh.packedInventory||{}; SKUS.forEach(s=>pk[s.key]+=(parseInt(prev[s.key])||0));
+  const _iso=getShowDates(sh), _t=_iso.indexOf(_todayKey()), _di=(_t>0&&_t<(sh.days||[]).length)?_t:0;
+  sh.status='active';sh.packedInventory={...pk};if(!truckMode(sh))sh.days[_di].morningCount={...pk};if(!sh.prices)sh.prices=JSON.parse(JSON.stringify(S.prices||{})); // freeze prices so later price changes never rewrite this show's history
   mClose();saveS();toast('Show started! Inventory packed.');
 }
 // boothId is optional. Given one, the modal counts THAT booth and compares it
@@ -9299,10 +9309,14 @@ function endShowReturns(sh){
   // What physically remains anywhere (booth + truck): packed − sold − lost, floored at the last booth count.
   let lE=null;for(let i=sh.days.length-1;i>=0;i--){if(sh.days[i].eveningCount){lE=sh.days[i].eveningCount;break;}}
   const pk=sh.packedInventory||null, sold=showUnitsSold(sh), ret={};
+  // v96: what left for another show on or after the last counted night is no longer on this table
+  let lEi=-1; for(let i=sh.days.length-1;i>=0;i--){ if(sh.days[i].eveningCount){ lEi=i; break; } }
+  const lEdate=lEi>=0?(getShowDates(sh)[lEi]||''):'', outAfter={};
+  if(lEdate)(S.transfers||[]).forEach(t=>{ if(t&&t.fromShowId===sh.id&&t.toShowId!==GARAGE_ID&&(t.date||'')>=lEdate)outAfter[t.sku]=(outAfter[t.sku]||0)+(parseInt(t.qty)||0); });
   SKUS.forEach(s=>{
     let lost=0;(sh.days||[]).forEach(d=>{lost+=((d.lost&&d.lost[s.key])||0);});
     const fromPack=pk?Math.max(0,(pk[s.key]||0)-(sold[s.key]||0)-lost):0;
-    ret[s.key]=Math.max((lE&&lE[s.key])||0,fromPack);
+    ret[s.key]=Math.max(Math.max(0,((lE&&lE[s.key])||0)-(outAfter[s.key]||0)),fromPack);
   });
   return ret;
 }
@@ -9334,7 +9348,7 @@ function undoStartShow(shId){
   const pk=sh.packedInventory||{}, n=SKUS.reduce((t,s)=>t+(parseInt(pk[s.key])||0),0);
   if(typeof confirm==='function'&&!confirm('Undo starting "'+sh.name+'"?\n\nThe '+n+' units you packed go back on the garage shelf and the show goes back to upcoming.'))return;
   SKUS.forEach(s=>S.inventory[s.key]=(parseInt(S.inventory[s.key])||0)+(parseInt(pk[s.key])||0));
-  (sh.days||[]).forEach(d=>{ d.morningCount=null; delete d.morningSeeded; delete d.truckCount;
+  (sh.days||[]).forEach(d=>{ d.morningCount=null; delete d.morningSeeded; delete d.truckCount; delete d.restock; delete d.lost; delete d.garageIn; delete d.truckIn; // v96
     Object.values(d.boothCounts||{}).forEach(en=>{ if(en){ delete en.morningCount; delete en.morningSeeded; delete en.restock; delete en.lost; } }); });
   invLogPush(sh,{ts:new Date().toISOString(),type:'undo start',changes:['unpacked: '+SKUS.filter(s=>pk[s.key]).map(s=>s.short+' +'+pk[s.key]).join(', ')+' back to the garage'],by:'owner'});
   sh.packedInventory=null; sh.status='planned';
@@ -9973,28 +9987,32 @@ function exportCalICS(){
   if(!shows.length){toast('No shows to export');return;}
   const CRLF='\r\n';
   let ics='BEGIN:VCALENDAR'+CRLF+'VERSION:2.0'+CRLF+'PRODID:-//Best Solution//Show Calendar//EN'+CRLF+'CALSCALE:GREGORIAN'+CRLF+'METHOD:PUBLISH'+CRLF;
+  // v96: all-day events (the end date is the day after the last day, as the format wants), so a
+  // Sat-Sun show no longer spills into Monday; commas, semicolons and line breaks escaped.
+  const esc=v=>String(v==null?'':v).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');
+  const ymd=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+  const stamp=new Date().toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
   shows.forEach(sh=>{
-    const s=new Date(sh.startDate+'T08:00:00');
-    const e=new Date(sh.startDate+'T08:00:00');
-    e.setDate(e.getDate()+(sh.numDays||1));
-    const fmt8=d=>d.toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
-    const stamp=fmt8(new Date());
-    const boothNote='Booth: '+(sh.boothCost?'$'+sh.boothCost.toFixed(2):'TBD')+' | '+( sh.numDays||1)+' day(s) | '+(sh.confirmed?'CONFIRMED':'PENDING');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(sh.startDate))return;
+    const s=new Date(sh.startDate+'T12:00:00'), e=new Date(sh.startDate+'T12:00:00');
+    e.setDate(e.getDate()+(parseInt(sh.numDays)||1));
+    const bc=parseFloat(sh.boothCost)||0;
+    const boothNote='Booth: '+(bc?'$'+bc.toFixed(2):'TBD')+' | '+(parseInt(sh.numDays)||1)+' day(s) | '+(sh.confirmed?'CONFIRMED':'PENDING');
     ics+='BEGIN:VEVENT'+CRLF;
     ics+='UID:'+(sh.id||('bs_'+Date.now()))+'@bestsolution'+CRLF;
     ics+='DTSTAMP:'+stamp+CRLF;
-    ics+='DTSTART:'+fmt8(s)+CRLF;
-    ics+='DTEND:'+fmt8(e)+CRLF;
-    ics+='SUMMARY:'+(sh.confirmed?'✅ ':'⏳ ')+sh.name+CRLF;
-    ics+='LOCATION:'+(sh.location||'')+CRLF;
-    ics+='DESCRIPTION:'+boothNote+CRLF;
+    ics+='DTSTART;VALUE=DATE:'+ymd(s)+CRLF;
+    ics+='DTEND;VALUE=DATE:'+ymd(e)+CRLF;
+    ics+='SUMMARY:'+esc((sh.confirmed?'✅ ':'⏳ ')+sh.name)+CRLF;
+    ics+='LOCATION:'+esc(sh.location||'')+CRLF;
+    ics+='DESCRIPTION:'+esc(boothNote)+CRLF;
     ics+='END:VEVENT'+CRLF;
   });
   ics+='END:VCALENDAR';
   const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url;a.download='BestSolution_Shows_2026.ics';
+  a.href=url;a.download='BestSolution_Shows_'+_todayKey().slice(0,4)+'.ics';
   document.body.appendChild(a);a.click();
   setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},500);
   toast('📅 Calendar file downloaded!');
@@ -10723,6 +10741,9 @@ function _applyStateObj(parsed){
   // here (and nowhere else in this path) upgrades the debt shape without
   // re-running any of the show-seeding migrations, which this path must not do.
   pdNormalize(parsed);
+  // v96: a backup from before v95 has no SET size; without its cost the whole cost schedule is
+  // refused and every COGS falls back to the old table. Filling blanks only, as on load.
+  try{ smallSetSeedV95(parsed); }catch(e){ console.warn('restore set seed',e); }
   // v70: every restore or import is held on this device: pending saves are
   // cancelled and nothing syncs, across reloads, until the owner resolves it.
   // If the hold cannot be written, NOTHING is replaced (fail closed).
@@ -12500,7 +12521,7 @@ function csCurrentEntry(){ const sch=cogsSchedule(S); if(!sch)return null;
   const open=sch.filter(e=>e.effectiveTo==null||e.effectiveTo==='');
   return open.length===1?open[0]:sch[sch.length-1]; }
 
-// Step 1 — collect all six costs plus one effective date. Nothing is saved here.
+// Step 1 — collect all seven costs plus one effective date. Nothing is saved here.
 function csOpen(){
   const cur=csCurrentEntry(), sv=cogsValidate(cogsSchedule(S));
   const today=_todayKey();
@@ -12512,7 +12533,7 @@ function csOpen(){
   mOpen('<div class="mh"><div class="mt">💲 Change product costs</div><button class="mx" onclick="mClose()">&times;</button></div>'+
   (sv.valid?'':'<div class="card rb" style="margin-bottom:10px;padding:10px"><div style="font-size:11px;font-weight:900;color:var(--red)">SCHEDULE PROBLEM</div>'+
      '<div style="font-size:11px">'+sv.errors.map(e=>e.replace(/</g,'&lt;')).join('<br>')+'</div></div>')+
-  '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter <strong>all six</strong> new costs and the date they take effect. '+
+  '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Enter <strong>all seven</strong> new costs and the date they take effect. '+
   'Nothing is saved until you review and confirm on the next screen. Past periods are never touched.</div>'+
   '<div class="fg"><label class="fl">New costs take effect on</label>'+
   '<input class="fi" type="date" id="cs_date" value="'+today+'"></div>'+
