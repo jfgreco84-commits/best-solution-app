@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v96';
+const APP_VERSION='v97';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -3097,7 +3097,20 @@ function calcSold(m,e){const r={};SKUS.forEach(s=>r[s.key]=Math.max(0,(m[s.key]|
 // ---- Day-aware inventory movement with optional restock + damaged/lost/given ----
 // Units that physically left the booth = opening + restock - ending. Of those, some sold and some were lost/damaged/given.
 // Backward-compatible: with no restock/lost, daySold == calcSold(morning,evening) and COGS units == sold.
-function dayUnitsLeft(d){ const r={}; SKUS.forEach(s=>{ const m=(d.morningCount&&d.morningCount[s.key])||0; const rk=(d.restock&&d.restock[s.key])||0; const e=(d.eveningCount&&d.eveningCount[s.key])||0; r[s.key]=Math.max(0,m+rk-e); }); return r; }
+// v97 SMALL SETS BUILT AT THE SHOW. A table can open with loose 2oz and C5-S and close with Small
+// Sets made from them. More SET at night than the table had means that many sets were built there:
+// one 2oz and one C5-S each went into a set, not to a customer. Capped by what the 2oz and C5-S
+// tables actually went down, so a typo can never invent sales or stock.
+function setsBuiltOf(m,rk,e,ti,to){ const n=(o,k)=>parseInt((o||{})[k])||0, a=k=>n(m,k)+n(rk,k)+n(ti,k)-n(to,k);
+  return Math.max(0,Math.min(n(e,'set')-a('set'),a('2oz')-n(e,'2oz'),a('c5s')-n(e,'c5s'))); }
+function boothSetsBuilt(d,boothId){ const en=dayBoothRead(d,boothId)||{}; if(!en.morningCount||!en.eveningCount)return 0;
+  return setsBuiltOf(en.morningCount,en.restock,en.eveningCount,boothTransferIn(d,boothId),boothTransferOut(d,boothId)); }
+function daySetsBuilt(d){ if(!d||!d.morningCount||!d.eveningCount)return 0;
+  const ids=Object.keys((d.boothCounts&&typeof d.boothCounts==='object')?d.boothCounts:{}).filter(id=>{ const en=d.boothCounts[id]; return en&&en.morningCount&&en.eveningCount; });
+  return ids.length?ids.reduce((t,id)=>t+boothSetsBuilt(d,id),0):setsBuiltOf(d.morningCount,d.restock,d.eveningCount); }
+function dayUnitsLeft(d){ const r={}; SKUS.forEach(s=>{ const m=(d.morningCount&&d.morningCount[s.key])||0; const rk=(d.restock&&d.restock[s.key])||0; const e=(d.eveningCount&&d.eveningCount[s.key])||0; r[s.key]=Math.max(0,m+rk-e); });
+  const b=daySetsBuilt(d); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); } // v97: went into sets, not sold
+  return r; }
 function dayLostMap(d){ const r={}; SKUS.forEach(s=>r[s.key]=(d.lost&&d.lost[s.key])||0); return r; }
 function daySold(d){ const left=dayUnitsLeft(d),lost=dayLostMap(d),r={}; SKUS.forEach(s=>r[s.key]=Math.max(0,(left[s.key]||0)-(lost[s.key]||0))); return r; }
 // Option A (owner's rule): damaged / lost / given-away units still cost money, so COGS counts everything that left = sold + lost.
@@ -3252,6 +3265,7 @@ function boothUnitsLeft(d,boothId){
     const e=(en.eveningCount&&en.eveningCount[s.key])||0;
     r[s.key]=Math.max(0,m+rk+(ti[s.key]||0)-(to[s.key]||0)-e);
   });
+  const b=boothSetsBuilt(d,boothId); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); } // v97: went into sets, not sold
   return r;
 }
 function boothSold(d,boothId){
@@ -3450,6 +3464,7 @@ function showLedger(sh){
       left[s.key]=L?(L[s.key]||0):0;
       end[s.key]=start[s.key]-left[s.key];
     });
+    const _b=(hasM&&hasE)?daySetsBuilt(d):0; if(_b){ end['2oz']-=_b; end.c5s-=_b; end.set+=_b; } // v97: sets built at the show
     cur=end;
     return {di:i,start,table,truck,left,end,hasM,hasE,counted:hasM&&hasE};
   });
@@ -4069,7 +4084,7 @@ function invCarryIssues(sh){ const out=[]; const days=sh.days||[];
     SKUS.forEach(s=>{ const a=pe[s.key]||0,b=mo[s.key]||0,g=gi[s.key]||0,x=a+g; if(x!==b)out.push({di:i,sku:s.key,short:s.short,prevEve:a,brought:g,expected:x,morn:b,diff:b-x}); }); }
   return out; }
 // Impossible sell-through: ending > opening on the same day (would be a negative sale) — needs a restock note or a fix.
-function invNegativeSold(sh){ const out=[]; (sh.days||[]).forEach((d,i)=>{ if(d.morningCount&&d.eveningCount)SKUS.forEach(s=>{ const avail=(d.morningCount[s.key]||0)+((d.restock&&d.restock[s.key])||0),e=d.eveningCount[s.key]||0; if(e>avail)out.push({di:i,sku:s.key,short:s.short,morn:avail,eve:e,diff:e-avail}); }); }); return out; }
+function invNegativeSold(sh){ const out=[]; (sh.days||[]).forEach((d,i)=>{ const _b=daySetsBuilt(d); if(d.morningCount&&d.eveningCount)SKUS.forEach(s=>{ const avail=(d.morningCount[s.key]||0)+((d.restock&&d.restock[s.key])||0)+(s.key==='set'?_b:0),e=d.eveningCount[s.key]||0; if(e>avail)out.push({di:i,sku:s.key,short:s.short,morn:avail,eve:e,diff:e-avail}); }); }); return out; }
 // Carry mismatches that have NOT been acknowledged with a reason on the receiving day.
 function invUnresolved(sh){ return invCarryIssues(sh).filter(m=>!((sh.days[m.di]||{}).carryReason)); }
 // Green = clean · Yellow = reviewed/overridden with a reason · Red = unresolved mismatch or impossible sale.
@@ -9069,7 +9084,8 @@ function saveCount(shId,di,type,boothId){
   const over=truckShort(sh).filter(x=>x.di===di||x.di===di+1);
   if(over.length)warn=' 🛑 More than the show has: '+over.map(x=>x.short+' +'+x.over).join(', ')+'. Fix the count or bring it from the garage.';
   // v81: a night count above what the table opened with is almost always a typo; say so now, not at closeout
-  if(type==='evening'&&tgt.morningCount){ const hi=SKUS.filter(s=>(c[s.key]||0)>(parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0));
+  if(type==='evening'&&tgt.morningCount){ const _sb=setsBuiltOf(tgt.morningCount,tgt.restock,c,boothId?boothTransferIn(d,boothId):null,boothId?boothTransferOut(d,boothId):null); // v97: sets built at the show are not a typo
+    const hi=SKUS.filter(s=>(c[s.key]||0)>(parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0)+(s.key==='set'?_sb:0));
     if(hi.length)warn=' 🛑 Typo? '+hi.map(s=>s.short+' '+c[s.key]+' tonight, only '+((parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0))+' this morning').join(', ')+'. Tap Evening Count to fix.'; }
   mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn,warn?7000:2200);
   if(type==='evening')closeFlowStep('count',shId,di,boothId,warn);
@@ -9412,9 +9428,10 @@ function endShowReturns(sh){
   let lEi=-1; for(let i=sh.days.length-1;i>=0;i--){ if(sh.days[i].eveningCount){ lEi=i; break; } }
   const lEat=lEi>=0?String(sh.days[lEi].eveningAt||''):'', outAfter={};
   if(lEat)(S.transfers||[]).forEach(t=>{ if(t&&t.fromShowId===sh.id&&t.toShowId!==GARAGE_ID&&String(t.ts||'')>lEat)outAfter[t.sku]=(outAfter[t.sku]||0)+(parseInt(t.qty)||0); });
+  const _built=(sh.days||[]).reduce((t,d)=>t+daySetsBuilt(d),0), _bAdj={'2oz':-_built,c5s:-_built,set:_built}; // v97
   SKUS.forEach(s=>{
     let lost=0;(sh.days||[]).forEach(d=>{lost+=((d.lost&&d.lost[s.key])||0);});
-    const fromPack=pk?Math.max(0,(pk[s.key]||0)-(sold[s.key]||0)-lost):0;
+    const fromPack=pk?Math.max(0,(pk[s.key]||0)+(_bAdj[s.key]||0)-(sold[s.key]||0)-lost):0;
     ret[s.key]=Math.max(Math.max(0,((lE&&lE[s.key])||0)-(outAfter[s.key]||0)),fromPack);
   });
   return ret;
@@ -11367,7 +11384,7 @@ function bxView(st){
 
   V.dayUnitsLeft=d=>{ const r={}; SKUS.forEach(s=>{
     const m=N((d.morningCount||{})[s.key]), rk=N((d.restock||{})[s.key]), e=N((d.eveningCount||{})[s.key]);
-    r[s.key]=Math.max(0,m+rk-e); }); return r; };
+    r[s.key]=Math.max(0,m+rk-e); }); const b=daySetsBuilt(d); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); } return r; };
   V.dayLost=d=>{ const r={}; SKUS.forEach(s=>r[s.key]=N((d.lost||{})[s.key])); return r; };
   V.daySold=d=>{ const l=V.dayUnitsLeft(d),x=V.dayLost(d),r={};
     SKUS.forEach(s=>r[s.key]=Math.max(0,l[s.key]-x[s.key])); return r; };
