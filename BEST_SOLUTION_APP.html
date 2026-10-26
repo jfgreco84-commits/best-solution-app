@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v97';
+const APP_VERSION='v98';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -3101,15 +3101,18 @@ function calcSold(m,e){const r={};SKUS.forEach(s=>r[s.key]=Math.max(0,(m[s.key]|
 // Sets made from them. More SET at night than the table had means that many sets were built there:
 // one 2oz and one C5-S each went into a set, not to a customer. Capped by what the 2oz and C5-S
 // tables actually went down, so a typo can never invent sales or stock.
-function setsBuiltOf(m,rk,e,ti,to){ const n=(o,k)=>parseInt((o||{})[k])||0, a=k=>n(m,k)+n(rk,k)+n(ti,k)-n(to,k);
-  return Math.max(0,Math.min(n(e,'set')-a('set'),a('2oz')-n(e,'2oz'),a('c5s')-n(e,'c5s'))); }
+// v98: "Small Sets made here today" (made) is what was really put together, sold or not; blank =
+// only the extra sets still on the table. Never fewer than that extra, never more than the parts used.
+function setsBuiltOf(m,rk,e,ti,to,made){ const n=(o,k)=>parseInt((o||{})[k])||0, a=k=>n(m,k)+n(rk,k)+n(ti,k)-n(to,k);
+  const extra=n(e,'set')-a('set'), mk=parseInt(made), want=(isFinite(mk)&&mk>=0)?Math.max(mk,extra):extra;
+  return Math.max(0,Math.min(want,a('2oz')-n(e,'2oz'),a('c5s')-n(e,'c5s'))); }
 function boothSetsBuilt(d,boothId){ const en=dayBoothRead(d,boothId)||{}; if(!en.morningCount||!en.eveningCount)return 0;
-  return setsBuiltOf(en.morningCount,en.restock,en.eveningCount,boothTransferIn(d,boothId),boothTransferOut(d,boothId)); }
+  return setsBuiltOf(en.morningCount,en.restock,en.eveningCount,boothTransferIn(d,boothId),boothTransferOut(d,boothId),en.setsMade); }
 function daySetsBuilt(d){ if(!d||!d.morningCount||!d.eveningCount)return 0;
   const ids=Object.keys((d.boothCounts&&typeof d.boothCounts==='object')?d.boothCounts:{}).filter(id=>{ const en=d.boothCounts[id]; return en&&en.morningCount&&en.eveningCount; });
-  return ids.length?ids.reduce((t,id)=>t+boothSetsBuilt(d,id),0):setsBuiltOf(d.morningCount,d.restock,d.eveningCount); }
+  return ids.length?ids.reduce((t,id)=>t+boothSetsBuilt(d,id),0):setsBuiltOf(d.morningCount,d.restock,d.eveningCount,null,null,d.setsMade); }
 function dayUnitsLeft(d){ const r={}; SKUS.forEach(s=>{ const m=(d.morningCount&&d.morningCount[s.key])||0; const rk=(d.restock&&d.restock[s.key])||0; const e=(d.eveningCount&&d.eveningCount[s.key])||0; r[s.key]=Math.max(0,m+rk-e); });
-  const b=daySetsBuilt(d); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); } // v97: went into sets, not sold
+  const b=daySetsBuilt(d); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); r.set=Math.max(0,((d.morningCount||{}).set||0)+((d.restock||{}).set||0)+b-((d.eveningCount||{}).set||0)); } // v97: went into sets, not sold; v98: sets made and sold
   return r; }
 function dayLostMap(d){ const r={}; SKUS.forEach(s=>r[s.key]=(d.lost&&d.lost[s.key])||0); return r; }
 function daySold(d){ const left=dayUnitsLeft(d),lost=dayLostMap(d),r={}; SKUS.forEach(s=>r[s.key]=Math.max(0,(left[s.key]||0)-(lost[s.key]||0))); return r; }
@@ -3265,7 +3268,8 @@ function boothUnitsLeft(d,boothId){
     const e=(en.eveningCount&&en.eveningCount[s.key])||0;
     r[s.key]=Math.max(0,m+rk+(ti[s.key]||0)-(to[s.key]||0)-e);
   });
-  const b=boothSetsBuilt(d,boothId); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); } // v97: went into sets, not sold
+  const b=boothSetsBuilt(d,boothId); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b);
+    r.set=Math.max(0,(parseInt((en.morningCount||{}).set)||0)+(parseInt((en.restock||{}).set)||0)+(ti.set||0)-(to.set||0)+b-(parseInt((en.eveningCount||{}).set)||0)); } // v97/v98
   return r;
 }
 function boothSold(d,boothId){
@@ -8117,6 +8121,7 @@ function boothDayCardHTML(sh,di,b){
   if(restockT||lostT)h+=`<div style="font-size:10px;color:var(--muted);margin-top:6px">${restockT?'+ Restock '+restockT+' ':''}${lostT?'· Lost/Damaged '+lostT+' (still costs COGS)':''}</div>`;
   if(carry.length)h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ Opening ≠ this booth's ending last night: ${carry.map(m=>m.short+' '+m.prevEve+'→'+m.morn).join(', ')}</div>`;
   if(pulled.length)h+=`<div style="margin-top:6px;font-size:11px;color:#7EB8F7">🚚 ${pulled.map(m=>m.short+' '+(m.diff>0?'+'+m.diff+' off the truck':(-m.diff)+' back to the truck')).join(' · ')}</div>`;
+  { const sb=boothSetsBuilt(d,b.id); if(sb)h+=`<div style="margin-top:6px;font-size:11px;color:var(--gold)">🎁 ${sb} Small Set${sb>1?'s':''} made here from 2oz + C5-S</div>`; }
   if(sold)h+=`<div style="margin-top:7px;font-size:12px;color:var(--muted)">Sold <b style="color:var(--gold)">${soldT}</b> units · full price <b style="color:var(--gold)">${fmt(rev)}</b> · collected <b style="color:var(--green)">${fmt(money)}</b></div>`;
   if(cc.state==='short')h+=`<div class="wb red" style="margin-top:6px;font-size:11px">⚠️ ${_esc(b.name)} is ${fmt(cc.amt)} short: ${fmt(cc.collected)} in the drawer vs ${fmt(cc.rev)} of product gone. OK if they gave discounts — otherwise ask.</div>`;
   else if(cc.state==='over')h+=`<div class="wb gold" style="margin-top:6px;font-size:11px">⚠️ ${_esc(b.name)} is ${fmt(cc.amt)} OVER what sold. Re-check this booth's counts.</div>`;
@@ -8863,6 +8868,7 @@ function rDay(sh,di){
     ${(haP&&!(haM&&haE))?`<div class="wb red" style="margin-top:6px">⚠️ Money logged but counts missing — this day's profit ignores product cost until you count.</div>`:''}
     ${(()=>{const st=(sh.repIds||[]).some(id=>{const r=(S.reps||[]).find(x=>x.id===id);return r&&r.active&&!r.isSelf;});return (isA&&st&&pmtT>0&&dayPay<=0)?`<div class="wb red" style="margin-top:6px">💵 Staffed day with money logged — rep day pay not entered yet.</div>`:'';})()}
     ${(sh.status==='active'||sh.status==='completed')?`<button class="btn ${d.locked?'btn-ghost':'btn-gold'} btn-full" style="margin:8px 0" onclick="openCloseout('${sh.id}',${di})">${d.locked?'🔒 Day Finalized — view closeout':'🏁 Day Closeout'}</button>`:''}
+    ${(()=>{ const b=daySetsBuilt(d); if(!b)return ''; const sold=(daySold(d).set||0); return `<div style="font-size:12px;color:var(--gold);margin:2px 0 6px">🎁 ${b} Small Set${b>1?'s':''} made here from 2oz + C5-S${sold?' · '+sold+' sold':''}${(d.setsMade==null&&!(d.boothCounts&&Object.keys(d.boothCounts).length))?' <span style="color:var(--muted)">(the ones left on the table; tap Evening Edit to enter how many you made)</span>':''}</div>`; })()}
     ${(soldChips||rev>0)?`<div style="margin-bottom:6px">
       ${soldChips?`<div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin:2px 0 3px">Sold today</div><div style="display:flex;flex-wrap:wrap;gap:5px">${soldChips}</div>`:''}
       ${rev>0?`<div style="margin-top:4px;font-size:12px;color:var(--muted)">Full-price value: <b style="color:var(--gold)">${fmt(rev)}</b> · collected <b style="color:var(--green)">${fmt(pmtT)}</b></div>`:''}
@@ -9047,6 +9053,8 @@ function showCntModal(shId,di,type,boothId){
     :(prevEve?`<div class="wb gold" style="margin-bottom:12px;font-size:12px">Opening should match <strong>${boothId?'this booth\'s':''} ending last night${gInT?' + what you brought from the garage':''}</strong>. Only change a number if you restocked or recounted — a mismatch gets flagged for reconciliation.</div>`:'')}
   ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.name}</div>${type==='evening'&&cur.morningCount?`<div class="cr-s">Started: ${cur.morningCount[s.key]||0}</div>`:(prevEve?`<div class="cr-s">Last night: ${prevEve[s.key]||0}${(gIn[s.key]||0)?' + 🏠 '+gIn[s.key]+' brought = '+((parseInt(prevEve[s.key])||0)+gIn[s.key]):''}</div>`:'')}${q10(d=>`cA('c_${s.key}',${d})`)}</div>
   <div class="cr-c"><button class="crb" onclick="cA('c_${s.key}',-1)">−</button><input class="cri" type="number" inputmode="numeric" id="c_${s.key}" value="${def[s.key]||0}" min="0"><button class="crb" onclick="cA('c_${s.key}',1)">+</button></div></div>`).join('')}
+  ${(type==='evening'&&SKUS.some(s=>s.key==='set'))?`<div class="cr" style="border-bottom:none"><div class="cr-i"><div class="cr-n">🎁 Small Sets made here today</div><div class="cr-s">Every set you put together at this table today, sold or not, from its 2oz + C5-S. Leave blank if you only made the ones still on the table.</div></div>
+  <div class="cr-c"><input class="cri" type="number" inputmode="numeric" id="c_setsMade" min="0" placeholder="—" value="${cur.setsMade!=null?cur.setsMade:''}"></div></div>`:''}
   <button class="btn btn-gold btn-full" style="margin-top:12px" onclick="saveCount('${shId}',${di},'${type}',${bArg})">Save ${type==='morning'?'Morning':'Evening'} Count${who}</button>`);
 }
 // v96: quick −10 / +10 under the product name on count, pack, truck and transfer screens
@@ -9066,6 +9074,7 @@ function saveCount(shId,di,type,boothId){
   if(type==='morning'){ tgt.morningCount=c; delete tgt.morningSeeded; }
   else{
     tgt.eveningCount=c; tgt.eveningAt=d.eveningAt=new Date().toISOString(); // v96: when tonight was counted (endShowReturns)
+    { const mEl=$$('c_setsMade'), mv=mEl?String(mEl.value==null?'':mEl.value).trim():''; if(mEl&&mEl.value!==undefined){ if(mv===''||!isFinite(parseInt(mv)))delete tgt.setsMade; else tgt.setsMade=Math.max(0,parseInt(mv)); } } // v98
     // Tomorrow opens where tonight ended — per booth when the show has booths.
     if(nextDay){ const ntgt=boothId?dayBoothWrite(nextDay,boothId):nextDay; if(!ntgt.morningCount||ntgt.morningSeeded){ ntgt.morningSeeded=true; /* v48: an opening the app filled in follows last night's count until someone counts it */ const ng=boothId?boothGarageIn(nextDay,boothId):dayGarageIn(nextDay); ntgt.morningCount={}; SKUS.forEach(s=>ntgt.morningCount[s.key]=(parseInt(c[s.key])||0)+(ng[s.key]||0)); } }
   }
@@ -9084,7 +9093,7 @@ function saveCount(shId,di,type,boothId){
   const over=truckShort(sh).filter(x=>x.di===di||x.di===di+1);
   if(over.length)warn=' 🛑 More than the show has: '+over.map(x=>x.short+' +'+x.over).join(', ')+'. Fix the count or bring it from the garage.';
   // v81: a night count above what the table opened with is almost always a typo; say so now, not at closeout
-  if(type==='evening'&&tgt.morningCount){ const _sb=setsBuiltOf(tgt.morningCount,tgt.restock,c,boothId?boothTransferIn(d,boothId):null,boothId?boothTransferOut(d,boothId):null); // v97: sets built at the show are not a typo
+  if(type==='evening'&&tgt.morningCount){ const _sb=setsBuiltOf(tgt.morningCount,tgt.restock,c,boothId?boothTransferIn(d,boothId):null,boothId?boothTransferOut(d,boothId):null,tgt.setsMade); // v97: sets built at the show are not a typo
     const hi=SKUS.filter(s=>(c[s.key]||0)>(parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0)+(s.key==='set'?_sb:0));
     if(hi.length)warn=' 🛑 Typo? '+hi.map(s=>s.short+' '+c[s.key]+' tonight, only '+((parseInt(tgt.morningCount[s.key])||0)+(parseInt((tgt.restock||{})[s.key])||0))+' this morning').join(', ')+'. Tap Evening Count to fix.'; }
   mClose();saveS();toast((boothId?boothName(sh,boothId)+': ':'')+(type==='morning'?'Morning count saved!':'Evening count saved!')+warn,warn?7000:2200);
@@ -11384,7 +11393,7 @@ function bxView(st){
 
   V.dayUnitsLeft=d=>{ const r={}; SKUS.forEach(s=>{
     const m=N((d.morningCount||{})[s.key]), rk=N((d.restock||{})[s.key]), e=N((d.eveningCount||{})[s.key]);
-    r[s.key]=Math.max(0,m+rk-e); }); const b=daySetsBuilt(d); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); } return r; };
+    r[s.key]=Math.max(0,m+rk-e); }); const b=daySetsBuilt(d); if(b){ r['2oz']=Math.max(0,r['2oz']-b); r.c5s=Math.max(0,r.c5s-b); r.set=Math.max(0,N((d.morningCount||{}).set)+N((d.restock||{}).set)+b-N((d.eveningCount||{}).set)); } return r; };
   V.dayLost=d=>{ const r={}; SKUS.forEach(s=>r[s.key]=N((d.lost||{})[s.key])); return r; };
   V.daySold=d=>{ const l=V.dayUnitsLeft(d),x=V.dayLost(d),r={};
     SKUS.forEach(s=>r[s.key]=Math.max(0,l[s.key]-x[s.key])); return r; };
