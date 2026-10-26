@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v96 full audit, Oct 25 2026](2026-10-25-v96-full-audit.md)** (25 fixes across stock, money, shows and sync: year rollover for Jan 1 2027 with a P&L year switch, Payout Sheet uses hand pay, late-start opening on today's day, no double-returned leftovers, sync protocol 3 blocks old cached apps, one cloud push at a time, calendar all-day events)
+**NEWEST: [v97 Small Sets built at the show, Oct 26 2026](2026-10-26-v97-sets-built-at-show.md)** (sets made at the table from 2oz + C5-S come out of both evenly: Chicago Women's Expo Oct 25 now sold 2oz 18 / C5-S 15, $584, no SET flag, no false $365 short)
+
+**Before that: [v96 full audit, Oct 25 2026](2026-10-25-v96-full-audit.md)** (25 fixes across stock, money, shows and sync: year rollover for Jan 1 2027 with a P&L year switch, Payout Sheet uses hand pay, late-start opening on today's day, no double-returned leftovers, sync protocol 3 blocks old cached apps, one cloud push at a time, calendar all-day events)
 
 **Before that: [v95 Small Sets, Oct 25 2026](2026-10-25-v95-small-sets.md)** (travel sets renamed Small Sets and made their own SET column, $20 default, $4.80 bottle COGS, $5.83 all in; 🎁 Build Small Sets on the Stock page; set add-ons and organza sizes on Supplies)
 
