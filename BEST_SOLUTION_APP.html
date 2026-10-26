@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v98';
+const APP_VERSION='v99';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2947,6 +2947,17 @@ function applyOneTimeUpdates(d){
   if(!d._applied['small_set_v95']){
     try{ smallSetSeedV95(d); d._applied['small_set_v95']=true; }
     catch(e){ console.error('small_set_v95',e); }
+  }
+
+  // v99 (Froggy, Oct 26): Batman's own note of where they stand. "I owe Frog"
+  // 32oz 13, 16oz 76, 8oz 28, C5-L 80; "Frog owes me" 2oz 96, C5-S 234. The
+  // extras Froggy gave back were wiped on Oct 22 by the stale cloud copy, and
+  // v88 could only restore 0s. Debt only, like Set Exact; the garage is not
+  // touched. Runs only on the v88 tally (0,0,0,96,274,0), so a tally changed
+  // since is never overwritten.
+  if(!d._applied['batman_note_oct26_v99']){
+    try{ if(bmNoteOct26(d))d._applied['batman_note_oct26_v99']=true; }
+    catch(e){ console.error('batman_note_oct26_v99',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -7368,6 +7379,21 @@ function bmFixOct19Return(d){
   L.push({id:'bmh_v88_oct19',ts:new Date().toISOString(),date:'2026-10-19',type:'set',items,owed,
     note:'Oct 19 return put back (v88): this copy was from before it. Garage not changed.',src:'app'});
   auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:'Batman owed put back to after the Oct 19 return (v88): 32oz 0, 16oz 0, 8oz 0, 2oz 96, C5-S 274, C5-L 0.'});
+  return true;
+}
+// v99: see the batman_note_oct26_v99 note in applyOneTimeUpdates.
+// true = done or not needed; false = wait (blank device before cloud sync).
+function bmNoteOct26(d){
+  const b=(d.batmanBorrow&&typeof d.batmanBorrow==='object')?d.batmanBorrow:null;
+  if(!b||!SKUS.some(s=>(parseInt(b[s.key])||0)!==0))return false;
+  const was={'32oz':0,'16oz':0,'8oz':0,'2oz':96,c5s:274,c5l:0};
+  if(!Object.keys(was).every(k=>(parseInt(b[k])||0)===was[k]))return true;
+  const to={'32oz':-13,'16oz':-76,'8oz':-28,'2oz':96,c5s:234,c5l:-80}, items={};
+  Object.keys(to).forEach(k=>{ const dv=to[k]-(parseInt(b[k])||0); if(dv)items[k]=dv; b[k]=to[k]; });
+  const owed={}; SKUS.forEach(s=>owed[s.key]=parseInt(b[s.key])||0);
+  bmLogOf(d).push({id:'bmh_v99_oct26',ts:new Date().toISOString(),date:'2026-10-26',type:'set',items,owed,
+    note:"From Batman's note: he owes you 32oz 13, 16oz 76, 8oz 28, C5-L 80; you owe him 2oz 96, C5-S 234 (v99). Garage not changed.",src:'app'});
+  auditState(d).log.push({ts:new Date().toISOString(),type:'batman',msg:"Batman set from his note (v99): he owes you 32oz 13, 16oz 76, 8oz 28, C5-L 80; you owe him 2oz 96, C5-S 234."});
   return true;
 }
 // v91: see the ftr_fall_pack_v91 note in applyOneTimeUpdates. true = done or

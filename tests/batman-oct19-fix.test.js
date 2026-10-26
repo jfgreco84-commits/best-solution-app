@@ -35,11 +35,23 @@ R.section('2. Left alone when it does not match the stale copy');
 R.section('3. Through applyOneTimeUpdates: once only');
 { const x=boot().ctx;
   const d=JSON.parse(JSON.stringify(x.S)); d.batmanBorrow=Object.assign({},STALE); d.settings=d.settings||{}; d.settings.batmanLog=[Object.assign({},OCT16)];
-  d._applied=Object.assign({},d._applied,{batman_history_seed_v75:true,batman_borrow_oct16_v76:true});
+  d._applied=Object.assign({},d._applied,{batman_history_seed_v75:true,batman_borrow_oct16_v76:true,batman_note_oct26_v99:true});
   x.applyOneTimeUpdates(d);
   chk('3a. marker set and debt fixed',[!!d._applied.batman_oct19_return_v88,d.batmanBorrow.c5s],[true,274]);
   d.batmanBorrow.c5s=1054; d.batmanBorrow.c5l=445;
   x.applyOneTimeUpdates(d);
   chk('3b. never runs twice',d.batmanBorrow.c5s,1054);
 }
+R.section('4. v99: Batman\'s Oct 26 note, only on the v88 tally');
+{ const x=boot().ctx;
+  const d={settings:{batmanLog:[]},batmanBorrow:{'32oz':0,'16oz':0,'8oz':0,'2oz':96,c5s:274,c5l:0,set:0},inventory:{'32oz':50},_applied:{}};
+  chk('4a. applied',x.bmNoteOct26(d),true);
+  chk('4b. tally from the note',[d.batmanBorrow['32oz'],d.batmanBorrow['16oz'],d.batmanBorrow['8oz'],d.batmanBorrow['2oz'],d.batmanBorrow.c5s,d.batmanBorrow.c5l],[-13,-76,-28,96,234,-80]);
+  chk('4c. garage untouched',d.inventory['32oz'],50);
+  chk('4d. one History entry',[d.settings.batmanLog.length,d.settings.batmanLog[0].type],[1,'set']);
+  const again=JSON.stringify(d.batmanBorrow); x.bmNoteOct26(d);
+  chk('4e. second run changes nothing',JSON.stringify(d.batmanBorrow),again);
+  chk('4f. screen shows the negatives',/gave back extra/.test((x.S=d,x.secBatman())),true); }
+{ const x=boot().ctx; const d={settings:{batmanLog:[]},batmanBorrow:{'2oz':50,c5s:274},_applied:{}};
+  chk('4g. a tally changed since is left alone',[x.bmNoteOct26(d),d.batmanBorrow['2oz']],[true,50]); }
 R.done();
