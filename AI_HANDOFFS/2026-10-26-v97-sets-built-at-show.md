@@ -49,3 +49,13 @@ Every reader follows from it:
 
 - The $31 over is most likely sets that were built and sold during the day: the app only sees the 22 left, so a set sold at $20 reads as a 2oz + C5-S ($18).
 - If he wants it exact, the next step is a "sets made today" number on the day. With it, sold sets = made − left, and the drawer would match.
+
+## v98: "Small Sets made here today" (same day, Froggy: "add the sets made today box")
+
+- **The box:** the night count has one more line, 🎁 Small Sets made here today (`c_setsMade`, saved as `setsMade` on the day or the booth). It holds every set put together at that table, sold or not.
+- **Blank:** the v97 rule, which counts only the extra sets still on the table.
+- **`setsBuiltOf(...,made)`:** uses `max(made, extra on the table)`, capped by what the 2oz and C5-S went down.
+- **Sold:** sets sold = had + made − left, valued at the set price. 2oz and C5-S sold leave out the ones that went into sets.
+- **Day and booth cards** show "🎁 N Small Sets made here from 2oz + C5-S · X sold".
+- **Oct 25 with 37 typed in:** 15 sets, 3 2oz and 0 C5-S sold, $614 vs $615 in the drawer. What goes home is still 111 / 86 / 22.
+- **Tests:** `tests/sets-built-at-show-v97.test.js` now has 29 checks.
