@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v97 + v98 Small Sets built at the show, Oct 26 2026](2026-10-26-v97-sets-built-at-show.md)** (v98: 🎁 Small Sets made here today box on the night count, sets sold = made − left at the set price; sets made at the table from 2oz + C5-S come out of both evenly: Chicago Women's Expo Oct 25 now sold 2oz 18 / C5-S 15, $584, no SET flag, no false $365 short)
+**NEWEST: [v99 Batman tally from his note, Oct 26 2026](2026-10-26-v99-batman-note.md)** (he owes 32oz 13, 16oz 76, 8oz 28, C5-L 80; Froggy owes 2oz 96, C5-S 234)
+
+**Previous: [v97 + v98 Small Sets built at the show, Oct 26 2026](2026-10-26-v97-sets-built-at-show.md)** (v98: 🎁 Small Sets made here today box on the night count, sets sold = made − left at the set price; sets made at the table from 2oz + C5-S come out of both evenly: Chicago Women's Expo Oct 25 now sold 2oz 18 / C5-S 15, $584, no SET flag, no false $365 short)
 
 **Before that: [v96 full audit, Oct 25 2026](2026-10-25-v96-full-audit.md)** (25 fixes across stock, money, shows and sync: year rollover for Jan 1 2027 with a P&L year switch, Payout Sheet uses hand pay, late-start opening on today's day, no double-returned leftovers, sync protocol 3 blocks old cached apps, one cloud push at a time, calendar all-day events)
 
