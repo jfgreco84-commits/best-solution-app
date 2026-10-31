@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v101 bead show flop, WWW paid in full, website sale, Oct 31 2026](2026-10-31-v101-oct31-updates.md)** (Whole Bead Show flagged DO NOT REBOOK; WWW final $418.90, $1,087.80 paid; website sale 1 x 16oz + 1 x C5-L $55, $10 postage)
+**NEWEST: [v102 two July website orders, Oct 31 2026](2026-10-31-v102-july-web-orders.md)** (7/7 1 x 8oz $25 Venmo; 7/20 8oz + 2oz $40 Cash App; postage blank, garage not moved)
+
+**Previous: [v101 bead show flop, WWW paid in full, website sale, Oct 31 2026](2026-10-31-v101-oct31-updates.md)** (Whole Bead Show flagged DO NOT REBOOK; WWW final $418.90, $1,087.80 paid; website sale 1 x 16oz + 1 x C5-L $55, $10 postage)
 
 **Previous: [v100 Royale Events 2027, four pending shows on one $800 Zelle, Oct 31 2026](2026-10-31-v100-royale-2027.md)** (Feb 19 + 20 Addison, Feb 26 + Mar 7 Naperville, overnight hours, $800 split 235.29 / 235.30 / 164.70 / 164.71 as an internal allocation, paid ahead, no Mar 8)
 
