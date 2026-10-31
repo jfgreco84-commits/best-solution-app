@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v101';
+const APP_VERSION='v102';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2990,6 +2990,17 @@ function applyOneTimeUpdates(d){
   if(!d._applied['oct31_updates_v101']){
     try{ oct31SaleV101(d); d._applied['oct31_updates_v101']=true; }
     catch(e){ console.error('oct31_updates_v101',e); }
+  }
+
+  // v102 (Froggy, Oct 31): two July website orders (bestsolutionpolish.com,
+  // Formspree emails) that never made the online list. 7/7: 1 x 8oz, $25,
+  // Venmo, to Oregon IL. 7/20: 1 x 8oz + 1 x 2oz, $40, Cash App, to
+  // Hudsonville MI. Both free shipping to the buyer; postage not known yet.
+  // The garage is NOT moved: the Sep 23 recount and Oct 22 hard count already
+  // reflect those bottles being gone. Buyer names stay out of this public file.
+  if(!d._applied['july_web_orders_v102']){
+    try{ julyWebOrdersV102(d); d._applied['july_web_orders_v102']=true; }
+    catch(e){ console.error('july_web_orders_v102',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -7773,6 +7784,27 @@ function oct31SaleV101(d){
     d.inventory['16oz']=(parseInt(d.inventory['16oz'])||0)-1; d.inventory.c5l=(parseInt(d.inventory.c5l)||0)-1;
     out.push('website sale added');
   }
+  return out;
+}
+// v102: see the july_web_orders_v102 note in applyOneTimeUpdates.
+const JULY_WEB_V102=[
+  {id:'ol_2026_07_07_web',date:'2026-07-07',items:[{sku:'8oz',qty:1}],amount:25,method:'Venmo',buyer:'Website order, Oregon IL'},
+  {id:'ol_2026_07_20_web',date:'2026-07-20',items:[{sku:'8oz',qty:1},{sku:'2oz',qty:1}],amount:40,method:'Cash App',buyer:'Website order, Hudsonville MI'}
+];
+function julyWebOrdersV102(d){
+  d.settings=d.settings||{}; if(!Array.isArray(d.settings.onlineSales))d.settings.onlineSales=[];
+  const L=d.settings.onlineSales, out=[];
+  const q=(x,k)=>(Array.isArray(x.items)?x.items:(x.sku?[{sku:x.sku,qty:x.qty||1}]:[])).filter(i=>i&&i.sku===k).reduce((t,i)=>t+(parseInt(i.qty)||0),0);
+  const days=(a,b)=>Math.abs((new Date(a+'T12:00:00'))-(new Date(b+'T12:00:00')))/864e5;
+  JULY_WEB_V102.forEach(o=>{
+    // Already there: same id, or the same amount and products within 10 days (typed in by hand).
+    const dup=L.some(x=>x&&(x.id===o.id||(Math.abs((parseFloat(x.amount)||0)-o.amount)<0.005&&/^\d{4}-\d{2}-\d{2}$/.test(x.date||'')&&days(x.date,o.date)<=10
+      &&o.items.every(i=>q(x,i.sku)===i.qty)&&['32oz','16oz','8oz','2oz','c5s','c5l','set'].every(k=>q(x,k)===((o.items.find(i=>i.sku===k)||{}).qty||0)))));
+    if(dup)return;
+    L.push({id:o.id,date:o.date,items:o.items.map(i=>({sku:i.sku,qty:i.qty})),amount:o.amount,postage:0,buyer:o.buyer,method:o.method,
+      note:'bestsolutionpolish.com order (Formspree email). $'+o.amount+', free shipping to the buyer. Postage you paid not entered yet: tap ✏️ to add it. Garage not changed (already counted out by the Sep/Oct recounts).'});
+    out.push(o.id);
+  });
   return out;
 }
 // v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.
