@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v99';
+const APP_VERSION='v101';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -986,7 +986,9 @@ const MRG_SEED_RECORDS={
   'chicago_womens_expo_v76':['chicago women s expo'],
   'social_market_v77':['harvest handmade market','a girls day out market','merry makers expo',
     'holly jolly christmas market','shop small sunday market','small business saturday market',
-    'winter wonderland market','bridal expo the ten hotel','galentine s day market']
+    'winter wonderland market','bridal expo the ten hotel','galentine s day market'],
+  'royale_2027_v100':['dawat e iftaar ramadan bazaar shalimar day 1','dawat e iftaar ramadan bazaar shalimar day 2',
+    'iftaar suhoor night ramadan bazaar naperville','laylat al fitr chaand raat ramadan bazaar naperville']
 };
 const MRG_SEED_MARKERS=Object.keys(MRG_SEED_RECORDS);
 
@@ -2958,6 +2960,36 @@ function applyOneTimeUpdates(d){
   if(!d._applied['batman_note_oct26_v99']){
     try{ if(bmNoteOct26(d))d._applied['batman_note_oct26_v99']=true; }
     catch(e){ console.error('batman_note_oct26_v99',e); }
+  }
+
+  // v100 (Oct 31): Royale Events & Productions 2027 Ramadan bazaar package.
+  // Four show dates (Feb 19, Feb 20, Feb 26, Mar 7 2027) on ONE booking paid
+  // with ONE $800 Zelle on Oct 31 2026. Booked as pending: applications in,
+  // payment sent, organizer confirmation not back yet. The $800 is split
+  // across the four shows only so each show's P&L carries its share; the
+  // four shares add to exactly $800 and nothing else is charged.
+  if(!d._applied['royale_2027_v100']){
+    try{ royale2027V100(d); d._applied['royale_2027_v100']=true; }
+    catch(e){ console.error('royale_2027_v100',e); }
+  }
+
+  // v101 (Froggy, Oct 31): three updates.
+  // 1) Whole Bead Show, DoubleTree (Oct 27): "a complete flop and waste of
+  //    time". Flagged at the top of the notes so Previous Years and the next
+  //    booking decision see it. Sales, status and money are not touched.
+  // 2) Wonderful World of Weddings: last payment made, $418.90 per the
+  //    invoice schedule, dated Oct 31. Added only while the ledger stands at
+  //    $250 + $418.90, so a payment he logged himself is never doubled.
+  // 3) Website sale: 1 x 16oz + 1 x C5 Large for $55, $10 shipping he paid,
+  //    already shipped from the garage. Skipped if the same sale is on the list.
+  //    The two show edits are stamped on the show itself (v101 field) and
+  //    checked every load, so a show restored from its seed gets them back;
+  //    an edit Froggy changes afterwards is never redone. The sale moves the
+  //    garage, so it runs once under the marker.
+  try{ oct31ShowsV101(d); }catch(e){ console.error('oct31_shows_v101',e); }
+  if(!d._applied['oct31_updates_v101']){
+    try{ oct31SaleV101(d); d._applied['oct31_updates_v101']=true; }
+    catch(e){ console.error('oct31_updates_v101',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -7642,6 +7674,105 @@ function socialMarketV77(d){
       out.push(x.name+' updated');
     }
   });
+  return out;
+}
+// v100: see the royale_2027_v100 note in applyOneTimeUpdates. Shares follow the
+// published group quotes (Shalimar 2 days $500, Embassy Suites 2 days $350) with
+// the $50 discount spread the same way, rounded to the penny so they add to $800.00.
+const ROYALE_V100_REF='PNCAA0e-ZN45n';
+const ROYALE_V100=[
+  {key:'ROYALE-2027-02-19-ADDISON',name:'Dawat-e-Iftaar Ramadan Bazaar, Shalimar Day 1',date:'2027-02-19',open:'14:00',close:'02:00',loc:'Addison, IL',miles:0,share:235.29,n:1,
+   note:'Fri Feb 19 2027, 2pm Fri to 2am Sat Feb 20 (Central). Shalimar Banquets, 280 W North Ave, Addison IL 60101. SETUP: organizer terms allow Thu Feb 18 evening and/or Fri Feb 19 afternoon, booth fully set up by 1pm Fri; final load-in details from Sam. No teardown during the show, cleanup by 3am after close. Ask if the booth can stay set up into Saturday. Organizer advertises free entry, free parking and complimentary iftaar for guests and vendors: verify. Registration: https://form.jotform.com/royaleventsprod/dawat-e-iftaar-season-2-zelleform Terms: https://royaleventsprod.com/dawat-e-iftaar-season-2 MILES NOT VERIFIED: check a live map from Waterford and enter one-way miles in Edit Show (New Berlin to Addison is about 93 mi city to city, published estimate).'},
+  {key:'ROYALE-2027-02-20-ADDISON',name:'Dawat-e-Iftaar Ramadan Bazaar, Shalimar Day 2',date:'2027-02-20',open:'14:00',close:'02:00',loc:'Addison, IL',miles:0,share:235.30,n:2,
+   note:'Sat Feb 20 2027, 2pm Sat to 2am Sun Feb 21 (Central). Same venue, organizer and booking as Day 1: Shalimar Banquets, 280 W North Ave, Addison IL 60101. NO SECOND $500: this date is inside the same $800. Ask Sam: same booth held overnight, can inventory stay securely, Saturday entry time, final teardown and exit. MILES NOT VERIFIED: check a live map and enter in Edit Show.'},
+  {key:'ROYALE-2027-02-26-NAPERVILLE',name:'Iftaar & Suhoor Night Ramadan Bazaar, Naperville',date:'2027-02-26',open:'16:00',close:'04:00',loc:'Naperville, IL',miles:75,share:164.70,n:3,
+   note:'Fri Feb 26 2027, 4pm Fri to 4am Sat Feb 27 (Central). Embassy Suites by Hilton Chicago Naperville, 1823 Abriter Court, Naperville IL 60563. Setup, unload and access NOT confirmed by organizer yet. Hotel lists free on-site self-parking: confirm vendor loading access. Registration: https://form.jotform.com/royaleventsprod/ramadan-bazaars-embassy-suites-2027 Hotel: https://www.hilton.com/en/hotels/chinaes-embassy-suites-chicago-naperville/ MILES: about 75 one-way Waterford to Naperville city to city (Rome2Rio, about 1 hr 52 min), not door to door. Check a live map before travel.'},
+  {key:'ROYALE-2027-03-07-NAPERVILLE',name:'Laylat al Fitr (Chaand Raat) Ramadan Bazaar, Naperville',date:'2027-03-07',open:'14:00',close:'02:00',loc:'Naperville, IL',miles:75,share:164.71,n:4,
+   note:'Sun Mar 7 2027, 2pm Sun to 2am Mon Mar 8 (Central). Same Embassy Suites as Feb 26: 1823 Abriter Court, Naperville IL 60563. The 2am Mar 8 finish is only the overnight close. The separate Mar 8 bazaar was NOT bought and is NOT on the board. Setup, booth and electricity details still open, same as Feb 26. MILES: about 75 one-way city to city, check a live map before travel.'}
+];
+const ROYALE_V100_COMMON='STATUS: APPLICATION SUBMITTED, PAYMENT SENT, ORGANIZER CONFIRMATION PENDING (Oct 31 2026). '
+  +'Royale Events 2027 package: Feb 19, Feb 20, Feb 26 and Mar 7 2027 (dates per organizer email). '
+  +'ONE $800 Zelle sent Oct 31 2026 to Royale Events & Productions Inc., ref '+ROYALE_V100_REF+', covers ALL FOUR dates. '
+  +'Published: Shalimar Feb 19+20 $500, Embassy Suites Feb 26+Mar 7 $350, $850 less $50 negotiated = $800. '
+  +'Not yet confirmed by Sam: payment received / paid in full, final booth acceptance. Two JotForm applications submitted, receipts INV-000076 and INV-000083 (which form is which is not known). '
+  +'Organizer: Sam Khan, CEO / Founder, Royale Events & Productions Inc., royaleventsprod@gmail.com, https://royaleventsprod.com/ . '
+  +'ASK SAM: booth # and size, a high-traffic spot for the live demo, electricity and fees, tables/chairs, lighting, signage limits, load-in and unloading route, vendor arrival time, overnight security, breakdown, permits, IL sales tax paperwork, COI, product restrictions, promo tips. '
+  +'Show runs past midnight: lodging or a rotating crew is NOT booked, ask Froggy before spending. Sales, gas, lodging, meals and tax start blank until real numbers exist.';
+function royale2027V100(d){
+  d.shows=d.shows||[]; const out=[];
+  const RE=/royale|iftaa?r|ramadan|bazaar|shalimar|embassy suites|chaand|suhoor|laylat/i;
+  const txt=s=>(s.name||'')+' '+(s.location||'')+' '+(s.notes||'');
+  const isOurs=p=>p&&/^bp_royale2027_/.test(p.id||'');
+  // The one $800 is already on the board some other way (typed in by hand, or a
+  // Zelle with this reference on any show): then no share is entered anywhere.
+  const paidOther=d.shows.some(s=>s&&(s.boothPayments||[]).some(p=>p&&!isOurs(p)&&(
+    String(p.note||'').indexOf(ROYALE_V100_REF)>=0||
+    (RE.test(txt(s))&&p.date==='2026-10-31'&&Math.abs((parseFloat(p.amount)||0)-800)<0.005))));
+  ROYALE_V100.forEach(x=>{
+    const pid='bp_royale2027_'+x.date.replace(/-/g,'');
+    const pay={id:pid,amount:x.share,date:'2026-10-31',method:'zelle',
+      note:'Share '+x.n+' of 4 of ONE $800 Zelle to Royale Events & Productions Inc., sent Oct 31 2026, ref '+ROYALE_V100_REF+'. Internal cost allocation, not the organizer\'s price for this date. Sent, waiting on Sam to acknowledge receipt.'};
+    const booking={id:'royale_2027_pkg',showKey:x.key,part:x.n+' of 4',organizer:'Royale Events & Productions Inc.',contact:'Sam Khan',
+      total:800,allocated:x.share,allocation:'internal',paidOn:'2026-10-31',method:'Zelle',ref:ROYALE_V100_REF,category:'Event / Vendor Booth Fees',
+      paymentStatus:'sent, awaiting organizer receipt',status:'application submitted, payment sent, organizer confirmation pending',
+      receipts:['INV-000076','INV-000083']};
+    const notes=x.name.toUpperCase()+' ('+x.key+', show '+x.n+' of 4). '+x.note+' '
+      +(paidOther?'The $800 Zelle is already entered elsewhere on the board, so no share is entered here. ':'Booth cost $'+x.share.toFixed(2)+' is this show\'s share of the $800, an internal allocation, NOT the organizer\'s price for this date. Do not pay or enter it again. ')
+      +ROYALE_V100_COMMON;
+    // Only a show on the SAME date that is clearly this event is adopted.
+    let sh=d.shows.find(s=>s&&s.startDate===x.date&&RE.test(txt(s)));
+    if(!sh){
+      sh=buildPlannedShow({name:x.name,location:x.loc,startDate:x.date,numDays:1,boothCost:paidOther?0:x.share,miles:x.miles,boothPayments:paidOther?[]:[pay]});
+      sh.confirmed=false;
+      if(sh.days[0]){ sh.days[0].openTime=x.open; sh.days[0].closeTime=x.close; }
+      sh.openTime=x.open; sh.closeTime=x.close; sh.hoursVerified=true; sh.hoursNeedConfirm=false; sh.datesNeedConfirm=false;
+      sh.booking=booking; sh.notes=notes;
+      mrgPushShow(d,sh,'royale_2027_v100'); out.push(x.name+' added');
+    } else {
+      if(!sh.location)sh.location=x.loc;
+      if(!(parseFloat(sh.miles)>0)&&x.miles)sh.miles=x.miles;
+      const bp=sh.boothPayments=sh.boothPayments||[];
+      if(!paidOther&&!bp.some(p=>p&&(p.id===pid||(parseFloat(p.amount)||0)>0.005))){
+        bp.push(pay); if(!(parseFloat(sh.boothCost)>0))sh.boothCost=x.share; }
+      (sh.days||[]).forEach((day,i)=>{ if(i===0&&!day.openTime&&!day.closeTime){ day.openTime=x.open; day.closeTime=x.close; } });
+      if(!sh.openTime&&!sh.closeTime){ sh.openTime=x.open; sh.closeTime=x.close; }
+      if(!sh.booking)sh.booking=booking;
+      if((sh.notes||'').indexOf(x.key)<0)sh.notes=(sh.notes?sh.notes+' ':'')+notes;
+      out.push(x.name+' updated');
+    }
+  });
+  return out;
+}
+// v101: see the oct31_updates_v101 note in applyOneTimeUpdates.
+function oct31ShowsV101(d){
+  d.shows=d.shows||[]; const out=[];
+  const wb=d.shows.find(s=>s&&/whole bead/i.test(s.name||'')&&s.startDate==='2026-10-27');
+  if(wb&&!wb.v101){
+    if(!/FLOP/.test(wb.notes||''))wb.notes='❌ FLOP, DO NOT REBOOK (Froggy, Oct 31 2026): complete flop and waste of time at the DoubleTree.'+(wb.notes?' '+wb.notes:'');
+    wb.notRebook=true; wb.v101='flop'; out.push('bead show flagged');
+  }
+  const www=d.shows.find(s=>s&&/wonderful world of weddings/i.test(s.name||'')&&s.startDate==='2027-01-30');
+  if(www&&!www.v101){ const bp=www.boothPayments=www.boothPayments||[];
+    const paid=Math.round(bp.reduce((t,x)=>t+(parseFloat(x.amount)||0),0)*100)/100;
+    if(!bp.some(x=>x&&x.id==='bp_www_2026_10_31')&&Math.abs(paid-668.90)<0.005){
+      bp.push({id:'bp_www_2026_10_31',amount:418.90,date:'2026-10-31',note:'Final payment (Froggy, Oct 31). Booth paid in full, $1,087.80.'});
+      if(www.depositDue)www.depositDue=''; out.push('www paid in full');
+    }
+    if(Math.abs(Math.round(bp.reduce((t,x)=>t+(parseFloat(x.amount)||0),0)*100)/100-1087.80)<0.005)www.v101='paid';
+  }
+  return out;
+}
+function oct31SaleV101(d){
+  d.settings=d.settings||{}; d.inventory=d.inventory||{}; const out=[];
+  if(!Array.isArray(d.settings.onlineSales))d.settings.onlineSales=[];
+  const L=d.settings.onlineSales;
+  const q=(x,k)=>(Array.isArray(x.items)?x.items:(x.sku?[{sku:x.sku,qty:x.qty||1}]:[])).filter(i=>i&&i.sku===k).reduce((t,i)=>t+(parseInt(i.qty)||0),0);
+  const dup=L.some(x=>x&&(x.id==='ol_2026_10_31_web'||(Math.abs((parseFloat(x.amount)||0)-55)<0.005&&q(x,'16oz')===1&&q(x,'c5l')===1&&String(x.date||'')>='2026-10-15')));
+  if(!dup){
+    L.push({id:'ol_2026_10_31_web',date:'2026-10-31',items:[{sku:'16oz',qty:1},{sku:'c5l',qty:1}],amount:55,postage:10,buyer:'Website order',method:'',note:'Sold on the website, already shipped. $55 in, $10 shipping.'});
+    d.inventory['16oz']=(parseInt(d.inventory['16oz'])||0)-1; d.inventory.c5l=(parseInt(d.inventory.c5l)||0)-1;
+    out.push('website sale added');
+  }
   return out;
 }
 // v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.

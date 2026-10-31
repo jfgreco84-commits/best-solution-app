@@ -1,6 +1,10 @@
 # LATEST
 
-**NEWEST: [v99 Batman tally from his note, Oct 26 2026](2026-10-26-v99-batman-note.md)** (he owes 32oz 13, 16oz 76, 8oz 28, C5-L 80; Froggy owes 2oz 96, C5-S 234)
+**NEWEST: [v101 bead show flop, WWW paid in full, website sale, Oct 31 2026](2026-10-31-v101-oct31-updates.md)** (Whole Bead Show flagged DO NOT REBOOK; WWW final $418.90, $1,087.80 paid; website sale 1 x 16oz + 1 x C5-L $55, $10 postage)
+
+**Previous: [v100 Royale Events 2027, four pending shows on one $800 Zelle, Oct 31 2026](2026-10-31-v100-royale-2027.md)** (Feb 19 + 20 Addison, Feb 26 + Mar 7 Naperville, overnight hours, $800 split 235.29 / 235.30 / 164.70 / 164.71 as an internal allocation, paid ahead, no Mar 8)
+
+**Previous: [v99 Batman tally from his note, Oct 26 2026](2026-10-26-v99-batman-note.md)** (he owes 32oz 13, 16oz 76, 8oz 28, C5-L 80; Froggy owes 2oz 96, C5-S 234)
 
 **Previous: [v97 + v98 Small Sets built at the show, Oct 26 2026](2026-10-26-v97-sets-built-at-show.md)** (v98: 🎁 Small Sets made here today box on the night count, sets sold = made − left at the set price; sets made at the table from 2oz + C5-S come out of both evenly: Chicago Women's Expo Oct 25 now sold 2oz 18 / C5-S 15, $584, no SET flag, no false $365 short)
 
