@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v100';
+const APP_VERSION='v101';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -2971,6 +2971,25 @@ function applyOneTimeUpdates(d){
   if(!d._applied['royale_2027_v100']){
     try{ royale2027V100(d); d._applied['royale_2027_v100']=true; }
     catch(e){ console.error('royale_2027_v100',e); }
+  }
+
+  // v101 (Froggy, Oct 31): three updates.
+  // 1) Whole Bead Show, DoubleTree (Oct 27): "a complete flop and waste of
+  //    time". Flagged at the top of the notes so Previous Years and the next
+  //    booking decision see it. Sales, status and money are not touched.
+  // 2) Wonderful World of Weddings: last payment made, $418.90 per the
+  //    invoice schedule, dated Oct 31. Added only while the ledger stands at
+  //    $250 + $418.90, so a payment he logged himself is never doubled.
+  // 3) Website sale: 1 x 16oz + 1 x C5 Large for $55, $10 shipping he paid,
+  //    already shipped from the garage. Skipped if the same sale is on the list.
+  //    The two show edits are stamped on the show itself (v101 field) and
+  //    checked every load, so a show restored from its seed gets them back;
+  //    an edit Froggy changes afterwards is never redone. The sale moves the
+  //    garage, so it runs once under the marker.
+  try{ oct31ShowsV101(d); }catch(e){ console.error('oct31_shows_v101',e); }
+  if(!d._applied['oct31_updates_v101']){
+    try{ oct31SaleV101(d); d._applied['oct31_updates_v101']=true; }
+    catch(e){ console.error('oct31_updates_v101',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -7722,6 +7741,38 @@ function royale2027V100(d){
       out.push(x.name+' updated');
     }
   });
+  return out;
+}
+// v101: see the oct31_updates_v101 note in applyOneTimeUpdates.
+function oct31ShowsV101(d){
+  d.shows=d.shows||[]; const out=[];
+  const wb=d.shows.find(s=>s&&/whole bead/i.test(s.name||'')&&s.startDate==='2026-10-27');
+  if(wb&&!wb.v101){
+    if(!/FLOP/.test(wb.notes||''))wb.notes='❌ FLOP, DO NOT REBOOK (Froggy, Oct 31 2026): complete flop and waste of time at the DoubleTree.'+(wb.notes?' '+wb.notes:'');
+    wb.notRebook=true; wb.v101='flop'; out.push('bead show flagged');
+  }
+  const www=d.shows.find(s=>s&&/wonderful world of weddings/i.test(s.name||'')&&s.startDate==='2027-01-30');
+  if(www&&!www.v101){ const bp=www.boothPayments=www.boothPayments||[];
+    const paid=Math.round(bp.reduce((t,x)=>t+(parseFloat(x.amount)||0),0)*100)/100;
+    if(!bp.some(x=>x&&x.id==='bp_www_2026_10_31')&&Math.abs(paid-668.90)<0.005){
+      bp.push({id:'bp_www_2026_10_31',amount:418.90,date:'2026-10-31',note:'Final payment (Froggy, Oct 31). Booth paid in full, $1,087.80.'});
+      if(www.depositDue)www.depositDue=''; out.push('www paid in full');
+    }
+    if(Math.abs(Math.round(bp.reduce((t,x)=>t+(parseFloat(x.amount)||0),0)*100)/100-1087.80)<0.005)www.v101='paid';
+  }
+  return out;
+}
+function oct31SaleV101(d){
+  d.settings=d.settings||{}; d.inventory=d.inventory||{}; const out=[];
+  if(!Array.isArray(d.settings.onlineSales))d.settings.onlineSales=[];
+  const L=d.settings.onlineSales;
+  const q=(x,k)=>(Array.isArray(x.items)?x.items:(x.sku?[{sku:x.sku,qty:x.qty||1}]:[])).filter(i=>i&&i.sku===k).reduce((t,i)=>t+(parseInt(i.qty)||0),0);
+  const dup=L.some(x=>x&&(x.id==='ol_2026_10_31_web'||(Math.abs((parseFloat(x.amount)||0)-55)<0.005&&q(x,'16oz')===1&&q(x,'c5l')===1&&String(x.date||'')>='2026-10-15')));
+  if(!dup){
+    L.push({id:'ol_2026_10_31_web',date:'2026-10-31',items:[{sku:'16oz',qty:1},{sku:'c5l',qty:1}],amount:55,postage:10,buyer:'Website order',method:'',note:'Sold on the website, already shipped. $55 in, $10 shipping.'});
+    d.inventory['16oz']=(parseInt(d.inventory['16oz'])||0)-1; d.inventory.c5l=(parseInt(d.inventory.c5l)||0)-1;
+    out.push('website sale added');
+  }
   return out;
 }
 // v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.

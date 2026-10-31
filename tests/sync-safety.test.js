@@ -305,7 +305,8 @@ const resolve=(w,a,b)=>w.run('typeof cloudResolve==="function"?cloudResolve('+JS
   { const w=boot();
     w.run('var __d=JSON.parse(JSON.stringify(S));var I2=()=>__d.productDebt.invoices.filter(i=>pdNum(i.number)===2)[0];var WW=()=>__d.shows.filter(s=>/wonderful world/i.test(s.name))[0];I2().payments=[{amount:2500,date:"2026-09-01"},{amount:500,date:"2026-09-28"}];WW().boothPayments=[{amount:250,date:"2026-08-18"}];');
     const paid2=()=>w.run('I2().payments.reduce((t,p)=>t+pdNum(p.amount),0)');
-    const wwwPaid=()=>Math.round(w.run('WW().boothPayments.reduce((t,p)=>t+(+p.amount),0)')*100)/100;
+    // v101 adds the final $418.90 (bp_www_2026_10_31) on the same pass; this section is about v69 only.
+    const wwwPaid=()=>Math.round(w.run('WW().boothPayments.filter(p=>p.id!=="bp_www_2026_10_31").reduce((t,p)=>t+(+p.amount),0)')*100)/100;
     w.run('delete __d._applied.www_pay2_mm_2000_v69;applyOneTimeUpdates(__d)');
     R.check('first run: invoice 2 paid = 5000',paid2(),5000);
     R.check('first run: invoice 2 balance = 985',w.run('I2().total')-paid2(),985);

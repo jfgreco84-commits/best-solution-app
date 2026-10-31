@@ -37,6 +37,7 @@ node tests/bulletproof-v85.test.js
 node tests/full-audit-v96.test.js
 node tests/sets-built-at-show-v97.test.js
 node tests/royale-2027-v100.test.js
+node tests/oct31-updates-v101.test.js
 bash tests/server-guard.test.sh   # needs a local Postgres 14+ (initdb/pg_ctl/psql)
 ```
 

@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v100 Royale Events 2027, four pending shows on one $800 Zelle, Oct 31 2026](2026-10-31-v100-royale-2027.md)** (Feb 19 + 20 Addison, Feb 26 + Mar 7 Naperville, overnight hours, $800 split 235.29 / 235.30 / 164.70 / 164.71 as an internal allocation, paid ahead, no Mar 8)
+**NEWEST: [v101 bead show flop, WWW paid in full, website sale, Oct 31 2026](2026-10-31-v101-oct31-updates.md)** (Whole Bead Show flagged DO NOT REBOOK; WWW final $418.90, $1,087.80 paid; website sale 1 x 16oz + 1 x C5-L $55, $10 postage)
+
+**Previous: [v100 Royale Events 2027, four pending shows on one $800 Zelle, Oct 31 2026](2026-10-31-v100-royale-2027.md)** (Feb 19 + 20 Addison, Feb 26 + Mar 7 Naperville, overnight hours, $800 split 235.29 / 235.30 / 164.70 / 164.71 as an internal allocation, paid ahead, no Mar 8)
 
 **Previous: [v99 Batman tally from his note, Oct 26 2026](2026-10-26-v99-batman-note.md)** (he owes 32oz 13, 16oz 76, 8oz 28, C5-L 80; Froggy owes 2oz 96, C5-S 234)
 
