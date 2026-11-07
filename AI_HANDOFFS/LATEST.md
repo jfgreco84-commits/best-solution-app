@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v102 two July website orders, Oct 31 2026](2026-10-31-v102-july-web-orders.md)** (7/7 1 x 8oz $25 Venmo; 7/20 8oz + 2oz $40 Cash App; postage blank, garage not moved)
+**NEWEST: [v103 ✏️ Fix Packed, Nov 7 2026](2026-11-07-v103-fix-packed.md)** (fix what was packed for any size on a running show, garage follows; Rustic Fox Nov 7 SET 22 → 32, garage SET −10)
+
+**Previous: [v102 two July website orders, Oct 31 2026](2026-10-31-v102-july-web-orders.md)** (7/7 1 x 8oz $25 Venmo; 7/20 8oz + 2oz $40 Cash App; postage blank, garage not moved)
 
 **Previous: [v101 bead show flop, WWW paid in full, website sale, Oct 31 2026](2026-10-31-v101-oct31-updates.md)** (Whole Bead Show flagged DO NOT REBOOK; WWW final $418.90, $1,087.80 paid; website sale 1 x 16oz + 1 x C5-L $55, $10 postage)
 

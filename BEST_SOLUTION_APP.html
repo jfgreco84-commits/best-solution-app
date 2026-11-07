@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v102';
+const APP_VERSION='v103';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -3001,6 +3001,17 @@ function applyOneTimeUpdates(d){
   if(!d._applied['july_web_orders_v102']){
     try{ julyWebOrdersV102(d); d._applied['july_web_orders_v102']=true; }
     catch(e){ console.error('july_web_orders_v102',e); }
+  }
+
+  // v103 (Froggy, Nov 7): The Rustic Fox, North Aurora, Nov 7. He brought 32
+  // Small Sets, the pack said 22. Packed goes to 32 and the 10 extra sets come
+  // off the garage (capped at what it shows). The opening count follows only if
+  // it still reads the old 22 and the extra 10 are not already in restock. Waits until the
+  // show is on the device and only runs while packed still says 22, so a fix
+  // he made by hand with ✏️ Fix Packed is left alone.
+  if(!d._applied['rustic_fox_sets_v103']){
+    try{ if(rusticFoxSetsV103(d).done)d._applied['rustic_fox_sets_v103']=true; }
+    catch(e){ console.error('rustic_fox_sets_v103',e); }
   }
 
   // Supplier debt is a list of invoices. This is shape driven and idempotent,
@@ -7036,7 +7047,7 @@ function showStockCardHTML(sh){
   const anyB=T(brought)>0;
   const cell=(v,c)=>`<td style="text-align:right;padding:3px 4px;${c||''}">${v}</td>`;
   return `<div class="card" style="margin-bottom:12px">
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">📦 Show stock — where every unit came from</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700">📦 Show stock — where every unit came from</div>${sh.status==='active'?`<button class="btn btn-gold btn-xs" style="flex-shrink:0" onclick="openFixPacked('${sh.id}')">✏️ Fix Packed</button>`:''}</div>
     <table style="width:100%;border-collapse:collapse;font-size:11px">
       <tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:3px 4px">Size</th><th style="text-align:right;padding:3px 4px">Packed</th><th style="text-align:right;padding:3px 4px;color:var(--gold)">🏠 Brought</th><th style="text-align:right;padding:3px 4px">Total</th><th style="text-align:right;padding:3px 4px">Sold</th>${T(lost)?'<th style="text-align:right;padding:3px 4px;color:var(--red)">Lost</th>':''}<th style="text-align:right;padding:3px 4px">${sh.status==='active'?'On hand':'Returned'}</th></tr>
       ${SKUS.map(s=>`<tr style="border-top:1px solid var(--border)"><td style="padding:3px 4px">${s.short}</td>${cell(start[s.key]||0)}${cell((brought[s.key]||0)?'+'+brought[s.key]:'—','color:var(--gold);font-weight:800')}${cell((start[s.key]||0)+(brought[s.key]||0),'font-weight:800')}${cell(sold[s.key]||0)}${T(lost)?cell(lost[s.key]||0,'color:var(--red)'):''}${cell(held[s.key]||0,'font-weight:800;color:var(--gold)')}</tr>`).join('')}
@@ -7044,6 +7055,79 @@ function showStockCardHTML(sh){
     </table>
     ${anyB?`<div style="font-size:10px;color:var(--muted);margin-top:6px">${transferBatches(x=>x.fromShowId===GARAGE_ID&&x.toShowId===sh.id).map(b=>'🏠 '+(b.dayDate||'')+(b.boothName?' · '+_esc(b.boothName):'')+': '+transferBatchLabel(b)).join('<br>')}</div>`:''}
   </div>`;
+}
+// v103: fix what was packed (Froggy, Nov 7: "I brought 32 sets, not 22 ... make it
+// editable for me"). Type the real packed number for any size. Per size:
+//   packed moves by the difference (garage deliveries stay as they are);
+//   the garage gives up the extra / takes back the shortfall (fromGarage);
+//   the opening count moves too, but only where it still equals the old packed
+//   number. A count already typed by hand is never overwritten, and extra stock
+//   already entered as restock on the opening day stays restock, so sold and
+//   on hand never change on their own.
+// Works on any state object (st) so the one-time update can use it too.
+function packedOpeningDay(sh){ const days=sh.days||[]; for(let i=0;i<days.length;i++){ if(days[i]&&days[i].morningCount)return i; } return -1; }
+function fixPackedCounts(sh,want,fromGarage,st,why){
+  st=st||S; const n=v=>parseInt(v)||0;
+  if(!sh)return {ok:false,reason:'Show not found'};
+  if(sh.status!=='active'||!sh.packedInventory)return {ok:false,reason:'Only a show that is running can have its packed count fixed.'};
+  const start=showPackedAtStart(sh), di=truckMode(sh)?-1:packedOpeningDay(sh), d=di>=0?sh.days[di]:null;
+  const ch={};
+  SKUS.forEach(s=>{ if(want[s.key]==null||want[s.key]==='')return; const v=n(want[s.key]); if(v<0)return; if(v!==start[s.key])ch[s.key]={before:start[s.key],after:v,diff:v-start[s.key]}; });
+  if(!Object.keys(ch).length)return {ok:false,reason:'Nothing changed.'};
+  if(d&&d.locked)return {ok:false,reason:(d.date||'The first day')+' is finalized. Unlock it first.'};
+  st.inventory=st.inventory||{};
+  const gIn=d?dayGarageIn(d):{}, notes=[], garage={};
+  SKUS.forEach(s=>{ const c=ch[s.key]; if(!c)return;
+    sh.packedInventory[s.key]=Math.max(0,n(sh.packedInventory[s.key])+c.diff);
+    if(fromGarage){ const have=n(st.inventory[s.key]);
+      const mv=c.diff>0?Math.min(c.diff,have):c.diff; // never below 0: the garage gives what it has
+      st.inventory[s.key]=have-mv; if(mv){ c.garage=-mv; garage[s.key]=-mv; }
+      if(c.diff>0&&mv<c.diff)notes.push('the garage only had '+have+' '+s.short); }
+    if(d&&d.morningCount){ const m=n(d.morningCount[s.key]), rk=n((d.restock||{})[s.key]), old=c.before+(gIn[s.key]||0);
+      if(m===old&&!(c.diff>0&&rk>=c.diff)){ d.morningCount[s.key]=Math.max(0,m+c.diff); c.opening=d.morningCount[s.key]; }
+      else c.openingKept=m; } // already typed by hand, or the extra came onto the table as restock
+  });
+  const ts=new Date().toISOString();
+  const txt=SKUS.filter(s=>ch[s.key]).map(s=>s.short+' '+ch[s.key].before+'→'+ch[s.key].after).join(', ');
+  const gTxt=Object.keys(garage).length?' · garage '+SKUS.filter(s=>garage[s.key]).map(s=>s.short+' '+(garage[s.key]>0?'+':'')+garage[s.key]).join(', '):' · garage not touched';
+  if(!Array.isArray(sh.packFixes))sh.packFixes=[];
+  sh.packFixes.push({ts,di,date:d?d.date:'',changes:ch,fromGarage:!!fromGarage,by:why||'owner'});
+  invLogPush(sh,{ts,di:di>=0?di:0,date:d?d.date:'',type:'✏️ packed count fixed',changes:[txt+gTxt],by:why||'owner'});
+  auditState(st).log.push({ts,showId:sh.id,show:sh.name,type:'packFix',msg:'Packed count fixed'+(why?' ('+why+')':'')+': '+txt+gTxt});
+  if(Object.keys(garage).length){
+    if(!why)_garageWhy='Fixed what was packed for '+sh.name+': '+txt; // by hand: the save logs it
+    // one-time update: log it here, and tell garageCheck it is already logged
+    else{ const after={}; SKUS.forEach(s=>after[s.key]=n(st.inventory[s.key])); garageLogOf(st).push({ts,why:'Fixed what was packed for '+sh.name+': '+txt+(why?' ('+why+')':''),changes:garage,after}); _garageLoggedAt=JSON.stringify(after); }
+  }
+  return {ok:true,changes:ch,txt,gTxt,notes};
+}
+function openFixPacked(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  if(sh.status!=='active'||!sh.packedInventory){ toast('Only a running show can have its packed count fixed.'); return; }
+  const start=showPackedAtStart(sh);
+  mOpen(`<div class="mh"><div class="mt">✏️ Fix What You Packed</div><button class="mx" onclick="mClose()">×</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Typed the wrong number when you packed <strong>${_esc(sh.name)}</strong>? Put in what you really brought. Stock brought from the garage later stays as it is.</div>
+    ${SKUS.map(s=>`<div class="cr"><div class="cr-i"><div class="cr-n">${s.emoji} ${s.name}</div><div class="cr-s">app says ${start[s.key]||0}</div></div><div class="cr-c"><input class="cri" type="number" inputmode="numeric" id="fpk_${s.key}" value="${start[s.key]||0}" min="0" onfocus="this.select()"></div></div>`).join('')}
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;margin:12px 0 4px;cursor:pointer"><input type="checkbox" id="fpk_garage" checked style="margin-top:2px" onchange="fixPackedLive('${shId}')"><span>The difference came out of (or goes back to) the <strong>garage</strong></span></label>
+    <div id="fpkLive" style="font-size:12px;color:var(--muted);margin:10px 0;min-height:16px"></div>
+    <button class="btn btn-gold btn-full" onclick="applyFixPackedCounts('${shId}')">Save</button>`);
+  SKUS.forEach(s=>{ const el=$$('fpk_'+s.key); if(el)el.addEventListener('input',()=>fixPackedLive(shId)); });
+  fixPackedLive(shId);
+}
+function fixPackedWant(){ const w={}; SKUS.forEach(s=>{ const el=$$('fpk_'+s.key); if(el&&el.value!=='')w[s.key]=Math.max(0,parseInt(el.value)||0); }); return w; }
+function fixPackedLive(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId), el=$$('fpkLive'); if(!sh||!el)return;
+  const start=showPackedAtStart(sh), w=fixPackedWant(), g=!!(($$('fpk_garage')||{}).checked);
+  const rows=SKUS.filter(s=>w[s.key]!=null&&w[s.key]!==start[s.key]).map(s=>{ const dv=w[s.key]-start[s.key];
+    return `<div>${s.short}: ${start[s.key]} → <strong style="color:var(--gold)">${w[s.key]}</strong> (${dv>0?'+':''}${dv})${g?` · garage ${dv>0?'−':'+'}${Math.abs(dv)}`:''}</div>`; });
+  el.innerHTML=rows.length?rows.join(''):'No changes yet.';
+}
+function applyFixPackedCounts(shId){
+  const sh=(S.shows||[]).find(s=>s.id===shId); if(!sh)return;
+  const r=fixPackedCounts(sh,fixPackedWant(),!!(($$('fpk_garage')||{}).checked));
+  if(!r.ok){ toast('⚠️ '+r.reason); return; }
+  mClose(); saveS(); renderCur();
+  toast('✏️ Packed fixed: '+r.txt+r.gTxt+(r.notes.length?' ('+r.notes.join(', ')+')':''),5000);
 }
 // The day screen's delivery card: what came from the garage for this day,
 // one line per tap, with an undo, plus the button to bring more.
@@ -7806,6 +7890,14 @@ function julyWebOrdersV102(d){
     out.push(o.id);
   });
   return out;
+}
+// v103: see the rustic_fox_sets_v103 note in applyOneTimeUpdates.
+function rusticFoxSetsV103(d){
+  const sh=(d.shows||[]).find(x=>x&&x.startDate==='2026-11-07'&&x.packedInventory&&/fox|north aurora|towne center/i.test([x.name,x.location,x.venue,x.address].filter(Boolean).join(' ')));
+  if(!sh)return {done:false,reason:'show not on this device yet'};
+  if(sh.status!=='active')return {done:true,skipped:true,reason:'show not running'};
+  if(showPackedAtStart(sh).set!==22)return {done:true,skipped:true,reason:'packed SET is not 22 any more'};
+  return {done:true,result:fixPackedCounts(sh,{set:32},true,d,'v103, Froggy: brought 32 sets, not 22')};
 }
 // v76: see the fox_found_oct_pack_v76 note in applyOneTimeUpdates.
 function foxFoundOctPack(d){
