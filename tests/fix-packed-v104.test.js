@@ -25,7 +25,7 @@ function world(o){
 R.section('1. One-time update: the opening already says 32 (18 sold, 14 left)');
 { const {ctx,sh,d,S}=world({morn:{...PACK,set:32}});
   chk('1a. before: packed 22, sold 18',[ctx.showPackedAtStart(sh).set,ctx.showUnitsSold(sh).set],[22,18]);
-  delete S._applied.rustic_fox_sets_v103; ctx.applyOneTimeUpdates(S);
+  delete S._applied.rustic_fox_sets_v104; ctx.applyOneTimeUpdates(S);
   chk('1b. packed SET 32',ctx.showPackedAtStart(sh).set,32);
   chk('1c. sold 18, on hand 14 unchanged',[ctx.showUnitsSold(sh).set,ctx.showOnHand(sh).set],[18,14]);
   chk('1d. opening stays 32',d.morningCount.set,32);
@@ -33,22 +33,22 @@ R.section('1. One-time update: the opening already says 32 (18 sold, 14 left)');
   chk('1f. other sizes untouched',SK.filter(k=>k!=='set').map(k=>sh.packedInventory[k]),SK.filter(k=>k!=='set').map(k=>PACK[k]));
   const L=S.settings.garageLog; chk('1g. garage history says why',L.some(e=>/Fixed what was packed/.test(e.why)),true);
   chk('1h. show log has it',sh.invLog.some(e=>/packed count fixed/.test(e.type)),true);
-  chk('1i. marker set',S._applied.rustic_fox_sets_v103,true);
+  chk('1i. marker set',S._applied.rustic_fox_sets_v104,true);
   S.inventory.set=30; ctx.applyOneTimeUpdates(S);
   chk('1j. running again changes nothing',[ctx.showPackedAtStart(sh).set,S.inventory.set],[32,30]); }
 
 R.section('2. One-time update: the extra 10 were typed as restock');
 { const {ctx,sh,d,S}=world({restock:{set:10}});
-  delete S._applied.rustic_fox_sets_v103; ctx.applyOneTimeUpdates(S);
+  delete S._applied.rustic_fox_sets_v104; ctx.applyOneTimeUpdates(S);
   chk('2a. packed 32, opening and restock left as counted',[ctx.showPackedAtStart(sh).set,d.morningCount.set,d.restock.set],[32,22,10]);
   chk('2b. sold still 18, on hand 14',[ctx.showUnitsSold(sh).set,ctx.showOnHand(sh).set],[18,14]); }
 
 R.section('3. One-time update waits and never redoes a hand fix');
 { const {ctx,S}=world(); S.shows=[];
-  delete S._applied.rustic_fox_sets_v103; ctx.applyOneTimeUpdates(S);
-  chk('3a. show not on the device yet: waits',!!S._applied.rustic_fox_sets_v103,false); }
+  delete S._applied.rustic_fox_sets_v104; ctx.applyOneTimeUpdates(S);
+  chk('3a. show not on the device yet: waits',!!S._applied.rustic_fox_sets_v104,false); }
 { const {ctx,sh,S}=world({morn:{...PACK,set:32}}); sh.packedInventory.set=30;
-  delete S._applied.rustic_fox_sets_v103; ctx.applyOneTimeUpdates(S);
+  delete S._applied.rustic_fox_sets_v104; ctx.applyOneTimeUpdates(S);
   chk('3b. packed no longer 22: left alone',[sh.packedInventory.set,S.inventory.set],[30,40]); }
 
 R.section('4. ✏️ Fix Packed, typed by hand');
@@ -67,7 +67,7 @@ R.section('4. ✏️ Fix Packed, typed by hand');
   ctx.fixPackedCounts(sh,{set:32},false);
   chk('4g. garage box unchecked: garage not touched',S.inventory.set,40); }
 { const {ctx,sh,d}=world(); d.locked=true;
-  chk('4h. finalized day is refused',ctx.fixPackedCounts(sh,{set:32},true).ok,false); }
+  chk('4h. finalized day is refused when the opening would move',ctx.fixPackedCounts(sh,{set:32},true).ok,false); }
 { const {ctx,sh,d,els,S}=world();
   ctx.openFixPacked('rf'); const h=els.mb?els.mb.innerHTML:'';
   chk('4i. modal shows what the app says',/app says 22/.test(h),true);
@@ -76,5 +76,20 @@ R.section('4. ✏️ Fix Packed, typed by hand');
   ctx.applyFixPackedCounts('rf');
   chk('4j. Save button applies it',[sh.packedInventory.set,d.morningCount.set,S.inventory.set],[32,32,30]);
   chk('4k. stock card has the button',/Fix Packed/.test(ctx.showStockCardHTML(sh)),true); }
+
+R.section('5. v104: the show was already CLOSED when the fix loaded (Froggy, Nov 8 screenshot)');
+{ const {ctx,sh,d,S}=world({morn:{...PACK,set:32}});
+  sh.status='completed'; d.locked=true; sh.returned={...EVE}; sh.returnedAt='2026-11-07T23:00:00Z';
+  S._applied.rustic_fox_sets_v103=true; // v103 already ran and skipped it
+  delete S._applied.rustic_fox_sets_v104; ctx.applyOneTimeUpdates(S);
+  chk('5a. packed SET 32 on the closed show',ctx.showPackedAtStart(sh).set,32);
+  chk('5b. sold 18, returned 14 unchanged',[ctx.showUnitsSold(sh).set,ctx.endShowReturns(sh).set],[18,14]);
+  chk('5c. garage SET −10',S.inventory.set,30);
+  chk('5d. marker set',S._applied.rustic_fox_sets_v104,true);
+  ctx.saveS();
+  chk('5e. saving does not move the garage again',S.inventory.set,30);
+  chk('5f. stock card on a closed show has the button',/Fix Packed/.test(ctx.showStockCardHTML(sh)),true); }
+{ const {ctx,sh,d}=world(); sh.status='completed'; d.locked=true;
+  chk('5g. closed + finalized, opening would move: refused',ctx.fixPackedCounts(sh,{set:32},true).ok,false); }
 
 R.done();

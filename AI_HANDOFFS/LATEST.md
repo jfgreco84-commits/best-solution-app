@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v103 ✏️ Fix Packed, Nov 7 2026](2026-11-07-v103-fix-packed.md)** (fix what was packed for any size on a running show, garage follows; Rustic Fox Nov 7 SET 22 → 32, garage SET −10)
+**NEWEST: [v104 Fix Packed on a closed show, Nov 8 2026](2026-11-08-v104-fix-packed-closed-show.md)** (v103 skipped the Rustic Fox because it was already closed; button and one-time fix now work on closed shows, SET 22 → 32)
+
+**Previous: [v103 ✏️ Fix Packed, Nov 7 2026](2026-11-07-v103-fix-packed.md)** (fix what was packed for any size on a running show, garage follows; Rustic Fox Nov 7 SET 22 → 32, garage SET −10)
 
 **Previous: [v102 two July website orders, Oct 31 2026](2026-10-31-v102-july-web-orders.md)** (7/7 1 x 8oz $25 Venmo; 7/20 8oz + 2oz $40 Cash App; postage blank, garage not moved)
 
