@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v104';
+const APP_VERSION='v105';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -1834,6 +1834,12 @@ function applyOneTimeUpdates(d){
   // Fling (Aug 30) and Mistletoe & Martinis (Nov 27) are already on the board
   // from the Aug 26 show update and are not touched here. A show already on the
   // board under the same date and a matching name is filled in place (blanks only).
+  // v105 (Froggy, Nov 11): the Bridal Expo at The Ten Hotel moved from Sun
+  // Jan 17 2027 to Sun Jan 24 2027. Shape driven and runs before the v77 seed,
+  // which now carries Jan 24, so a re-run seed finds the moved show instead of
+  // adding a second one. Stamped on the show, so a date Froggy sets by hand
+  // afterwards is never moved again.
+  try{ bridalExpoDateV105(d); }catch(e){ console.error('bridal_expo_date_v105',e); }
   if(!d._applied['social_market_v77']){
     try{ socialMarketV77(d); d._applied['social_market_v77']=true; }
     catch(e){ console.error('social_market_v77',e); }
@@ -7741,11 +7747,26 @@ const SMC_V77=[
     note:'140 Cass St, Woodstock IL 60098 (Woodstock Square). Hours 11am-3pm. 8x8 indoor.'},
   {name:'Winter Wonderland Market',re:/winter wonderland/i,date:'2026-12-06',open:'12:00',close:'16:00',loc:'Valley Ridge Golf Course, Antioch, IL',miles:30,fee:65,paid:68,inv:'001936',paidOn:'2026-08-21',
     note:'40150 N IL-59, Antioch IL 60002. Setup 10am-12pm. Indoor, one 6 ft table included.'},
-  {name:'Bridal Expo — The Ten Hotel',re:/bridal expo/i,date:'2027-01-17',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:175,paid:178,inv:'001930',paidOn:'2026-08-21',
-    note:'2nd Annual. Grand Ballroom, 6161 W Grand Ave, Gurnee IL. Premium pre-function space. A $25 Vendor Spotlight was offered as a separate invoice; none was found.'},
+  {name:'Bridal Expo — The Ten Hotel',re:/bridal expo/i,date:'2027-01-24',open:'12:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:175,paid:178,inv:'001930',paidOn:'2026-08-21',
+    note:'Moved from Sun Jan 17 to Sun Jan 24 2027 (v105). 2nd Annual. Grand Ballroom, 6161 W Grand Ave, Gurnee IL. Premium pre-function space. A $25 Vendor Spotlight was offered as a separate invoice; none was found.'},
   {name:"Galentine's Day Market",re:/galentine/i,date:'2027-02-07',open:'10:00',close:'16:00',loc:'The Ten Hotel, Gurnee, IL',miles:42,fee:115,paid:118,inv:'001941',paidOn:'2026-08-24',
     note:'2nd Annual. 6161 W Grand Ave, Gurnee IL. Hours 10am-4pm, setup from 8am. Ballroom corner 8x8 + 2 chairs, bring your own table (hotel rents one for $25). Late fee was waived.'}
 ];
+// v105: see the bridal_expo_date_v105 note in applyOneTimeUpdates.
+function bridalExpoDateV105(d){
+  const OLD='2027-01-17', NEW='2027-01-24', out=[];
+  const isIt=s=>s&&/bridal expo/i.test(s.name||'')&&/ten hotel|gurnee/i.test((s.name||'')+' '+(s.location||''));
+  const shows=(d.shows||[]).filter(isIt);
+  shows.filter(s=>s.startDate===NEW&&!s.v105).forEach(s=>{ s.v105='moved'; });
+  if(shows.some(s=>s.startDate===NEW))return out; // already on the new date, never add or move a second one
+  shows.filter(s=>s.startDate===OLD&&!s.v105&&s.status!=='completed').forEach(s=>{
+    invLogPush(s,{ts:new Date().toISOString(),type:'date moved',changes:[OLD+' → '+NEW],by:'v105 (Froggy: organizer moved the show)'});
+    s.startDate=NEW; resizeShowDays(s,s.numDays||(s.days||[]).length||1);
+    if(!/Jan 24/.test(s.notes||''))s.notes=(s.notes?s.notes+' ':'')+'DATE MOVED (Froggy, Nov 11 2026): now Sun Jan 24 2027, was Sun Jan 17.';
+    s.v105='moved'; out.push(s.name+' → '+NEW);
+  });
+  return out;
+}
 function socialMarketV77(d){
   d.shows=d.shows||[]; const out=[];
   SMC_V77.forEach(x=>{

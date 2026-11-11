@@ -107,7 +107,7 @@ R.section('8. The Social Market Co. shows');
 { const d=full(); const g=re=>d.shows.filter(s=>re.test(s.name));
   const want=[['Harvest & Handmade Market','2026-09-12',78],['A Girls Day Out Market','2026-09-13',68],['Merry Makers Expo','2026-11-08',103],
     ['Holly Jolly Christmas Market','2026-11-14',78],['Shop Small Sunday Market','2026-11-22',68],['Small Business Saturday Market','2026-11-28',78],
-    ['Winter Wonderland Market','2026-12-06',68],['Bridal Expo — The Ten Hotel','2027-01-17',178],["Galentine's Day Market",'2027-02-07',118]];
+    ['Winter Wonderland Market','2026-12-06',68],['Bridal Expo — The Ten Hotel','2027-01-24',178],["Galentine's Day Market",'2027-02-07',118]];
   chk('8a. all nine on the board, booth = what was paid, nothing owed',want.map(w=>{ const s=d.shows.find(x=>x.name===w[0]&&x.startDate===w[1]);
     return s?[s.boothCost,s.boothPayments.reduce((t,p)=>t+p.amount,0)]:null; }),want.map(w=>[w[2],w[2]]));
   chk('8b. hours that are not 12-4',[g(/small business saturday/i)[0].days[0].openTime,g(/galentine/i)[0].days[0].openTime],['11:00','10:00']);
