@@ -553,7 +553,7 @@ const SKUS=[
 // behaviour changes. Module build tags (e.g. BX_BUILD.featureBuild) are
 // separate and must never be conflated with it. A ?v=NN on the page URL is
 // a browser cache-buster and is neither of these.
-const APP_VERSION='v105';
+const APP_VERSION='v106';
 const PAY_RULES_FROM='2026-10-17'; // v80 pay rules start with this show date (see repCommRate)
 // Cranberry Fest 2026 show-only prices (v42). Only that show's snapshot uses them.
 const CRANBERRY_PRICES_2026={'32oz':30.00,'16oz':25.00,'8oz':20.00,'2oz':12.50,c5s:12.50,c5l:25.00};
@@ -4292,6 +4292,10 @@ function calcYTD(Y){
   // v79: online sales (mailed from the garage) are business income too: money in, bottle cost, postage.
   const ol=(typeof olTotals==='function')?olTotals(Y):{amount:0,cost:0,postage:0,units:0,orders:0};
   gross+=ol.amount; cogs+=ol.cost; expenses+=ol.postage;
+  // v106 (Froggy, Nov 24): bottles mailed out count in Units Sold too. showUnits keeps the show-only
+  // count for the restock pace, which is units per selling show.
+  const showUnits=Object.assign({},units);
+  Object.keys(ol.bySku||{}).forEach(k=>{ if(units[k]!=null)units[k]+=parseInt(ol.bySku[k])||0; });
   // Total rep pay earned across all shows
   const totalRepPay=yrShows(Y).reduce((t,sh)=>t+showRepPayTotal(sh),0);
   // (rep pay already included in expenses via calcShow/boothPaid paths above)
@@ -4304,7 +4308,7 @@ function calcYTD(Y){
   let tripPark=0;
   (S.settings&&Array.isArray(S.settings.businessTrips)?S.settings.businessTrips:[]).forEach(t=>{ if(!t||!_inYear(t.date,Y))return; const m=parseFloat(t.miles)||0; miles+=m; allMiles+=m; irsDeduct+=m*irsRateOn(t.date); tripPark+=parseFloat(t.park)||0; }); // v93: supply runs, post office, product pickups
   const taxProfit=profit+ownGas-irsDeduct-tripPark;
-  return{gross,cogs,expenses,profit,taxRes,keep,units,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum,online:ol,paidAhead,irsDeduct,ownGas,taxProfit,allMiles};
+  return{gross,cogs,expenses,profit,taxRes,keep,units,showUnits,totalUnits,pmtTotals,miles,gas,otherSpend,totalRepPay,cardFees:cardFeesSum,salesTax:salesTaxSum,online:ol,paidAhead,irsDeduct,ownGas,taxProfit,allMiles};
 }
 // v81: the same entry twice inside 1.5s is a double tap, not a second entry.
 function _sameTap(key){ const n=Date.now(), w=window.__lastTap; window.__lastTap={k:key,t:n}; return !!(w&&w.k===key&&n-w.t<1500); }
@@ -4731,7 +4735,7 @@ function secCollected(){
 }
 function secUnits(C){
   return `<div class="card">
-    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units Sold (completed + running shows)</span><span class="srv lg" style="color:var(--gold)">${fmtN(C.ytd.totalUnits)}</span></div>
+    <div class="sr" style="border-bottom:1px solid var(--border);margin-bottom:4px"><span class="srl b">Total Units Sold (shows + online)</span><span class="srv lg" style="color:var(--gold)">${fmtN(C.ytd.totalUnits)}</span></div>
     ${SKUS.map(s=>{const u=C.ytd.units[s.key]||0;const rev=u*getP(s.key);return`<div class="sr"><span class="srl">${s.emoji} ${s.name}</span><span class="srv">${u} units · <span style="color:var(--gold)">${fmt(rev)}</span></span></div>`;}).join('')}
   </div>`;
 }
@@ -4950,7 +4954,7 @@ function secInventory(C){
   // Selling pace = units sold per selling show this season, so "shows left" is an estimate, not a promise.
   const nSell=(C.sellShows||[]).length;
   const upcoming=C.plannedCount||0;
-  const rows=SKUS.map(s=>{const q=S.inventory[s.key]||0,c=getCost(s.key),pr=getP(s.key),sold=(C.ytd.units||{})[s.key]||0,pace=nSell?sold/nSell:0;
+  const rows=SKUS.map(s=>{const q=S.inventory[s.key]||0,c=getCost(s.key),pr=getP(s.key),sold=(C.ytd.showUnits||C.ytd.units||{})[s.key]||0,pace=nSell?sold/nSell:0;
     return {s,q,c,pr,sold,pace,left:pace>0?q/pace:null,need:Math.max(0,Math.ceil(pace*upcoming-q))};});
   const margin=C.invRetail-C.invCost;
   const mPct=C.invRetail>0?Math.round(margin/C.invRetail*100):0;
