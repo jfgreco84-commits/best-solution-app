@@ -1,6 +1,8 @@
 # LATEST
 
-**NEWEST: [v105 Bridal Expo moved to Jan 24, Nov 11 2026](2026-11-11-v105-bridal-expo-date.md)** (Ten Hotel Bridal Expo Sun Jan 17 2027 → Sun Jan 24 2027; $178 booth untouched)
+**NEWEST: [v106 online bottles in Units Sold, Nov 24 2026](2026-11-24-v106-online-units.md)** (Units Sold now counts bottles mailed from the garage; restock pace stays show-only)
+
+**Previous: [v105 Bridal Expo moved to Jan 24, Nov 11 2026](2026-11-11-v105-bridal-expo-date.md)** (Ten Hotel Bridal Expo Sun Jan 17 2027 → Sun Jan 24 2027; $178 booth untouched)
 
 **Previous: [v104 Fix Packed on a closed show, Nov 8 2026](2026-11-08-v104-fix-packed-closed-show.md)** (v103 skipped the Rustic Fox because it was already closed; button and one-time fix now work on closed shows, SET 22 → 32)
 
